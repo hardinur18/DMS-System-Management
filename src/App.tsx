@@ -2158,6 +2158,7 @@ function UsersPage({ activeView }: { activeView: ViewId }) {
   const [passwordDeliveryMode, setPasswordDeliveryMode] = useState<PasswordDeliveryMode>("manual")
   const [manualPassword, setManualPassword] = useState("")
   const [manualPasswordConfirm, setManualPasswordConfirm] = useState("")
+  const [showManualPassword, setShowManualPassword] = useState(false)
   const [passwordActionError, setPasswordActionError] = useState("")
   const [formInitialValues, setFormInitialValues] = useState<UserAccessFormValues>(() => createEmptyUserForm())
   const [rows, setRows] = useState<UserAccessRow[]>([])
@@ -2349,6 +2350,7 @@ function UsersPage({ activeView }: { activeView: ViewId }) {
     setManualPassword("")
     setManualPasswordConfirm("")
     setPasswordActionError("")
+    setShowManualPassword(false)
   }
 
   const handleGeneratePassword = () => {
@@ -2665,6 +2667,7 @@ function UsersPage({ activeView }: { activeView: ViewId }) {
             setPasswordActionError("")
             setManualPassword("")
             setManualPasswordConfirm("")
+            setShowManualPassword(false)
           }
         }}
         onConfirm={() => void handlePasswordAction()}
@@ -2699,8 +2702,22 @@ function UsersPage({ activeView }: { activeView: ViewId }) {
                     Generate
                   </button>
                 </div>
-                <TextFormField label="Password Baru" type="password" value={manualPassword} onChange={(event) => setManualPassword(event.target.value)} placeholder="Minimal 12 karakter" autoComplete="new-password" required />
-                <TextFormField label="Konfirmasi Password" type="password" value={manualPasswordConfirm} onChange={(event) => setManualPasswordConfirm(event.target.value)} placeholder="Ulangi password" autoComplete="new-password" required />
+                <PasswordFormField
+                  label="Password Baru"
+                  value={manualPassword}
+                  visible={showManualPassword}
+                  onChange={setManualPassword}
+                  onToggle={() => setShowManualPassword((value) => !value)}
+                  placeholder="Minimal 12 karakter"
+                />
+                <PasswordFormField
+                  label="Konfirmasi Password"
+                  value={manualPasswordConfirm}
+                  visible={showManualPassword}
+                  onChange={setManualPasswordConfirm}
+                  onToggle={() => setShowManualPassword((value) => !value)}
+                  placeholder="Ulangi password"
+                />
                 <div className={clsx("passwordStrength", manualPasswordScore >= 5 && "strong", manualPasswordScore === 4 && "medium")}>
                   <span><i style={{ width: `${Math.max(12, manualPasswordScore * 20)}%` }} /></span>
                   <small>{manualPassword ? manualPasswordScoreLabel : "Belum diisi"} · 12+ karakter, huruf besar/kecil, angka, simbol</small>
@@ -2830,6 +2847,49 @@ function UserAccessDialog({
           </div>
         </form>
       </section>
+    </div>
+  )
+}
+
+function PasswordFormField({
+  label,
+  value,
+  visible,
+  onChange,
+  onToggle,
+  placeholder,
+}: {
+  label: string
+  value: string
+  visible: boolean
+  onChange: (value: string) => void
+  onToggle: () => void
+  placeholder: string
+}) {
+  const inputId = label.toLowerCase().replace(/\s+/g, "-")
+
+  return (
+    <div className="formField passwordFormField">
+      <label htmlFor={inputId}>{label}<span className="requiredMark">*</span></label>
+      <div className="passwordFieldControl">
+        <input
+          id={inputId}
+          type={visible ? "text" : "password"}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={placeholder}
+          autoComplete="new-password"
+          required
+        />
+        <button
+          className="passwordToggle"
+          type="button"
+          onClick={onToggle}
+          aria-label={visible ? "Sembunyikan password" : "Tampilkan password"}
+        >
+          {visible ? <EyeOff size={16} /> : <Eye size={16} />}
+        </button>
+      </div>
     </div>
   )
 }

@@ -1858,6 +1858,43 @@ button {
   text-align: left;
 }
 
+.passwordFieldControl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 40px;
+  align-items: center;
+  min-height: 54px;
+  border: 1px solid rgba(15, 23, 42, 0.13);
+  border-radius: var(--ops-radius-sm);
+  background: #ffffff;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.passwordFieldControl:focus-within {
+  border-color: rgba(34, 174, 202, 0.66);
+  box-shadow: 0 0 0 3px rgba(34, 174, 202, 0.12), 0 10px 24px -20px rgba(15, 23, 42, 0.5);
+}
+
+.passwordFieldControl:hover {
+  border-color: rgba(34, 174, 202, 0.28);
+}
+
+.passwordFieldControl input {
+  min-height: 52px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.passwordFieldControl input:focus,
+.passwordFieldControl input:hover {
+  border: 0;
+  box-shadow: none;
+}
+
+.passwordFieldControl .passwordToggle {
+  justify-self: center;
+}
+
 .passwordManualToolbar {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
