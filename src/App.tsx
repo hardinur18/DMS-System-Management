@@ -1,4 +1,4 @@
-import { Fragment, FormEvent, useCallback, useEffect, useMemo, useState } from "react"
+import { Fragment, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import {
   AlertCircle,
@@ -52,7 +52,7 @@ import dmsLogo from "../assets/brand/dms-logo.jpeg"
 import { CategoryTabs } from "./components/category-tabs"
 import { ConfirmDialog } from "./components/confirm-dialog"
 import { ClickableTableRow, DataTablePagination, RowActionButton, RowActionMenu, RowActionMenuItem, TableNumberCell, TableText } from "./components/data-table"
-import { DateFormField, SelectFormField, SwitchFormField, TextFormField } from "./components/form-field"
+import { DateFormField, SegmentedFormField, SelectFormField, SwitchFormField, TextFormField } from "./components/form-field"
 import { AutoStatusBadge, StatusBadge as UiStatusBadge } from "./components/status-badge"
 import {
   OperationalFilterPanel,
@@ -146,6 +146,54 @@ interface ManagementUser {
 type TwoFactorStatus = "enabled" | "pending" | "disabled"
 type PasswordActionType = "setup" | "reset"
 type PasswordDeliveryMode = "manual" | "email"
+type EmployeeStatus = "active" | "review" | "inactive"
+
+interface EmployeeDirectoryRow {
+  id: string
+  employeeCode: string
+  fullName: string
+  nik: string
+  phone: string
+  email: string
+  divisionId: string
+  divisionName: string
+  positionId: string
+  positionName: string
+  workLocationId: string
+  workLocationName: string
+  shiftId: string
+  shiftName: string
+  dailySalary: number
+  joinDate: string
+  payrollCycleDays: number
+  status: EmployeeStatus
+  notes: string
+}
+
+interface EmployeeFormValues {
+  employeeCode: string
+  fullName: string
+  nik: string
+  phone: string
+  email: string
+  divisionId: string
+  positionId: string
+  workLocationId: string
+  shiftId: string
+  dailySalary: string
+  joinDate: string
+  payrollCycleDays: string
+  status: EmployeeStatus
+  notes: string
+}
+
+interface EmployeeOption {
+  id: string
+  code: string
+  name: string
+  divisionId?: string
+  isActive: boolean
+}
 
 interface UserAccessRow {
   id: string
@@ -214,6 +262,29 @@ interface PermissionDefinition {
   label: string
   group: string
   description: string
+}
+
+interface RolePermissionRole {
+  id: string
+  code: string
+  name: string
+  description: string
+  level: number
+  isSystem: boolean
+  isActive: boolean
+  userCount: number
+}
+
+interface RolePermissionRecord {
+  roleId: string
+  permissionKey: string
+  enabled: boolean
+}
+
+interface RolePermissionData {
+  roles: RolePermissionRole[]
+  permissions: PermissionDefinition[]
+  matrix: Record<string, Record<string, boolean>>
 }
 
 type MasterCategoryId = "all" | "roles" | "divisions" | "positions" | "shifts" | "locations" | "payroll-components"
@@ -293,6 +364,9 @@ interface ToastMessage {
   description: string
 }
 
+const accessProfileCacheKey = "dms.management.accessProfile.v1"
+const accessProfileCacheMaxAgeMs = 1000 * 60 * 60 * 12
+
 const navItems: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, group: "" },
   { id: "attendance-live", label: "Live Absensi", icon: Megaphone, group: "Operasional" },
@@ -313,7 +387,7 @@ const navItems: NavItem[] = [
 const viewPermissionMap: Partial<Record<ViewId, string>> = {
   dashboard: "dashboard.view",
   "attendance-live": "attendance.view",
-  employees: "attendance.view",
+  employees: "employees.view",
   "attendance-requests": "attendance.review",
   "attendance-review": "attendance.review",
   "field-monitoring": "attendance.view",
@@ -377,6 +451,8 @@ const permissionDefinitions: PermissionDefinition[] = [
   { key: "users.lock", label: "Lock User", group: "User Management", description: "Membekukan akses user bermasalah." },
   { key: "master_data.view", label: "Lihat Master Data", group: "Master Data", description: "Akses divisi, jabatan, shift, lokasi, dan komponen gaji." },
   { key: "master_data.manage", label: "Kelola Master Data", group: "Master Data", description: "Tambah, ubah, dan nonaktifkan master data." },
+  { key: "employees.view", label: "Lihat Karyawan", group: "Karyawan", description: "Melihat direktori karyawan dan relasi master data." },
+  { key: "employees.manage", label: "Kelola Karyawan", group: "Karyawan", description: "Tambah, ubah, nonaktifkan, dan hapus data karyawan." },
   { key: "attendance.view", label: "Lihat Absensi", group: "Absensi", description: "Monitoring absensi GPS dan face verification." },
   { key: "attendance.review", label: "Review Absensi", group: "Absensi", description: "Approve/reject absensi bermasalah." },
   { key: "payroll.view", label: "Lihat Payroll", group: "Payroll", description: "Melihat cycle 26 hari, draft gaji, bonus, dan potongan." },
@@ -395,16 +471,18 @@ const rolePermissionMap: Record<(typeof dmsRoles)[number], string[]> = {
     "users.edit",
     "master_data.view",
     "master_data.manage",
+    "employees.view",
+    "employees.manage",
     "attendance.view",
     "attendance.review",
     "payroll.view",
     "cash_advance.manage",
     "audit_logs.view",
   ],
-  Finance: ["dashboard.view", "master_data.view", "payroll.view", "payroll.process", "cash_advance.manage", "audit_logs.view"],
-  Supervisor: ["dashboard.view", "users.view", "attendance.view", "attendance.review", "master_data.view"],
-  Admin: ["dashboard.view", "users.view", "users.create", "master_data.view", "master_data.manage", "attendance.view", "audit_logs.view"],
-  Viewer: ["dashboard.view", "users.view", "master_data.view", "attendance.view", "payroll.view"],
+  Finance: ["dashboard.view", "master_data.view", "employees.view", "payroll.view", "payroll.process", "cash_advance.manage", "audit_logs.view"],
+  Supervisor: ["dashboard.view", "users.view", "employees.view", "attendance.view", "attendance.review", "master_data.view"],
+  Admin: ["dashboard.view", "users.view", "users.create", "master_data.view", "master_data.manage", "employees.view", "employees.manage", "attendance.view", "audit_logs.view"],
+  Viewer: ["dashboard.view", "users.view", "master_data.view", "employees.view", "attendance.view", "payroll.view"],
 }
 
 const statusLabel: Record<AttendanceStatus, string> = {
@@ -1767,6 +1845,57 @@ function mapAccessStatus(status: unknown): UserStatus {
   return "invited"
 }
 
+function readCachedAccessProfile(session: Session | null): AppAccessProfile | null {
+  if (!session || typeof window === "undefined") return null
+
+  try {
+    const raw = window.localStorage.getItem(accessProfileCacheKey)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as { cachedAt?: unknown; profile?: Partial<AppAccessProfile> }
+    const cachedAt = Number(parsed.cachedAt || 0)
+    const profile = parsed.profile
+
+    if (!profile || profile.authUserId !== session.user.id) return null
+    if (!cachedAt || Date.now() - cachedAt > accessProfileCacheMaxAgeMs) return null
+    if (!profile.id || !profile.email || !Array.isArray(profile.permissions)) return null
+
+    return {
+      id: String(profile.id),
+      authUserId: String(profile.authUserId),
+      fullName: String(profile.fullName || profile.email),
+      email: String(profile.email),
+      roleId: String(profile.roleId || ""),
+      roleName: String(profile.roleName || "Belum pilih role"),
+      divisionId: String(profile.divisionId || ""),
+      divisionName: String(profile.divisionName || "Belum pilih divisi"),
+      status: mapAccessStatus(profile.status),
+      permissions: profile.permissions.map(String),
+      emailVerifiedAt: String(profile.emailVerifiedAt || ""),
+      forcePasswordChange: profile.forcePasswordChange === true,
+    }
+  } catch {
+    return null
+  }
+}
+
+function writeCachedAccessProfile(profile: AppAccessProfile | null) {
+  if (typeof window === "undefined") return
+
+  try {
+    if (!profile) {
+      window.localStorage.removeItem(accessProfileCacheKey)
+      return
+    }
+
+    window.localStorage.setItem(accessProfileCacheKey, JSON.stringify({
+      cachedAt: Date.now(),
+      profile,
+    }))
+  } catch {
+    // Cache is only for startup UX; failing to write it must not block auth.
+  }
+}
+
 async function loadAppAccessProfile(session: Session): Promise<AppAccessProfile | null> {
   const userEmail = session.user.email?.trim().toLowerCase()
   const columns = "id, auth_user_id, full_name, email, role_id, division_id, status, email_verified_at, force_password_change"
@@ -1972,6 +2101,143 @@ async function invokeAppUsersFunction(action: string, payload: Record<string, un
   return data
 }
 
+async function invokeRolePermissionsFunction(action: string, payload: Record<string, unknown>) {
+  const { data, error } = await supabase.functions.invoke("role-permissions", {
+    body: { action, payload },
+  })
+
+  if (error) {
+    const context = "context" in error ? (error as { context?: unknown }).context : null
+
+    if (context instanceof Response) {
+      const text = await context.clone().text()
+
+      if (text) {
+        let parsedMessage = ""
+
+        try {
+          const parsed = JSON.parse(text) as { error?: unknown; message?: unknown }
+          parsedMessage = String(parsed.error || parsed.message || "")
+        } catch {
+          parsedMessage = ""
+        }
+
+        throw new Error(parsedMessage || text)
+      }
+    }
+
+    throw error
+  }
+  if (data?.error) throw new Error(String(data.error))
+
+  return data
+}
+
+function hasPermission(profile: AppAccessProfile, permissionKey: string) {
+  return profile.permissions.includes(permissionKey)
+}
+
+function buildPermissionMatrix(roles: RolePermissionRole[], permissions: PermissionDefinition[], records: RolePermissionRecord[]) {
+  const matrix: Record<string, Record<string, boolean>> = {}
+
+  roles.forEach((role) => {
+    matrix[role.id] = {}
+    permissions.forEach((permission) => {
+      matrix[role.id][permission.key] = false
+    })
+  })
+
+  records.forEach((record) => {
+    if (!matrix[record.roleId]) matrix[record.roleId] = {}
+    matrix[record.roleId][record.permissionKey] = record.enabled
+  })
+
+  return matrix
+}
+
+function clonePermissionMatrix(matrix: Record<string, Record<string, boolean>>) {
+  return Object.fromEntries(
+    Object.entries(matrix).map(([roleId, permissions]) => [roleId, { ...permissions }]),
+  ) as Record<string, Record<string, boolean>>
+}
+
+function getRolePermissionSnapshot(roleId: string, matrix: Record<string, Record<string, boolean>>) {
+  return Object.entries(matrix[roleId] || {})
+    .sort(([first], [second]) => first.localeCompare(second))
+    .map(([permissionKey, enabled]) => `${permissionKey}:${enabled ? "1" : "0"}`)
+    .join("|")
+}
+
+async function loadRolePermissionData(): Promise<RolePermissionData> {
+  const [roles, permissions, rolePermissions, appUsers] = await Promise.all([
+    supabase
+      .from("roles")
+      .select("id, code, name, description, level, is_system, is_active, sort_order")
+      .order("sort_order", { ascending: true })
+      .order("level", { ascending: true }),
+    supabase
+      .from("permissions")
+      .select("key, label, group_name, description")
+      .order("group_name", { ascending: true })
+      .order("key", { ascending: true }),
+    supabase
+      .from("role_permissions")
+      .select("role_id, permission_key, enabled"),
+    supabase
+      .from("app_users")
+      .select("role_id, status"),
+  ])
+  const error = roles.error || permissions.error || rolePermissions.error || appUsers.error
+
+  if (error) throw error
+
+  const userCountByRole = new Map<string, number>()
+  ;(appUsers.data || []).forEach((row) => {
+    const roleId = String(row.role_id || "")
+    if (!roleId || row.status === "locked") return
+    userCountByRole.set(roleId, (userCountByRole.get(roleId) || 0) + 1)
+  })
+
+  const roleRows: RolePermissionRole[] = (roles.data || []).map((row) => ({
+    id: String(row.id),
+    code: String(row.code || ""),
+    name: String(row.name || ""),
+    description: String(row.description || ""),
+    level: Number(row.level || 100),
+    isSystem: row.is_system === true,
+    isActive: row.is_active !== false,
+    userCount: userCountByRole.get(String(row.id)) || 0,
+  }))
+  const permissionRows: PermissionDefinition[] = (permissions.data || []).map((row) => ({
+    key: String(row.key),
+    label: String(row.label || row.key),
+    group: String(row.group_name || "Sistem"),
+    description: String(row.description || ""),
+  }))
+  const rolePermissionRows: RolePermissionRecord[] = (rolePermissions.data || []).map((row) => ({
+    roleId: String(row.role_id),
+    permissionKey: String(row.permission_key),
+    enabled: row.enabled === true,
+  }))
+
+  return {
+    roles: roleRows,
+    permissions: permissionRows,
+    matrix: buildPermissionMatrix(roleRows, permissionRows, rolePermissionRows),
+  }
+}
+
+async function saveRolePermissionMatrix(role: RolePermissionRole, permissions: Record<string, boolean>) {
+  await invokeRolePermissionsFunction("save_matrix", {
+    roleId: role.id,
+    permissions: Object.entries(permissions).map(([permissionKey, enabled]) => ({ permissionKey, enabled })),
+  })
+}
+
+async function resetRolePermissionDefaults(role: RolePermissionRole) {
+  await invokeRolePermissionsFunction("reset_defaults", { roleId: role.id })
+}
+
 async function saveUserAccess(values: UserAccessFormValues, editingRow?: UserAccessRow | null) {
   if (useAppUsersFunction()) {
     await invokeAppUsersFunction(editingRow ? "update" : "create", {
@@ -2120,6 +2386,270 @@ function exportUserAccessCsv(rows: UserAccessRow[]) {
   URL.revokeObjectURL(url)
 }
 
+const employeeStatusLabel: Record<EmployeeStatus, string> = {
+  active: "Aktif",
+  review: "Review",
+  inactive: "Nonaktif",
+}
+
+const employeeStatusOptions: Array<{ value: EmployeeStatus; label: string; description: string }> = [
+  { value: "active", label: "Aktif", description: "Dipakai absensi & payroll." },
+  { value: "review", label: "Review", description: "Perlu pengecekan HR." },
+  { value: "inactive", label: "Nonaktif", description: "Disimpan sebagai arsip." },
+]
+
+const maxEmployeeDailySalary = 5000000
+
+function EmployeeStatusBadge({ status }: { status: EmployeeStatus }) {
+  const tone: Record<EmployeeStatus, "valid" | "pending" | "failed"> = {
+    active: "valid",
+    review: "pending",
+    inactive: "failed",
+  }
+
+  return <UiStatusBadge tone={tone[status]}>{employeeStatusLabel[status]}</UiStatusBadge>
+}
+
+function formatEmployeeDate(value?: string | null) {
+  if (!value) return "Belum diisi"
+  return new Intl.DateTimeFormat("id-ID", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(new Date(`${value}T00:00:00`))
+}
+
+function generateNextEmployeeCode(rows: EmployeeDirectoryRow[]) {
+  const maxNumber = rows.reduce((max, row) => {
+    const number = Number(row.employeeCode.replace(/\D/g, ""))
+    return Number.isFinite(number) ? Math.max(max, number) : max
+  }, 0)
+
+  return `EMP-${String(maxNumber + 1).padStart(3, "0")}`
+}
+
+function createEmptyEmployeeForm(rows: EmployeeDirectoryRow[] = []): EmployeeFormValues {
+  return {
+    employeeCode: generateNextEmployeeCode(rows),
+    fullName: "",
+    nik: "",
+    phone: "",
+    email: "",
+    divisionId: "",
+    positionId: "",
+    workLocationId: "",
+    shiftId: "",
+    dailySalary: "",
+    joinDate: new Date().toISOString().slice(0, 10),
+    payrollCycleDays: "0",
+    status: "active",
+    notes: "",
+  }
+}
+
+function normalizeIntegerInput(value: string, maxValue?: number) {
+  const digits = value.replace(/\D/g, "")
+  if (!digits) return ""
+  const number = Number(digits)
+
+  if (!Number.isFinite(number)) return ""
+  return String(maxValue === undefined ? number : Math.min(number, maxValue))
+}
+
+function normalizeEmployeeDailySalary(value: string) {
+  return normalizeIntegerInput(value, maxEmployeeDailySalary)
+}
+
+function normalizeEmployeeCycle(value: string) {
+  return normalizeIntegerInput(value, 26)
+}
+
+function mapEmployeeStatus(status: unknown): EmployeeStatus {
+  if (status === "review" || status === "inactive") return status
+  return "active"
+}
+
+function mapEmployeeRow(
+  row: Record<string, unknown>,
+  divisionMap: Map<string, EmployeeOption>,
+  positionMap: Map<string, EmployeeOption>,
+  locationMap: Map<string, EmployeeOption>,
+  shiftMap: Map<string, EmployeeOption>,
+): EmployeeDirectoryRow {
+  const divisionId = row.division_id ? String(row.division_id) : ""
+  const positionId = row.position_id ? String(row.position_id) : ""
+  const workLocationId = row.work_location_id ? String(row.work_location_id) : ""
+  const shiftId = row.shift_id ? String(row.shift_id) : ""
+
+  return {
+    id: String(row.id),
+    employeeCode: String(row.employee_code || ""),
+    fullName: String(row.full_name || ""),
+    nik: String(row.nik || ""),
+    phone: String(row.phone || ""),
+    email: String(row.email || ""),
+    divisionId,
+    divisionName: divisionMap.get(divisionId)?.name || "Belum pilih divisi",
+    positionId,
+    positionName: positionMap.get(positionId)?.name || "Belum pilih jabatan",
+    workLocationId,
+    workLocationName: locationMap.get(workLocationId)?.name || "Belum pilih lokasi",
+    shiftId,
+    shiftName: shiftMap.get(shiftId)?.name || "Belum pilih shift",
+    dailySalary: Number(row.daily_salary || 0),
+    joinDate: row.join_date ? String(row.join_date) : "",
+    payrollCycleDays: Number(row.payroll_cycle_days || 0),
+    status: mapEmployeeStatus(row.status),
+    notes: String(row.notes || ""),
+  }
+}
+
+async function loadEmployeeData() {
+  const [employeesResult, divisions, positions, locations, shifts] = await Promise.all([
+    supabase
+      .from("employees")
+      .select("id, employee_code, full_name, nik, phone, email, division_id, position_id, work_location_id, shift_id, daily_salary, join_date, payroll_cycle_days, status, notes, created_at")
+      .order("employee_code", { ascending: true }),
+    supabase.from("divisions").select("id, code, name, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
+    supabase.from("positions").select("id, code, name, division_id, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
+    supabase.from("work_locations").select("id, code, name, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
+    supabase.from("shifts").select("id, code, name, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
+  ])
+  const error = employeesResult.error || divisions.error || positions.error || locations.error || shifts.error
+
+  if (error) throw error
+
+  const divisionOptions = (divisions.data || []).map((row) => ({
+    id: String(row.id),
+    code: String(row.code || ""),
+    name: String(row.name || ""),
+    isActive: row.is_active !== false,
+  }))
+  const positionOptions = (positions.data || []).map((row) => ({
+    id: String(row.id),
+    code: String(row.code || ""),
+    name: String(row.name || ""),
+    divisionId: row.division_id ? String(row.division_id) : "",
+    isActive: row.is_active !== false,
+  }))
+  const locationOptions = (locations.data || []).map((row) => ({
+    id: String(row.id),
+    code: String(row.code || ""),
+    name: String(row.name || ""),
+    isActive: row.is_active !== false,
+  }))
+  const shiftOptions = (shifts.data || []).map((row) => ({
+    id: String(row.id),
+    code: String(row.code || ""),
+    name: String(row.name || ""),
+    isActive: row.is_active !== false,
+  }))
+  const divisionMap = new Map(divisionOptions.map((item) => [item.id, item]))
+  const positionMap = new Map(positionOptions.map((item) => [item.id, item]))
+  const locationMap = new Map(locationOptions.map((item) => [item.id, item]))
+  const shiftMap = new Map(shiftOptions.map((item) => [item.id, item]))
+
+  return {
+    rows: (employeesResult.data || []).map((row) => mapEmployeeRow(row, divisionMap, positionMap, locationMap, shiftMap)),
+    divisions: divisionOptions,
+    positions: positionOptions,
+    locations: locationOptions,
+    shifts: shiftOptions,
+  }
+}
+
+function createEmployeePayload(values: EmployeeFormValues) {
+  return {
+    employee_code: values.employeeCode.trim().toUpperCase(),
+    full_name: values.fullName.trim(),
+    nik: values.nik.trim() || null,
+    phone: values.phone.trim() || null,
+    email: values.email.trim().toLowerCase() || null,
+    division_id: values.divisionId || null,
+    position_id: values.positionId || null,
+    work_location_id: values.workLocationId || null,
+    shift_id: values.shiftId || null,
+    daily_salary: Number(values.dailySalary || 0),
+    join_date: values.joinDate || null,
+    payroll_cycle_days: Number(values.payrollCycleDays || 0),
+    status: values.status,
+    notes: values.notes.trim() || null,
+  }
+}
+
+function validateEmployeeForm(values: EmployeeFormValues) {
+  const errors: string[] = []
+  const dailySalary = Number(values.dailySalary)
+  const payrollCycleDays = Number(values.payrollCycleDays)
+  const emailValid = !values.email.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email.trim())
+
+  if (!values.fullName.trim()) errors.push("Nama karyawan wajib diisi.")
+  if (!values.employeeCode.trim()) errors.push("Kode karyawan wajib tersedia otomatis.")
+  if (!values.divisionId) errors.push("Divisi wajib dipilih dari Master Data.")
+  if (!values.positionId) errors.push("Jabatan wajib dipilih dari Master Data.")
+  if (!values.workLocationId) errors.push("Lokasi kerja wajib dipilih dari Master Data.")
+  if (!values.shiftId) errors.push("Shift wajib dipilih dari Master Data.")
+  if (!Number.isFinite(dailySalary) || dailySalary < 0) errors.push("Gaji harian wajib angka 0 atau lebih.")
+  if (Number.isFinite(dailySalary) && dailySalary > maxEmployeeDailySalary) errors.push(`Gaji harian maksimal ${formatCurrency(maxEmployeeDailySalary)}.`)
+  if (!Number.isFinite(payrollCycleDays) || payrollCycleDays < 0 || payrollCycleDays > 26) errors.push("Cycle payroll harus 0 sampai 26 hari.")
+  if (!emailValid) errors.push("Email karyawan belum valid.")
+
+  return errors
+}
+
+async function saveEmployee(values: EmployeeFormValues, editingRow?: EmployeeDirectoryRow | null) {
+  const payload = createEmployeePayload(values)
+  const query = editingRow
+    ? supabase.from("employees").update(payload).eq("id", editingRow.id)
+    : supabase.from("employees").insert(payload)
+  const { error } = await query
+
+  if (error) throw error
+}
+
+async function updateEmployeeStatus(row: EmployeeDirectoryRow, status: EmployeeStatus) {
+  const { error } = await supabase.from("employees").update({ status }).eq("id", row.id)
+
+  if (error) throw error
+}
+
+async function deleteEmployee(row: EmployeeDirectoryRow) {
+  const { error } = await supabase.from("employees").delete().eq("id", row.id)
+
+  if (error) throw error
+}
+
+function exportEmployeeCsv(rows: EmployeeDirectoryRow[]) {
+  const header = ["No", "Kode", "Nama", "NIK", "Phone", "Email", "Divisi", "Jabatan", "Lokasi", "Shift", "Gaji Harian", "Tanggal Masuk", "Cycle", "Status", "Catatan"]
+  const body = rows.map((row, index) => [
+    index + 1,
+    row.employeeCode,
+    row.fullName,
+    row.nik,
+    row.phone,
+    row.email,
+    row.divisionName,
+    row.positionName,
+    row.workLocationName,
+    row.shiftName,
+    row.dailySalary,
+    row.joinDate,
+    row.payrollCycleDays,
+    employeeStatusLabel[row.status],
+    row.notes,
+  ])
+  const csv = [header, ...body]
+    .map((columns) => columns.map((column) => `"${String(column).replace(/"/g, '""')}"`).join(","))
+    .join("\n")
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement("a")
+  link.href = url
+  link.download = `dms-karyawan-${new Date().toISOString().slice(0, 10)}.csv`
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
 const userStatusLabel: Record<UserStatus, string> = {
   active: "Aktif",
   invited: "Invite",
@@ -2147,7 +2677,707 @@ const passwordActionCopy: Record<PasswordActionType, { action: string; confirm: 
   },
 }
 
-function UsersPage({ activeView }: { activeView: ViewId }) {
+function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: AppAccessProfile }) {
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [editingRow, setEditingRow] = useState<EmployeeDirectoryRow | null>(null)
+  const [detailRow, setDetailRow] = useState<EmployeeDirectoryRow | null>(null)
+  const [statusRow, setStatusRow] = useState<EmployeeDirectoryRow | null>(null)
+  const [pendingStatus, setPendingStatus] = useState<EmployeeStatus>("active")
+  const [deleteRow, setDeleteRow] = useState<EmployeeDirectoryRow | null>(null)
+  const [dialogInitialValues, setDialogInitialValues] = useState<EmployeeFormValues>(() => createEmptyEmployeeForm())
+  const [rows, setRows] = useState<EmployeeDirectoryRow[]>([])
+  const [divisions, setDivisions] = useState<EmployeeOption[]>([])
+  const [positions, setPositions] = useState<EmployeeOption[]>([])
+  const [locations, setLocations] = useState<EmployeeOption[]>([])
+  const [shifts, setShifts] = useState<EmployeeOption[]>([])
+  const [searchTerm, setSearchTerm] = useState("")
+  const [divisionFilter, setDivisionFilter] = useState("all")
+  const [statusFilter, setStatusFilter] = useState("all")
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [errorMessage, setErrorMessage] = useState("")
+  const [toast, setToast] = useState<ToastMessage | null>(null)
+  const canManage = hasPermission(profile, "employees.manage")
+
+  const fetchRows = async () => {
+    setLoading(true)
+    setErrorMessage("")
+
+    try {
+      const data = await loadEmployeeData()
+      setRows(data.rows)
+      setDivisions(data.divisions)
+      setPositions(data.positions)
+      setLocations(data.locations)
+      setShifts(data.shifts)
+    } catch (error) {
+      setErrorMessage(getFriendlySupabaseError(error, "Gagal mengambil data karyawan."))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void fetchRows()
+  }, [])
+
+  const filteredRows = rows.filter((row) => {
+    const normalizedTerm = searchTerm.trim().toLowerCase()
+    const matchesSearch = normalizedTerm
+      ? [row.employeeCode, row.fullName, row.nik, row.phone, row.email, row.divisionName, row.positionName, row.workLocationName, row.shiftName, row.notes].join(" ").toLowerCase().includes(normalizedTerm)
+      : true
+    const matchesDivision = divisionFilter === "all" || row.divisionId === divisionFilter
+    const matchesStatus = statusFilter === "all" || row.status === statusFilter
+
+    return matchesSearch && matchesDivision && matchesStatus
+  })
+  const pageCount = Math.max(1, Math.ceil(filteredRows.length / Math.min(pageSize, 50)))
+  const currentPage = Math.min(page, pageCount)
+  const paginatedRows = filteredRows.slice((currentPage - 1) * Math.min(pageSize, 50), currentPage * Math.min(pageSize, 50))
+  const activeRows = rows.filter((row) => row.status === "active").length
+  const reviewRows = rows.filter((row) => row.status === "review").length
+  const averageSalary = activeRows
+    ? Math.round(rows.filter((row) => row.status === "active").reduce((sum, row) => sum + row.dailySalary, 0) / activeRows)
+    : 0
+
+  useEffect(() => {
+    setPage(1)
+  }, [searchTerm, divisionFilter, statusFilter, pageSize])
+
+  const showToast = (message: Omit<ToastMessage, "id">) => {
+    setToast({ ...message, id: Date.now() })
+  }
+
+  const openCreateDialog = () => {
+    setEditingRow(null)
+    setDialogInitialValues(createEmptyEmployeeForm(rows))
+    setDialogOpen(true)
+  }
+
+  const openEditDialog = (row: EmployeeDirectoryRow) => {
+    setDetailRow(null)
+    setEditingRow(row)
+    setDialogInitialValues({
+      employeeCode: row.employeeCode,
+      fullName: row.fullName,
+      nik: row.nik,
+      phone: row.phone,
+      email: row.email,
+      divisionId: row.divisionId,
+      positionId: row.positionId,
+      workLocationId: row.workLocationId,
+      shiftId: row.shiftId,
+      dailySalary: String(row.dailySalary),
+      joinDate: row.joinDate,
+      payrollCycleDays: String(row.payrollCycleDays),
+      status: row.status,
+      notes: row.notes,
+    })
+    setDialogOpen(true)
+  }
+
+  const openStatusDialog = (row: EmployeeDirectoryRow, status: EmployeeStatus) => {
+    setStatusRow(row)
+    setPendingStatus(status)
+  }
+
+  const handleSubmitEmployee = async (values: EmployeeFormValues) => {
+    setSaving(true)
+    setErrorMessage("")
+
+    try {
+      await saveEmployee(values, editingRow)
+      await writeAuditLog(editingRow ? "Update employee" : "Create employee", "employees", editingRow?.id || values.employeeCode, {
+        employee_code: values.employeeCode,
+        full_name: values.fullName,
+      }).catch(() => {})
+      setDialogOpen(false)
+      setEditingRow(null)
+      await fetchRows()
+      showToast({
+        tone: "success",
+        title: editingRow ? "Karyawan diupdate" : "Karyawan ditambahkan",
+        description: `${values.fullName} sudah tersimpan di direktori karyawan.`,
+      })
+    } catch (error) {
+      const message = getFriendlySupabaseError(error, "Gagal menyimpan karyawan.")
+      setErrorMessage(message)
+      showToast({ tone: "error", title: "Gagal menyimpan", description: message })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleStatusChangeEmployee = async (status: EmployeeStatus) => {
+    if (!statusRow) return
+    setSaving(true)
+    setErrorMessage("")
+
+    try {
+      await updateEmployeeStatus(statusRow, status)
+      await writeAuditLog("Update employee status", "employees", statusRow.id, {
+        employee_code: statusRow.employeeCode,
+        status,
+      }).catch(() => {})
+      setStatusRow(null)
+      await fetchRows()
+      showToast({
+        tone: "success",
+        title: "Status diperbarui",
+        description: `${statusRow.fullName} sekarang ${employeeStatusLabel[status]}.`,
+      })
+    } catch (error) {
+      const message = getFriendlySupabaseError(error, "Gagal mengubah status karyawan.")
+      setErrorMessage(message)
+      showToast({ tone: "error", title: "Gagal mengubah status", description: message })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDeleteEmployee = async () => {
+    if (!deleteRow) return
+    setSaving(true)
+    setErrorMessage("")
+
+    try {
+      await deleteEmployee(deleteRow)
+      await writeAuditLog("Delete employee", "employees", deleteRow.id, {
+        employee_code: deleteRow.employeeCode,
+        full_name: deleteRow.fullName,
+      }).catch(() => {})
+      setDeleteRow(null)
+      await fetchRows()
+      showToast({ tone: "success", title: "Karyawan dihapus", description: `${deleteRow.fullName} sudah dihapus dari database.` })
+    } catch (error) {
+      const message = getFriendlySupabaseError(error, "Gagal menghapus karyawan.")
+      setErrorMessage(message)
+      showToast({ tone: "error", title: "Gagal menghapus", description: message })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const resetFilters = () => {
+    setSearchTerm("")
+    setDivisionFilter("all")
+    setStatusFilter("all")
+  }
+
+  return (
+    <OperationalPageShell>
+      <PageHeader
+        activeView={activeView}
+        subtitle="Direktori karyawan yang terhubung ke divisi, jabatan, shift, lokasi kerja, dan cycle payroll 26 hari."
+        meta={
+          <InlinePageStats
+            items={[
+              `${filteredRows.length} dari ${rows.length} karyawan`,
+              `${activeRows} aktif`,
+              `${reviewRows} review`,
+              `Gaji aktif rata-rata ${formatCurrency(averageSalary)}`,
+            ]}
+          />
+        }
+        actions={
+          <>
+            <button className="secondaryButton" type="button" onClick={() => exportEmployeeCsv(filteredRows)} disabled={filteredRows.length === 0}>
+              <FileBarChart size={17} />
+              Export Karyawan
+            </button>
+            <button className="primaryButton" type="button" onClick={openCreateDialog} disabled={!canManage}>
+              <UserPlus size={17} />
+              Tambah Karyawan
+            </button>
+          </>
+        }
+      />
+
+      <section className="moduleGrid">
+        {errorMessage && <div className="inlineAlert">{errorMessage}</div>}
+
+        <OperationalFilterPanel className="employeeFilterPanel">
+          <div className="filterField">
+            <label>Search</label>
+            <div className="uiInput inputWithIcon compact">
+              <Search size={16} />
+              <input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Cari nama, kode, NIK, divisi, lokasi..." />
+            </div>
+          </div>
+          <div className="filterField">
+            <label>Divisi</label>
+            <select className="uiSelectTrigger" value={divisionFilter} onChange={(event) => setDivisionFilter(event.target.value)}>
+              <option value="all">Semua Divisi</option>
+              {divisions.map((division) => (
+                <option value={division.id} key={division.id}>{division.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="filterField">
+            <label>Status</label>
+            <select className="uiSelectTrigger" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+              <option value="all">Semua Status</option>
+              <option value="active">Aktif</option>
+              <option value="review">Review</option>
+              <option value="inactive">Nonaktif</option>
+            </select>
+          </div>
+          <button className="secondaryButton" type="button" onClick={resetFilters}>Reset Filter</button>
+        </OperationalFilterPanel>
+
+        <OperationalTableCard>
+          <div className="tableHeader">
+            <div>
+              <h2>Employee Directory</h2>
+              <p>Klik baris untuk melihat detail karyawan. Aksi cepat tersedia di titik tiga.</p>
+            </div>
+          </div>
+          <div className="tableScroller uiDataTableScroller uiDataTableHasColumns employeeTableScroller">
+            <table>
+              <colgroup>
+                <col className="tableNumberColumn" />
+                <col style={{ width: "19%" }} />
+                <col style={{ width: "14%" }} />
+                <col style={{ width: "14%" }} />
+                <col style={{ width: "16%" }} />
+                <col style={{ width: "13%" }} />
+                <col style={{ width: "10%" }} />
+                <col style={{ width: "9%" }} />
+                <col className="tableActionColumn" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th className="tableNumberHeader">No</th>
+                  <th>Karyawan</th>
+                  <th>Divisi</th>
+                  <th>Jabatan</th>
+                  <th>Lokasi / Shift</th>
+                  <th>Gaji Harian</th>
+                  <th>Cycle</th>
+                  <th>Status</th>
+                  <th className="tableActionHeader">Aksi</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading && (
+                  <tr>
+                    <td className="tableStateCell" colSpan={9}>
+                      <TableState title="Memuat karyawan" description="Mengambil direktori karyawan dari Supabase." icon={UsersRound} />
+                    </td>
+                  </tr>
+                )}
+                {!loading && errorMessage && rows.length === 0 && (
+                  <tr>
+                    <td className="tableStateCell" colSpan={9}>
+                      <TableState title="Gagal memuat data" description={errorMessage} icon={AlertTriangle} tone="danger" />
+                    </td>
+                  </tr>
+                )}
+                {!loading && !errorMessage && filteredRows.length === 0 && (
+                  <tr>
+                    <td className="tableStateCell" colSpan={9}>
+                      <TableState title="Karyawan tidak ditemukan" description="Ubah filter atau tambah karyawan baru." icon={Search} />
+                    </td>
+                  </tr>
+                )}
+                {!loading && paginatedRows.map((row, index) => (
+                  <ClickableTableRow key={row.id} label={`Lihat detail ${row.fullName}`} onOpen={() => setDetailRow(row)}>
+                    <td className="tableNumberCell"><TableNumberCell value={(currentPage - 1) * Math.min(pageSize, 50) + index + 1} /></td>
+                    <td><TableText primary={row.fullName} secondary={row.employeeCode} /></td>
+                    <td><TableText primary={row.divisionName} secondary={row.nik || "NIK belum diisi"} /></td>
+                    <td><TableText primary={row.positionName} secondary={row.phone || "No HP belum diisi"} /></td>
+                    <td><TableText primary={row.workLocationName} secondary={row.shiftName} /></td>
+                    <td><TableText primary={formatCurrency(row.dailySalary)} secondary={`Masuk ${formatEmployeeDate(row.joinDate)}`} /></td>
+                    <td>
+                      <span className="cycleCell">
+                        <ProgressRing value={row.payrollCycleDays} />
+                        <span>{row.payrollCycleDays}/26</span>
+                      </span>
+                    </td>
+                    <td><EmployeeStatusBadge status={row.status} /></td>
+                    <td className="tableActionCell">
+                      <div className="rowActions">
+                        <RowActionMenu label={`Aksi ${row.fullName}`}>
+                          <RowActionMenuItem disabled={!canManage || saving} onClick={() => openEditDialog(row)}>
+                            <Pencil size={14} />
+                            Edit
+                          </RowActionMenuItem>
+                          <RowActionMenuItem disabled={!canManage || saving || row.status === "active"} onClick={() => openStatusDialog(row, "active")}>
+                            <FileCheck2 size={14} />
+                            Aktifkan
+                          </RowActionMenuItem>
+                          <RowActionMenuItem disabled={!canManage || saving || row.status === "review"} onClick={() => openStatusDialog(row, "review")}>
+                            <AlertTriangle size={14} />
+                            Tandai Review
+                          </RowActionMenuItem>
+                          <RowActionMenuItem danger disabled={!canManage || saving || row.status === "inactive"} onClick={() => openStatusDialog(row, "inactive")}>
+                            <Trash2 size={14} />
+                            Nonaktifkan
+                          </RowActionMenuItem>
+                          <RowActionMenuItem danger disabled={!canManage || saving} onClick={() => setDeleteRow(row)}>
+                            <Trash2 size={14} />
+                            Hapus Permanen
+                          </RowActionMenuItem>
+                        </RowActionMenu>
+                      </div>
+                    </td>
+                  </ClickableTableRow>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <DataTablePagination
+            page={currentPage}
+            pageSize={pageSize}
+            totalRows={filteredRows.length}
+            onPageChange={setPage}
+            onPageSizeChange={(value) => setPageSize(Math.min(value, 50))}
+          />
+        </OperationalTableCard>
+      </section>
+
+      <EmployeeDialog
+        open={dialogOpen}
+        mode={editingRow ? "edit" : "create"}
+        initialValues={dialogInitialValues}
+        divisions={divisions}
+        positions={positions}
+        locations={locations}
+        shifts={shifts}
+        saving={saving}
+        onClose={() => {
+          setDialogOpen(false)
+          setEditingRow(null)
+        }}
+        onSubmit={handleSubmitEmployee}
+      />
+      <EmployeeDetailDialog
+        row={detailRow}
+        onClose={() => setDetailRow(null)}
+        onEdit={(row) => openEditDialog(row)}
+        canManage={canManage}
+      />
+      <ConfirmDialog
+        open={Boolean(statusRow)}
+        tone="warning"
+        eyebrow="Ubah Status Karyawan"
+        title={statusRow ? `Jadikan ${statusRow.fullName} ${employeeStatusLabel[pendingStatus]}?` : "Ubah status karyawan?"}
+        description="Status memengaruhi apakah karyawan aktif dipakai modul absensi, payroll, dan app lapangan."
+        confirmLabel="Simpan Status"
+        cancelLabel="Batal"
+        loading={saving}
+        onClose={() => {
+          if (!saving) setStatusRow(null)
+        }}
+        onConfirm={() => {
+          void handleStatusChangeEmployee(pendingStatus)
+        }}
+      >
+        {statusRow && (
+          <>
+            <div className="confirmDialogPreview">
+              <span>{statusRow.employeeCode}</span>
+              <strong>{statusRow.fullName}</strong>
+              <small>{statusRow.divisionName} / {statusRow.positionName}</small>
+            </div>
+            <div className="confirmRelationList">
+              <button className={clsx("statusChoiceButton", pendingStatus === "active" && "active")} type="button" disabled={saving} onClick={() => setPendingStatus("active")}>Aktif</button>
+              <button className={clsx("statusChoiceButton", pendingStatus === "review" && "active")} type="button" disabled={saving} onClick={() => setPendingStatus("review")}>Review</button>
+              <button className={clsx("statusChoiceButton danger", pendingStatus === "inactive" && "active")} type="button" disabled={saving} onClick={() => setPendingStatus("inactive")}>Nonaktif</button>
+            </div>
+          </>
+        )}
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={Boolean(deleteRow)}
+        tone="danger"
+        eyebrow="Hapus Karyawan"
+        title={deleteRow ? `Hapus permanen ${deleteRow.fullName}?` : "Hapus karyawan?"}
+        description="Data akan dihapus dari tabel karyawan. Untuk data operasional live biasanya lebih aman memakai Nonaktifkan."
+        confirmLabel="Hapus Data"
+        cancelLabel="Batal"
+        loading={saving}
+        onClose={() => {
+          if (!saving) setDeleteRow(null)
+        }}
+        onConfirm={() => void handleDeleteEmployee()}
+      >
+        {deleteRow && (
+          <div className="confirmDialogPreview">
+            <span>{deleteRow.employeeCode}</span>
+            <strong>{deleteRow.fullName}</strong>
+            <small>{deleteRow.divisionName} / {deleteRow.positionName}</small>
+          </div>
+        )}
+      </ConfirmDialog>
+      <ToastViewport toast={toast} onClose={() => setToast(null)} />
+    </OperationalPageShell>
+  )
+}
+
+function EmployeeDialog({
+  open,
+  mode,
+  initialValues,
+  divisions,
+  positions,
+  locations,
+  shifts,
+  saving,
+  onClose,
+  onSubmit,
+}: {
+  open: boolean
+  mode: "create" | "edit"
+  initialValues: EmployeeFormValues
+  divisions: EmployeeOption[]
+  positions: EmployeeOption[]
+  locations: EmployeeOption[]
+  shifts: EmployeeOption[]
+  saving: boolean
+  onClose: () => void
+  onSubmit: (values: EmployeeFormValues) => Promise<void>
+}) {
+  const [values, setValues] = useState(initialValues)
+  const [formErrors, setFormErrors] = useState<string[]>([])
+  const formBodyRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    setValues(initialValues)
+    setFormErrors([])
+  }, [initialValues])
+
+  useEffect(() => {
+    if (!open) return
+
+    window.requestAnimationFrame(() => {
+      formBodyRef.current?.scrollTo({ top: 0 })
+    })
+  }, [initialValues.employeeCode, mode, open])
+
+  if (!open) return null
+
+  const activeDivisions = divisions.filter((division) => division.isActive || division.id === values.divisionId)
+  const activePositions = positions.filter((position) => (
+    (position.isActive || position.id === values.positionId)
+    && (!values.divisionId || !position.divisionId || position.divisionId === values.divisionId)
+  ))
+  const activeLocations = locations.filter((location) => location.isActive || location.id === values.workLocationId)
+  const activeShifts = shifts.filter((shift) => shift.isActive || shift.id === values.shiftId)
+
+  return (
+    <div className="dialogBackdrop employeeDialogBackdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="dialogPanel employeeDialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="employee-dialog-title"
+        aria-describedby="employee-dialog-description"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="dialogCompactHeader">
+          <div>
+            <h2 id="employee-dialog-title">{mode === "edit" ? "Edit Karyawan" : "Tambah Karyawan"}</h2>
+            <p id="employee-dialog-description">Data karyawan ini akan dipakai modul absensi, app lapangan, dan payroll cycle.</p>
+          </div>
+          <button className="iconButton dialogClose" type="button" aria-label="Tutup dialog" onClick={onClose}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <form
+          key={`${mode}-${initialValues.employeeCode}`}
+          className="employeeDialogForm"
+          onSubmit={(event) => {
+            event.preventDefault()
+            const nextErrors = validateEmployeeForm(values)
+
+            if (nextErrors.length > 0) {
+              setFormErrors(nextErrors)
+              return
+            }
+
+            setFormErrors([])
+            void onSubmit(values)
+          }}
+        >
+          <div ref={formBodyRef} className="dialogForm employeeFormGrid">
+            {formErrors.length > 0 && (
+              <div className="formValidationPanel">
+                <AlertTriangle size={18} />
+                <div>
+                  <strong>Periksa data karyawan</strong>
+                  {formErrors.map((error) => (
+                    <span key={error}>{error}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+            <TextFormField label="Kode Otomatis" value={values.employeeCode} disabled readOnly required />
+            <TextFormField label="Nama Lengkap" value={values.fullName} onChange={(event) => setValues((current) => ({ ...current, fullName: event.target.value }))} placeholder="Nama karyawan" required />
+            <TextFormField label="NIK" value={values.nik} onChange={(event) => setValues((current) => ({ ...current, nik: event.target.value }))} placeholder="Nomor identitas karyawan" />
+            <TextFormField label="No HP" value={values.phone} onChange={(event) => setValues((current) => ({ ...current, phone: event.target.value }))} placeholder="08xxxxxxxxxx" />
+            <TextFormField label="Email" type="email" value={values.email} onChange={(event) => setValues((current) => ({ ...current, email: event.target.value }))} placeholder="nama@dms.local" />
+            <SelectFormField label="Divisi" value={values.divisionId} onChange={(event) => setValues((current) => ({ ...current, divisionId: event.target.value, positionId: "" }))} required>
+              <option value="">Pilih divisi</option>
+              {activeDivisions.map((division) => (
+                <option value={division.id} key={division.id}>{division.name}</option>
+              ))}
+            </SelectFormField>
+            <SelectFormField label="Jabatan" value={values.positionId} onChange={(event) => setValues((current) => ({ ...current, positionId: event.target.value }))} required>
+              <option value="">Pilih jabatan</option>
+              {activePositions.map((position) => (
+                <option value={position.id} key={position.id}>{position.name}</option>
+              ))}
+            </SelectFormField>
+            <SelectFormField label="Lokasi Kerja" value={values.workLocationId} onChange={(event) => setValues((current) => ({ ...current, workLocationId: event.target.value }))} required>
+              <option value="">Pilih lokasi</option>
+              {activeLocations.map((location) => (
+                <option value={location.id} key={location.id}>{location.name}</option>
+              ))}
+            </SelectFormField>
+            <SelectFormField label="Shift" value={values.shiftId} onChange={(event) => setValues((current) => ({ ...current, shiftId: event.target.value }))} required>
+              <option value="">Pilih shift</option>
+              {activeShifts.map((shift) => (
+                <option value={shift.id} key={shift.id}>{shift.name}</option>
+              ))}
+            </SelectFormField>
+            <TextFormField
+              label="Gaji Harian"
+              type="text"
+              inputMode="numeric"
+              value={values.dailySalary}
+              onChange={(event) => setValues((current) => ({ ...current, dailySalary: normalizeEmployeeDailySalary(event.target.value) }))}
+              placeholder="150000"
+              required
+            />
+            <DateFormField label="Tanggal Masuk" value={values.joinDate} onChange={(joinDate) => setValues((current) => ({ ...current, joinDate }))} required />
+            <TextFormField
+              label="Cycle Payroll"
+              type="text"
+              inputMode="numeric"
+              value={values.payrollCycleDays}
+              onChange={(event) => setValues((current) => ({ ...current, payrollCycleDays: normalizeEmployeeCycle(event.target.value) }))}
+              placeholder="0 - 26"
+              required
+            />
+            <div className="employeeStatusField">
+              <SegmentedFormField
+                label="Status"
+                value={values.status}
+                options={employeeStatusOptions}
+                onChange={(status) => setValues((current) => ({ ...current, status }))}
+                required
+              />
+            </div>
+            <div className="employeeNoteField">
+              <TextFormField label="Catatan" value={values.notes} onChange={(event) => setValues((current) => ({ ...current, notes: event.target.value }))} placeholder="Catatan HR atau payroll" />
+            </div>
+          </div>
+          <div className="dialogActions employeeDialogActions">
+            <button className="secondaryButton" type="button" onClick={onClose} disabled={saving}>Batal</button>
+            <button className="primaryButton" type="submit" disabled={saving}>
+              <FileCheck2 size={17} />
+              {saving ? "Menyimpan..." : "Simpan Karyawan"}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  )
+}
+
+function EmployeeDetailDialog({
+  row,
+  canManage,
+  onClose,
+  onEdit,
+}: {
+  row: EmployeeDirectoryRow | null
+  canManage: boolean
+  onClose: () => void
+  onEdit: (row: EmployeeDirectoryRow) => void
+}) {
+  if (!row) return null
+
+  const fields = [
+    { label: "Kode", value: row.employeeCode },
+    { label: "Status", value: <EmployeeStatusBadge status={row.status} /> },
+    { label: "NIK", value: row.nik || "Belum diisi" },
+    { label: "No HP", value: row.phone || "Belum diisi" },
+    { label: "Email", value: row.email || "Belum diisi" },
+    { label: "Divisi", value: row.divisionName },
+    { label: "Jabatan", value: row.positionName },
+    { label: "Lokasi Kerja", value: row.workLocationName },
+    { label: "Shift", value: row.shiftName },
+    { label: "Gaji Harian", value: formatCurrency(row.dailySalary) },
+    { label: "Tanggal Masuk", value: formatEmployeeDate(row.joinDate) },
+    { label: "Cycle Payroll", value: `${row.payrollCycleDays}/26 hari` },
+  ]
+
+  return (
+    <div className="dialogBackdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="dialogPanel masterDetailDialog employeeDetailDialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="employee-detail-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="dialogCompactHeader masterDetailHeader">
+          <div className="masterDetailTitle">
+            <span className="masterDetailIcon">
+              <UsersRound size={22} />
+            </span>
+            <div>
+              <span>Karyawan</span>
+              <h2 id="employee-detail-title">{row.fullName}</h2>
+              <p>Detail data karyawan yang dipakai modul absensi, app lapangan, dan payroll.</p>
+            </div>
+          </div>
+          <button className="iconButton dialogClose" type="button" aria-label="Tutup detail" onClick={onClose}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="masterDetailBody">
+          <div className="masterDetailGrid">
+            {fields.map((field) => (
+              <div className="masterDetailField" key={field.label}>
+                <span>{field.label}</span>
+                <strong>{field.value}</strong>
+              </div>
+            ))}
+          </div>
+
+          {row.notes && (
+            <div className="masterDetailRelation">
+              <small>Catatan</small>
+              <div>
+                <span>
+                  <em>HR Note</em>
+                  <strong>{row.notes}</strong>
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="masterDetailActions">
+          <button className="secondaryButton" type="button" onClick={onClose}>Tutup</button>
+          <button className="primaryButton" type="button" disabled={!canManage} onClick={() => onEdit(row)}>
+            <Pencil size={16} />
+            Edit Karyawan
+          </button>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function UsersPage({ activeView, profile }: { activeView: ViewId; profile: AppAccessProfile }) {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingRow, setEditingRow] = useState<UserAccessRow | null>(null)
   const [detailRow, setDetailRow] = useState<UserAccessRow | null>(null)
@@ -2223,6 +3453,9 @@ function UsersPage({ activeView }: { activeView: ViewId }) {
     : passwordAction.confirm
   const manualPasswordScore = getManualPasswordScore(manualPassword)
   const manualPasswordScoreLabel = manualPasswordScore >= 5 ? "Kuat" : manualPasswordScore >= 4 ? "Cukup" : "Lemah"
+  const canCreateUser = hasPermission(profile, "users.create")
+  const canEditUser = hasPermission(profile, "users.edit")
+  const canLockUser = hasPermission(profile, "users.lock")
 
   const showToast = (message: Omit<ToastMessage, "id">) => {
     setToast({ ...message, id: Date.now() })
@@ -2427,7 +3660,7 @@ function UsersPage({ activeView }: { activeView: ViewId }) {
               <FileBarChart size={17} />
               Export User
             </button>
-            <button className="primaryButton" type="button" onClick={openCreateDialog}>
+            <button className="primaryButton" type="button" onClick={openCreateDialog} disabled={!canCreateUser}>
               <Mail size={17} />
               Invite User
             </button>
@@ -2539,22 +3772,22 @@ function UsersPage({ activeView }: { activeView: ViewId }) {
                     <td className="tableActionCell">
                       <div className="rowActions">
                         <RowActionMenu label={`Aksi ${user.fullName}`}>
-                          <RowActionMenuItem onClick={() => openEditDialog(user)}>
+                          <RowActionMenuItem disabled={!canEditUser || saving} onClick={() => openEditDialog(user)}>
                             <Pencil size={14} />
                             Edit
                           </RowActionMenuItem>
-                          <RowActionMenuItem disabled={saving} onClick={() => openPasswordAction(user)}>
+                          <RowActionMenuItem disabled={!canEditUser || saving} onClick={() => openPasswordAction(user)}>
                             <KeyRound size={14} />
                             {user.status === "invited" ? "Buat Password" : "Reset Password"}
                           </RowActionMenuItem>
-                          <RowActionMenuItem danger={user.status !== "locked"} disabled={saving} onClick={() => {
+                          <RowActionMenuItem danger={user.status !== "locked"} disabled={!canLockUser || saving} onClick={() => {
                             setDetailRow(null)
                             setStatusRow(user)
                           }}>
                             {user.status === "locked" ? <FileCheck2 size={14} /> : <Lock size={14} />}
                             {user.status === "locked" ? "Unlock" : "Lock"}
                           </RowActionMenuItem>
-                          <RowActionMenuItem danger disabled={saving} onClick={() => {
+                          <RowActionMenuItem danger disabled={!canEditUser || saving} onClick={() => {
                             setDetailRow(null)
                             setDeleteRow(user)
                           }}>
@@ -2605,6 +3838,8 @@ function UsersPage({ activeView }: { activeView: ViewId }) {
           setDeleteRow(row)
         }}
         onPasswordAction={openPasswordAction}
+        canEdit={canEditUser}
+        canLock={canLockUser}
       />
       <ConfirmDialog
         open={Boolean(statusRow)}
@@ -2901,6 +4136,8 @@ function UserAccessDetailDialog({
   onToggleStatus,
   onDelete,
   onPasswordAction,
+  canEdit,
+  canLock,
 }: {
   row: UserAccessRow | null
   onClose: () => void
@@ -2908,6 +4145,8 @@ function UserAccessDetailDialog({
   onToggleStatus: (row: UserAccessRow) => void
   onDelete: (row: UserAccessRow) => void
   onPasswordAction: (row: UserAccessRow, type?: PasswordActionType) => void
+  canEdit: boolean
+  canLock: boolean
 }) {
   if (!row) return null
 
@@ -2953,19 +4192,19 @@ function UserAccessDetailDialog({
           </div>
         </div>
         <div className="masterDetailActions">
-          <button className="secondaryButton" type="button" onClick={() => onEdit(row)}>
+          <button className="secondaryButton" type="button" disabled={!canEdit} onClick={() => onEdit(row)}>
             <Pencil size={16} />
             Edit
           </button>
-          <button className="secondaryButton dangerSoftButton" type="button" onClick={() => onDelete(row)}>
+          <button className="secondaryButton dangerSoftButton" type="button" disabled={!canEdit} onClick={() => onDelete(row)}>
             <Trash2 size={16} />
             Hapus
           </button>
-          <button className="secondaryButton" type="button" onClick={() => onPasswordAction(row)}>
+          <button className="secondaryButton" type="button" disabled={!canEdit} onClick={() => onPasswordAction(row)}>
             <KeyRound size={16} />
             {row.status === "invited" ? "Buat Password" : "Reset Password"}
           </button>
-          <button className={clsx("primaryButton", row.status !== "locked" && "dangerButton")} type="button" onClick={() => onToggleStatus(row)}>
+          <button className={clsx("primaryButton", row.status !== "locked" && "dangerButton")} type="button" disabled={!canLock} onClick={() => onToggleStatus(row)}>
             {row.status === "locked" ? <FileCheck2 size={16} /> : <Lock size={16} />}
             {row.status === "locked" ? "Unlock" : "Lock"}
           </button>
@@ -2975,91 +4214,486 @@ function UserAccessDetailDialog({
   )
 }
 
-function RolePermissionPage({ activeView }: { activeView: ViewId }) {
-  const groupedPermissions = permissionDefinitions.reduce<Record<string, PermissionDefinition[]>>((groups, permission) => {
+function RolePermissionPage({ activeView, profile }: { activeView: ViewId; profile: AppAccessProfile }) {
+  const [roles, setRoles] = useState<RolePermissionRole[]>([])
+  const [permissions, setPermissions] = useState<PermissionDefinition[]>([])
+  const [matrix, setMatrix] = useState<Record<string, Record<string, boolean>>>({})
+  const [baselineMatrix, setBaselineMatrix] = useState<Record<string, Record<string, boolean>>>({})
+  const [activeRoleId, setActiveRoleId] = useState("")
+  const [searchTerm, setSearchTerm] = useState("")
+  const [groupFilter, setGroupFilter] = useState("all")
+  const [detailPermission, setDetailPermission] = useState<PermissionDefinition | null>(null)
+  const [saveConfirmOpen, setSaveConfirmOpen] = useState(false)
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [errorMessage, setErrorMessage] = useState("")
+  const [toast, setToast] = useState<ToastMessage | null>(null)
+
+  const fetchMatrix = async () => {
+    setLoading(true)
+    setErrorMessage("")
+
+    try {
+      const data = await loadRolePermissionData()
+      setRoles(data.roles)
+      setPermissions(data.permissions)
+      setMatrix(data.matrix)
+      setBaselineMatrix(clonePermissionMatrix(data.matrix))
+      setActiveRoleId((current) => current && data.roles.some((role) => role.id === current) ? current : data.roles[0]?.id || "")
+    } catch (error) {
+      setErrorMessage(getFriendlySupabaseError(error, "Gagal mengambil role permission."))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void fetchMatrix()
+  }, [])
+
+  const showToast = (message: Omit<ToastMessage, "id">) => {
+    setToast({ ...message, id: Date.now() })
+  }
+
+  const activeRole = roles.find((role) => role.id === activeRoleId) || null
+  const permissionGroups = Array.from(new Set(permissions.map((permission) => permission.group)))
+  const filteredPermissions = permissions.filter((permission) => {
+    const normalizedTerm = searchTerm.trim().toLowerCase()
+    const matchesGroup = groupFilter === "all" || permission.group === groupFilter
+    const matchesSearch = normalizedTerm
+      ? [permission.key, permission.label, permission.group, permission.description].join(" ").toLowerCase().includes(normalizedTerm)
+      : true
+
+    return matchesGroup && matchesSearch
+  })
+  const groupedPermissions = filteredPermissions.reduce<Record<string, PermissionDefinition[]>>((groups, permission) => {
     groups[permission.group] = [...(groups[permission.group] || []), permission]
     return groups
   }, {})
+  const activeRolePermissions = activeRole ? matrix[activeRole.id] || {} : {}
+  const enabledCount = Object.values(activeRolePermissions).filter(Boolean).length
+  const totalEnabled = roles.reduce((total, role) => total + Object.values(matrix[role.id] || {}).filter(Boolean).length, 0)
+  const dirty = activeRole
+    ? getRolePermissionSnapshot(activeRole.id, matrix) !== getRolePermissionSnapshot(activeRole.id, baselineMatrix)
+    : false
+  const changedCount = activeRole
+    ? permissions.filter((permission) => (matrix[activeRole.id]?.[permission.key] || false) !== (baselineMatrix[activeRole.id]?.[permission.key] || false)).length
+    : 0
+  const ownerRole = activeRole?.code === "ROLE-OWNER"
+  const canManage = hasPermission(profile, "role_permissions.manage")
+
+  const getPermissionDisabledReason = (role: RolePermissionRole, permissionKey: string) => {
+    if (!canManage) return "Role kamu tidak boleh mengubah permission."
+    if (role.code === "ROLE-OWNER") return "Owner dikunci sebagai full access."
+    if (role.id === profile.roleId && permissionKey === "role_permissions.manage") return "Permission ini menjaga akses kamu ke halaman ini."
+    if (role.id === profile.roleId && permissionKey === "dashboard.view") return "Dashboard wajib aktif untuk role yang sedang dipakai."
+    if (role.userCount > 0 && permissionKey === "dashboard.view") return "Dashboard wajib aktif untuk role yang punya user aktif."
+    return ""
+  }
+
+  const togglePermission = (role: RolePermissionRole, permissionKey: string) => {
+    if (getPermissionDisabledReason(role, permissionKey)) return
+    setMatrix((current) => ({
+      ...current,
+      [role.id]: {
+        ...(current[role.id] || {}),
+        [permissionKey]: !(current[role.id]?.[permissionKey] || false),
+      },
+    }))
+  }
+
+  const handleSaveMatrix = async () => {
+    if (!activeRole) return
+    setSaving(true)
+    setErrorMessage("")
+
+    try {
+      await saveRolePermissionMatrix(activeRole, matrix[activeRole.id] || {})
+      setSaveConfirmOpen(false)
+      await fetchMatrix()
+      showToast({
+        tone: "success",
+        title: "Permission tersimpan",
+        description: `Akses role ${activeRole.name} sudah diperbarui.`,
+      })
+    } catch (error) {
+      const message = getFriendlySupabaseError(error, "Gagal menyimpan permission role.")
+      setErrorMessage(message)
+      showToast({ tone: "error", title: "Gagal menyimpan permission", description: message })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleResetDefaults = async () => {
+    if (!activeRole) return
+    setSaving(true)
+    setErrorMessage("")
+
+    try {
+      await resetRolePermissionDefaults(activeRole)
+      setResetConfirmOpen(false)
+      await fetchMatrix()
+      showToast({
+        tone: "success",
+        title: "Default role dipulihkan",
+        description: `Permission ${activeRole.name} kembali ke template awal DMS.`,
+      })
+    } catch (error) {
+      const message = getFriendlySupabaseError(error, "Gagal reset permission role.")
+      setErrorMessage(message)
+      showToast({ tone: "error", title: "Gagal reset default", description: message })
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <OperationalPageShell>
       <PageHeader
         activeView={activeView}
-        subtitle="Atur permission per role untuk menentukan modul, action, approval, dan akses khusus user."
+        subtitle="Atur akses per role secara live. Perubahan permission tersimpan ke Supabase dan dicatat di audit log."
+        meta={
+          <InlinePageStats
+            items={[
+              `${roles.length} role`,
+              `${permissions.length} permission`,
+              `${totalEnabled} akses aktif`,
+              dirty ? `${changedCount} perubahan belum disimpan` : "matrix sinkron",
+            ]}
+          />
+        }
+        actions={
+          <>
+            <button className="secondaryButton" type="button" disabled={!activeRole || saving} onClick={() => setResetConfirmOpen(true)}>
+              <ArrowDown size={17} />
+              Reset Default
+            </button>
+            <button className="primaryButton" type="button" disabled={!activeRole || !dirty || saving || ownerRole} onClick={() => setSaveConfirmOpen(true)}>
+              <FileCheck2 size={17} />
+              Simpan Matrix
+            </button>
+          </>
+        }
       />
 
-      <OperationalKpiGrid>
-        <OperationalKpiCard label="Role" value={dmsRoles.length} detail="Role aktif DMS" icon={ShieldCheck} tone="violet" />
-        <OperationalKpiCard label="Permission" value={permissionDefinitions.length} detail="Akses granular" icon={Lock} tone="blue" />
-        <OperationalKpiCard label="Protected" value="Owner" detail="Role tidak bisa diubah" icon={Crown} tone="amber" />
-        <OperationalKpiCard label="Audit Ready" value="On" detail="Perubahan tercatat" icon={FileBarChart} tone="green" />
-      </OperationalKpiGrid>
+      <section className="moduleGrid rolePermissionModule">
+        {errorMessage && <div className="inlineAlert">{errorMessage}</div>}
 
-      <section className="rolePermissionHero">
-        <div>
-          <h2>Permission Matrix</h2>
-          <p>Dummy matrix awal mengikuti pola Poles: role sebagai kolom, permission sebagai baris, group sebagai section.</p>
+        <CategoryTabs
+          activeId={activeRoleId}
+          ariaLabel="Role permission"
+          items={roles.map((role) => ({
+            id: role.id,
+            label: role.name,
+            icon: role.code === "ROLE-OWNER" ? Crown : ShieldCheck,
+            count: Object.values(matrix[role.id] || {}).filter(Boolean).length,
+          }))}
+          onChange={setActiveRoleId}
+        />
+
+        {activeRole && (
+          <section className="rolePermissionSummary">
+            <div>
+              <span>{activeRole.code}</span>
+              <h2>{activeRole.name}</h2>
+              <p>{activeRole.description || "Role aktif DMS Management."}</p>
+            </div>
+            <div className="rolePermissionSummaryStats">
+              <span><strong>{enabledCount}</strong><small>aktif</small></span>
+              <span><strong>{permissions.length - enabledCount}</strong><small>nonaktif</small></span>
+              <span><strong>{activeRole.userCount}</strong><small>user</small></span>
+              {ownerRole && <em>Protected</em>}
+              {dirty && <em className="warning">{changedCount} changed</em>}
+            </div>
+          </section>
+        )}
+
+        <OperationalFilterPanel>
+          <div className="filterField">
+            <label>Search</label>
+            <div className="uiInput inputWithIcon compact">
+              <Search size={16} />
+              <input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Cari permission, modul, action..." />
+            </div>
+          </div>
+          <div className="filterField">
+            <label>Grup</label>
+            <select className="uiSelectTrigger" value={groupFilter} onChange={(event) => setGroupFilter(event.target.value)}>
+              <option value="all">Semua Grup</option>
+              {permissionGroups.map((group) => (
+                <option value={group} key={group}>{group}</option>
+              ))}
+            </select>
+          </div>
+          <button className="secondaryButton" type="button" onClick={() => {
+            setSearchTerm("")
+            setGroupFilter("all")
+          }}>Reset Filter</button>
+        </OperationalFilterPanel>
+
+        <OperationalTableCard className="rolePermissionMatrixCard">
+          <div className="tableHeader">
+            <div>
+              <h2>Permission Matrix</h2>
+              <p>Desktop menampilkan matrix semua role. Di PWA, fokus ke role aktif agar tetap ringan.</p>
+            </div>
+          </div>
+          <div className="tableScroller uiDataTableScroller uiDataTableHasColumns rolePermissionTable desktopPermissionMatrix">
+            <table>
+              <colgroup>
+                <col style={{ width: "340px" }} />
+                {roles.map((role) => (
+                  <col key={role.id} style={{ width: "130px" }} />
+                ))}
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>Permission</th>
+                  {roles.map((role) => (
+                    <th className="textCenter" key={role.id}>{role.name}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {loading && (
+                  <tr>
+                    <td className="tableStateCell" colSpan={roles.length + 1}>
+                      <TableState title="Memuat matrix" description="Mengambil role, permission, dan status akses dari Supabase." icon={Lock} />
+                    </td>
+                  </tr>
+                )}
+                {!loading && filteredPermissions.length === 0 && (
+                  <tr>
+                    <td className="tableStateCell" colSpan={roles.length + 1}>
+                      <TableState title="Permission tidak ditemukan" description="Ubah filter atau reset pencarian." icon={Search} />
+                    </td>
+                  </tr>
+                )}
+                {!loading && Object.entries(groupedPermissions).map(([group, groupPermissions]) => (
+                  <Fragment key={group}>
+                    <tr className="permissionGroupRow">
+                      <td colSpan={roles.length + 1}>{group}</td>
+                    </tr>
+                    {groupPermissions.map((permission) => (
+                      <ClickableTableRow key={permission.key} label={`Lihat detail ${permission.label}`} onOpen={() => setDetailPermission(permission)}>
+                        <td><TableText primary={permission.label} secondary={permission.description} /></td>
+                        {roles.map((role) => {
+                          const checked = matrix[role.id]?.[permission.key] || false
+                          const disabledReason = getPermissionDisabledReason(role, permission.key)
+                          return (
+                            <td className="permissionCheckCell" key={`${role.id}-${permission.key}`}>
+                              <RolePermissionSwitch
+                                checked={checked}
+                                disabled={Boolean(disabledReason)}
+                                locked={Boolean(disabledReason)}
+                                label={`${checked ? "Nonaktifkan" : "Aktifkan"} ${permission.label} untuk ${role.name}`}
+                                onClick={() => togglePermission(role, permission.key)}
+                              />
+                            </td>
+                          )
+                        })}
+                      </ClickableTableRow>
+                    ))}
+                  </Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="mobilePermissionList">
+            {loading && <TableState title="Memuat matrix" description="Mengambil role permission dari Supabase." icon={Lock} />}
+            {!loading && activeRole && Object.entries(groupedPermissions).map(([group, groupPermissions]) => (
+              <section className="mobilePermissionGroup" key={group}>
+                <h3>{group}</h3>
+                {groupPermissions.map((permission) => {
+                  const checked = matrix[activeRole.id]?.[permission.key] || false
+                  const disabledReason = getPermissionDisabledReason(activeRole, permission.key)
+                  return (
+                    <div
+                      className="mobilePermissionItem"
+                      role="button"
+                      tabIndex={0}
+                      key={permission.key}
+                      onClick={() => setDetailPermission(permission)}
+                      onKeyDown={(event) => {
+                        if (event.key !== "Enter" && event.key !== " ") return
+                        event.preventDefault()
+                        setDetailPermission(permission)
+                      }}
+                    >
+                      <span>
+                        <strong>{permission.label}</strong>
+                        <small>{permission.description}</small>
+                      </span>
+                      <RolePermissionSwitch
+                        checked={checked}
+                        disabled={Boolean(disabledReason)}
+                        locked={Boolean(disabledReason)}
+                        label={`${checked ? "Nonaktifkan" : "Aktifkan"} ${permission.label}`}
+                        onClick={() => togglePermission(activeRole, permission.key)}
+                      />
+                    </div>
+                  )
+                })}
+              </section>
+            ))}
+          </div>
+        </OperationalTableCard>
+      </section>
+
+      <RolePermissionDetailDialog
+        permission={detailPermission}
+        role={activeRole}
+        enabled={Boolean(activeRole && detailPermission && matrix[activeRole.id]?.[detailPermission.key])}
+        disabledReason={activeRole && detailPermission ? getPermissionDisabledReason(activeRole, detailPermission.key) : ""}
+        onClose={() => setDetailPermission(null)}
+        onToggle={() => {
+          if (activeRole && detailPermission) togglePermission(activeRole, detailPermission.key)
+        }}
+      />
+      <ConfirmDialog
+        open={saveConfirmOpen}
+        tone="default"
+        icon={FileCheck2}
+        eyebrow="Simpan Permission"
+        title={activeRole ? `Simpan perubahan ${activeRole.name}?` : "Simpan perubahan permission?"}
+        description="Perubahan akan langsung mempengaruhi akses user pada login/session berikutnya."
+        confirmLabel="Simpan Matrix"
+        cancelLabel="Batal"
+        loading={saving}
+        onClose={() => {
+          if (!saving) setSaveConfirmOpen(false)
+        }}
+        onConfirm={() => void handleSaveMatrix()}
+      >
+        {activeRole && (
+          <div className="confirmDialogPreview">
+            <span>{activeRole.code}</span>
+            <strong>{activeRole.name}</strong>
+            <small>{changedCount} permission berubah</small>
+          </div>
+        )}
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={resetConfirmOpen}
+        tone="warning"
+        icon={AlertTriangle}
+        eyebrow="Reset Default"
+        title={activeRole ? `Reset ${activeRole.name} ke default DMS?` : "Reset permission default?"}
+        description="Matrix role akan dikembalikan ke template awal sistem dan dicatat di audit log."
+        confirmLabel="Reset Default"
+        cancelLabel="Batal"
+        loading={saving}
+        onClose={() => {
+          if (!saving) setResetConfirmOpen(false)
+        }}
+        onConfirm={() => void handleResetDefaults()}
+      >
+        {activeRole && (
+          <div className="confirmDialogPreview">
+            <span>{activeRole.code}</span>
+            <strong>{activeRole.name}</strong>
+            <small>{activeRole.userCount} user terkait</small>
+          </div>
+        )}
+      </ConfirmDialog>
+      <ToastViewport toast={toast} onClose={() => setToast(null)} />
+    </OperationalPageShell>
+  )
+}
+
+function RolePermissionSwitch({
+  checked,
+  disabled,
+  locked,
+  label,
+  onClick,
+}: {
+  checked: boolean
+  disabled?: boolean
+  locked?: boolean
+  label: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      className={clsx("permissionSwitchButton", checked && "checked", locked && "locked")}
+      type="button"
+      aria-label={label}
+      aria-pressed={checked}
+      disabled={disabled}
+      onClick={(event) => {
+        event.stopPropagation()
+        onClick()
+      }}
+    >
+      <span />
+    </button>
+  )
+}
+
+function RolePermissionDetailDialog({
+  permission,
+  role,
+  enabled,
+  disabledReason,
+  onClose,
+  onToggle,
+}: {
+  permission: PermissionDefinition | null
+  role: RolePermissionRole | null
+  enabled: boolean
+  disabledReason: string
+  onClose: () => void
+  onToggle: () => void
+}) {
+  if (!permission || !role) return null
+
+  return (
+    <div className="dialogBackdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="dialogPanel masterDetailDialog rolePermissionDetailDialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="permission-detail-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="dialogCompactHeader masterDetailHeader">
+          <div className="masterDetailTitle">
+            <span className="masterDetailIcon">
+              <Lock size={22} />
+            </span>
+            <div>
+              <span>{permission.group}</span>
+              <h2 id="permission-detail-title">{permission.label}</h2>
+              <p>{permission.description}</p>
+            </div>
+          </div>
+          <button className="iconButton dialogClose" type="button" aria-label="Tutup detail permission" onClick={onClose}>
+            <X size={18} />
+          </button>
         </div>
-        <div className="rolePermissionActions">
-          <button className="secondaryButton" type="button">Reset Default</button>
-          <button className="primaryButton" type="button">
-            <FileCheck2 size={17} />
-            Simpan Matrix
+        <div className="masterDetailBody">
+          <div className="masterDetailGrid">
+            <div className="masterDetailField"><span>Role</span><strong>{role.name}</strong></div>
+            <div className="masterDetailField"><span>Kode Role</span><strong>{role.code}</strong></div>
+            <div className="masterDetailField"><span>Permission Key</span><strong>{permission.key}</strong></div>
+            <div className="masterDetailField"><span>Status</span><strong>{enabled ? "Aktif" : "Nonaktif"}</strong></div>
+            <div className="masterDetailField"><span>User Terkait</span><strong>{role.userCount} user</strong></div>
+            <div className="masterDetailField"><span>Proteksi</span><strong>{disabledReason || "Bisa diubah"}</strong></div>
+          </div>
+        </div>
+        <div className="masterDetailActions">
+          <button className="secondaryButton" type="button" onClick={onClose}>Tutup</button>
+          <button className={clsx("primaryButton", enabled && "dangerButton")} type="button" disabled={Boolean(disabledReason)} onClick={onToggle}>
+            {enabled ? <Lock size={16} /> : <FileCheck2 size={16} />}
+            {enabled ? "Nonaktifkan" : "Aktifkan"}
           </button>
         </div>
       </section>
-
-      <OperationalTableCard>
-        <div className="tableHeader">
-          <div>
-            <h2>Role & Permission</h2>
-            <p>Checklist akses per role. Owner dikunci sebagai full access.</p>
-          </div>
-        </div>
-        <div className="tableScroller uiDataTableScroller uiDataTableHasColumns rolePermissionTable">
-          <table>
-            <colgroup>
-              <col style={{ width: "330px" }} />
-              {dmsRoles.map((role) => (
-                <col key={role} style={{ width: "118px" }} />
-              ))}
-            </colgroup>
-            <thead>
-              <tr>
-                <th>Permission</th>
-                {dmsRoles.map((role) => (
-                  <th className="textCenter" key={role}>{role}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {Object.entries(groupedPermissions).map(([group, permissions]) => (
-                <Fragment key={group}>
-                  <tr className="permissionGroupRow" key={`${group}-group`}>
-                    <td colSpan={dmsRoles.length + 1}>{group}</td>
-                  </tr>
-                  {permissions.map((permission) => (
-                    <tr key={permission.key}>
-                      <td><TableText primary={permission.label} secondary={permission.description} /></td>
-                      {dmsRoles.map((role) => {
-                        const checked = rolePermissionMap[role].includes(permission.key)
-                        return (
-                          <td className="permissionCheckCell" key={`${role}-${permission.key}`}>
-                            <span className={clsx("permissionSwitch", checked && "checked", role === "Owner" && "locked")}>
-                              <span />
-                            </span>
-                          </td>
-                        )
-                      })}
-                    </tr>
-                  ))}
-                </Fragment>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </OperationalTableCard>
-    </OperationalPageShell>
+    </div>
   )
 }
 
@@ -4194,17 +5828,16 @@ function ModulePage({ activeView }: { activeView: ModuleViewId }) {
 
 function AuthLoadingPage() {
   return (
-    <main className="loginShell">
-      <section className="loginCard authStateCard">
-        <span className="loginMark brandLogo">
+    <main className="authSoftShell" aria-busy="true" aria-live="polite">
+      <span className="authTopProgress" aria-hidden="true" />
+      <section className="authSoftPanel">
+        <span className="authSoftLogo brandLogo">
           <img src={dmsLogo} alt="DMS" />
         </span>
-        <div className="loginHeading">
-          <p className="loginEyebrow">DMS System</p>
-          <h1>Memeriksa Akses</h1>
+        <div>
+          <strong>DMS Management</strong>
+          <small>Sinkronisasi akses...</small>
         </div>
-        <p className="loginSub">Menghubungkan session Supabase dengan Pengguna & Akses.</p>
-        <span className="authLoadingBar" />
       </section>
     </main>
   )
@@ -4370,16 +6003,26 @@ export function App() {
 
     if (!nextSession) {
       setAccessProfile(null)
+      writeCachedAccessProfile(null)
       setAuthLoading(false)
       return
     }
 
-    setAuthLoading(true)
+    const cachedProfile = readCachedAccessProfile(nextSession)
+
+    if (cachedProfile) {
+      setAccessProfile(cachedProfile)
+      setAuthLoading(false)
+    } else {
+      setAuthLoading(true)
+    }
+
     try {
       const profile = await loadAppAccessProfile(nextSession)
       setAccessProfile(profile)
+      writeCachedAccessProfile(profile)
     } catch (error) {
-      setAccessProfile(null)
+      if (!cachedProfile) setAccessProfile(null)
       setAuthError(getFriendlySupabaseError(error, "Gagal memeriksa akses user."))
     } finally {
       setAuthLoading(false)
@@ -4444,6 +6087,7 @@ export function App() {
     setAccessProfile(null)
     setAuthError("")
     setMobileMenuOpen(false)
+    writeCachedAccessProfile(null)
     clearAuthCallbackUrl()
   }
 
@@ -4531,10 +6175,12 @@ export function App() {
         <div className="workspaceViewport withMobileNav">
           {activeView === "dashboard" ? (
             <DashboardPage activeView={activeView} />
+          ) : activeView === "employees" ? (
+            <EmployeesPage activeView={activeView} profile={accessProfile} />
           ) : activeView === "users" ? (
-            <UsersPage activeView={activeView} />
+            <UsersPage activeView={activeView} profile={accessProfile} />
           ) : activeView === "role-permission" ? (
-            <RolePermissionPage activeView={activeView} />
+            <RolePermissionPage activeView={activeView} profile={accessProfile} />
           ) : activeView === "master-data" ? (
             <MasterDataPage activeView={activeView} />
           ) : activeView === "audit-log" ? (

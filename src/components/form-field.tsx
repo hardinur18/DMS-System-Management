@@ -1,4 +1,5 @@
 import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react"
+import clsx from "clsx"
 
 import { DatePickerField } from "./date-picker-field"
 
@@ -44,6 +45,44 @@ export function SelectFormField({
   return (
     <FormField label={label} required={Boolean(props.required)}>
       <select {...props}>{children}</select>
+    </FormField>
+  )
+}
+
+export function SegmentedFormField<TValue extends string>({
+  label,
+  value,
+  options,
+  onChange,
+  required,
+}: {
+  label: string
+  value: TValue
+  options: Array<{
+    value: TValue
+    label: string
+    description?: string
+  }>
+  onChange: (value: TValue) => void
+  required?: boolean
+}) {
+  return (
+    <FormField label={label} required={required}>
+      <div className="formSegmentedControl" role="radiogroup" aria-label={label}>
+        {options.map((option) => (
+          <button
+            className={clsx("formSegmentedOption", value === option.value && "active")}
+            type="button"
+            role="radio"
+            aria-checked={value === option.value}
+            key={option.value}
+            onClick={() => onChange(option.value)}
+          >
+            <strong>{option.label}</strong>
+            {option.description && <small>{option.description}</small>}
+          </button>
+        ))}
+      </div>
     </FormField>
   )
 }

@@ -35,8 +35,8 @@ on public.audit_logs for insert
 to anon, authenticated
 with check (true);
 
-insert into public.app_users (user_code, full_name, email, role_id, division_id, status, two_factor_status, last_login_at, invited_at, notes)
-values
+with seed_users(user_code, full_name, email, role_id, division_id, status, two_factor_status, last_login_at, invited_at, notes) as (
+  values
   (
     'USR-001',
     'Hardinur Rahman',
@@ -85,17 +85,16 @@ values
     now() - interval '8 days',
     'Supervisor development seed.'
   )
-on conflict (email) do update set
-  user_code = excluded.user_code,
-  full_name = excluded.full_name,
-  role_id = excluded.role_id,
-  division_id = excluded.division_id,
-  status = excluded.status,
-  two_factor_status = excluded.two_factor_status,
-  last_login_at = excluded.last_login_at,
-  invited_at = excluded.invited_at,
-  notes = excluded.notes,
-  updated_at = now();
+)
+insert into public.app_users (user_code, full_name, email, role_id, division_id, status, two_factor_status, last_login_at, invited_at, notes)
+select seed_users.user_code, seed_users.full_name, seed_users.email, seed_users.role_id, seed_users.division_id, seed_users.status, seed_users.two_factor_status, seed_users.last_login_at, seed_users.invited_at, seed_users.notes
+from seed_users
+where not exists (
+  select 1
+  from public.app_users app_user
+  where app_user.user_code = seed_users.user_code
+     or app_user.email = seed_users.email
+);
 
 insert into public.audit_logs (actor_name, action, target_table, target_id, status, metadata)
 values
