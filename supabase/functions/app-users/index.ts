@@ -2,7 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0"
 
 type UserStatus = "active" | "invited" | "locked"
 type TwoFactorStatus = "enabled" | "pending" | "disabled"
-type AppUserAction = "create" | "update" | "delete" | "lock" | "unlock" | "send_password_link"
+type AppUserAction = "create" | "update" | "delete" | "lock" | "unlock" | "send_password_link" | "set_password"
 
 interface AppUserPayload {
   id?: string
@@ -15,6 +15,7 @@ interface AppUserPayload {
   twoFactorStatus?: TwoFactorStatus
   notes?: string
   passwordActionType?: "setup" | "reset"
+  password?: string
 }
 
 const corsHeaders = {
@@ -30,6 +31,7 @@ const permissionByAction: Record<AppUserAction, string> = {
   lock: "users.lock",
   unlock: "users.lock",
   send_password_link: "users.edit",
+  set_password: "users.edit",
 }
 
 function jsonResponse(body: Record<string, unknown>, status = 200) {
@@ -49,6 +51,12 @@ function assertPayload(condition: unknown, message: string) {
 
 function isEmailRateLimitError(error: unknown) {
   return error instanceof Error && error.message.toLowerCase().includes("email rate limit")
+}
+
+function assertStrongEnoughPassword(password?: string) {
+  const value = password || ""
+  assertPayload(value.length >= 8, "Password minimal 8 karakter.")
+  assertPayload(/[A-Za-z]/.test(value) && /\d/.test(value), "Password wajib berisi huruf dan angka.")
 }
 
 async function findAuthUserIdByEmail(adminClient: ReturnType<typeof createClient>, email: string) {
@@ -232,7 +240,7 @@ Deno.serve(async (request) => {
 
     const { data: target, error: targetError } = await adminClient
       .from("app_users")
-      .select("id, auth_user_id, full_name, email, status")
+      .select("id, auth_user_id, full_name, email, status, user_code")
       .eq("id", payload.id)
       .single()
 
@@ -336,6 +344,46 @@ Deno.serve(async (request) => {
         .eq("id", target.id)
 
       if (timestampError) throw timestampError
+    }
+
+    if (action === "set_password") {
+      assertPayload(target.id !== actor.id, "Password akun sendiri tidak bisa diubah dari halaman user.")
+      assertStrongEnoughPassword(payload.password)
+
+      let targetAuthUserId = target.auth_user_id || await findAuthUserIdByEmail(adminClient, target.email)
+
+      if (targetAuthUserId) {
+        const { error: updatePasswordError } = await adminClient.auth.admin.updateUserById(targetAuthUserId, {
+          password: payload.password,
+          email_confirm: true,
+          user_metadata: { full_name: target.full_name, user_code: target.user_code },
+        })
+
+        if (updatePasswordError) throw updatePasswordError
+      } else {
+        const { data: createdAuth, error: createAuthError } = await adminClient.auth.admin.createUser({
+          email: target.email,
+          password: payload.password,
+          email_confirm: true,
+          user_metadata: { full_name: target.full_name, user_code: target.user_code },
+        })
+
+        if (createAuthError) throw createAuthError
+        targetAuthUserId = createdAuth.user?.id || null
+      }
+
+      assertPayload(targetAuthUserId, "Auth user gagal dibuat.")
+
+      const { error: profileError } = await adminClient
+        .from("app_users")
+        .update({
+          auth_user_id: targetAuthUserId,
+          status: target.status === "locked" ? "locked" : "active",
+          password_manual_set_at: new Date().toISOString(),
+        })
+        .eq("id", target.id)
+
+      if (profileError) throw profileError
     }
 
     await adminClient.from("audit_logs").insert({

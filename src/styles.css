@@ -1812,6 +1812,65 @@ button {
   font-weight: 600;
 }
 
+.passwordModeSwitch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 12px;
+  padding: 5px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 18px;
+  background: rgba(248, 250, 252, 0.9);
+}
+
+.passwordModeSwitch button {
+  min-height: 40px;
+  border: 0;
+  border-radius: 14px;
+  color: #64748b;
+  background: transparent;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 820;
+  cursor: pointer;
+  transition: color 150ms ease, background 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+}
+
+.passwordModeSwitch button:hover {
+  color: var(--ops-ink);
+  transform: translateY(-1px);
+}
+
+.passwordModeSwitch button.active {
+  color: var(--blue-ink);
+  background: #ffffff;
+  box-shadow: 0 14px 28px -22px rgba(7, 24, 74, 0.5), 0 0 0 1px rgba(34, 174, 202, 0.14);
+}
+
+.passwordManualFields {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  text-align: left;
+}
+
+.dialogInlineAlert {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 9px;
+  align-items: flex-start;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(244, 63, 94, 0.18);
+  border-radius: 16px;
+  color: #be123c;
+  background: rgba(255, 241, 242, 0.94);
+  font-size: 0.76rem;
+  font-weight: 720;
+  line-height: 1.45;
+  text-align: left;
+}
+
 .confirmRelationList {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

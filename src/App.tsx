@@ -145,6 +145,7 @@ interface ManagementUser {
 
 type TwoFactorStatus = "enabled" | "pending" | "disabled"
 type PasswordActionType = "setup" | "reset"
+type PasswordDeliveryMode = "manual" | "email"
 
 interface UserAccessRow {
   id: string
@@ -159,6 +160,7 @@ interface UserAccessRow {
   invitedAt: string
   passwordSetupSentAt: string
   passwordResetSentAt: string
+  passwordManualSetAt: string
   twoFactorStatus: TwoFactorStatus
   status: UserStatus
   notes: string
@@ -1859,6 +1861,7 @@ function mapUserAccessRow(
     invitedAt: row.invited_at ? String(row.invited_at) : "",
     passwordSetupSentAt: row.password_setup_sent_at ? String(row.password_setup_sent_at) : "",
     passwordResetSentAt: row.password_reset_sent_at ? String(row.password_reset_sent_at) : "",
+    passwordManualSetAt: row.password_manual_set_at ? String(row.password_manual_set_at) : "",
     twoFactorStatus: (row.two_factor_status === "enabled" || row.two_factor_status === "disabled") ? row.two_factor_status : "pending",
     status: (row.status === "active" || row.status === "locked") ? row.status : "invited",
     notes: String(row.notes || ""),
@@ -1867,7 +1870,7 @@ function mapUserAccessRow(
 
 async function loadUserAccessData() {
   const [users, roles, divisions] = await Promise.all([
-    supabase.from("app_users").select("id, user_code, full_name, email, role_id, division_id, status, two_factor_status, last_login_at, invited_at, password_setup_sent_at, password_reset_sent_at, notes, created_at").order("created_at", { ascending: false }),
+    supabase.from("app_users").select("id, user_code, full_name, email, role_id, division_id, status, two_factor_status, last_login_at, invited_at, password_setup_sent_at, password_reset_sent_at, password_manual_set_at, notes, created_at").order("created_at", { ascending: false }),
     supabase.from("roles").select("id, code, name, is_active, sort_order, level").order("sort_order", { ascending: true }).order("level", { ascending: true }),
     supabase.from("divisions").select("id, code, name, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
   ])
@@ -2026,6 +2029,25 @@ async function requestUserPasswordLink(row: UserAccessRow, type: PasswordActionT
   if (profileError) throw profileError
 }
 
+async function setUserManualPassword(row: UserAccessRow, password: string) {
+  if (useAppUsersFunction()) {
+    await invokeAppUsersFunction("set_password", { id: row.id, password })
+    return
+  }
+
+  throw new Error("Set password manual wajib memakai Edge Function.")
+}
+
+function validateManualPassword(password: string, confirmPassword: string) {
+  const errors: string[] = []
+
+  if (password.length < 8) errors.push("Password minimal 8 karakter.")
+  if (password && !(/[A-Za-z]/.test(password) && /\d/.test(password))) errors.push("Password wajib berisi huruf dan angka.")
+  if (password !== confirmPassword) errors.push("Konfirmasi password belum sama.")
+
+  return errors
+}
+
 function exportUserAccessCsv(rows: UserAccessRow[]) {
   const header = ["No", "Kode", "Nama", "Email", "Role", "Divisi", "Last Login", "2FA", "Status"]
   const body = rows.map((row, index) => [
@@ -2086,6 +2108,10 @@ function UsersPage({ activeView }: { activeView: ViewId }) {
   const [deleteRow, setDeleteRow] = useState<UserAccessRow | null>(null)
   const [passwordActionRow, setPasswordActionRow] = useState<UserAccessRow | null>(null)
   const [passwordActionType, setPasswordActionType] = useState<PasswordActionType>("setup")
+  const [passwordDeliveryMode, setPasswordDeliveryMode] = useState<PasswordDeliveryMode>("manual")
+  const [manualPassword, setManualPassword] = useState("")
+  const [manualPasswordConfirm, setManualPasswordConfirm] = useState("")
+  const [passwordActionError, setPasswordActionError] = useState("")
   const [formInitialValues, setFormInitialValues] = useState<UserAccessFormValues>(() => createEmptyUserForm())
   const [rows, setRows] = useState<UserAccessRow[]>([])
   const [roles, setRoles] = useState<UserAccessOption[]>([])
@@ -2141,6 +2167,12 @@ function UsersPage({ activeView }: { activeView: ViewId }) {
   const twoFactorEnabled = rows.filter((user) => user.twoFactorStatus === "enabled").length
   const statusTarget = statusRow?.status === "locked" ? "active" : "locked"
   const passwordAction = passwordActionCopy[passwordActionType]
+  const passwordDialogDescription = passwordDeliveryMode === "manual"
+    ? "Admin membuat password sementara langsung dari management. Cocok untuk operasional saat email belum stabil."
+    : passwordAction.description
+  const passwordDialogConfirmLabel = passwordDeliveryMode === "manual"
+    ? "Simpan Password"
+    : passwordAction.confirm
 
   const showToast = (message: Omit<ToastMessage, "id">) => {
     setToast({ ...message, id: Date.now() })
@@ -2264,6 +2296,10 @@ function UsersPage({ activeView }: { activeView: ViewId }) {
     setDetailRow(null)
     setPasswordActionRow(row)
     setPasswordActionType(type)
+    setPasswordDeliveryMode("manual")
+    setManualPassword("")
+    setManualPasswordConfirm("")
+    setPasswordActionError("")
   }
 
   const handlePasswordAction = async () => {
@@ -2272,10 +2308,23 @@ function UsersPage({ activeView }: { activeView: ViewId }) {
     const targetAction = passwordActionType
     setSaving(true)
     setErrorMessage("")
+    setPasswordActionError("")
 
     try {
-      await requestUserPasswordLink(targetRow, targetAction)
-      if (!useAppUsersFunction()) {
+      if (passwordDeliveryMode === "manual") {
+        const validationErrors = validateManualPassword(manualPassword, manualPasswordConfirm)
+
+        if (validationErrors.length > 0) {
+          setPasswordActionError(validationErrors.join(" "))
+          return
+        }
+
+        await setUserManualPassword(targetRow, manualPassword)
+      } else {
+        await requestUserPasswordLink(targetRow, targetAction)
+      }
+
+      if (!useAppUsersFunction() && passwordDeliveryMode === "email") {
         await writeAuditLog(passwordActionCopy[targetAction].action, "app_users", targetRow.id, {
           email: targetRow.email,
           user_code: targetRow.userCode,
@@ -2286,13 +2335,14 @@ function UsersPage({ activeView }: { activeView: ViewId }) {
       await fetchRows()
       showToast({
         tone: "success",
-        title: targetAction === "setup" ? "Link buat password dikirim" : "Reset password dikirim",
-        description: `Email dikirim ke ${targetRow.email}.`,
+        title: passwordDeliveryMode === "manual" ? "Password disimpan" : targetAction === "setup" ? "Link buat password dikirim" : "Reset password dikirim",
+        description: passwordDeliveryMode === "manual" ? `${targetRow.fullName} sudah bisa login dengan password baru.` : `Email dikirim ke ${targetRow.email}.`,
       })
     } catch (error) {
-      const message = getFriendlySupabaseError(error, targetAction === "setup" ? "Gagal mengirim link buat password." : "Gagal mengirim reset password.")
+      const message = getFriendlySupabaseError(error, passwordDeliveryMode === "manual" ? "Gagal menyimpan password." : targetAction === "setup" ? "Gagal mengirim link buat password." : "Gagal mengirim reset password.")
       setErrorMessage(message)
-      showToast({ tone: "error", title: targetAction === "setup" ? "Gagal kirim link" : "Gagal reset password", description: message })
+      setPasswordActionError(message)
+      showToast({ tone: "error", title: passwordDeliveryMode === "manual" ? "Gagal simpan password" : targetAction === "setup" ? "Gagal kirim link" : "Gagal reset password", description: message })
     } finally {
       setSaving(false)
     }
@@ -2543,23 +2593,56 @@ function UsersPage({ activeView }: { activeView: ViewId }) {
         open={Boolean(passwordActionRow)}
         tone="default"
         icon={KeyRound}
-        eyebrow={passwordActionType === "setup" ? "Buat Password" : "Reset Password"}
-        title={passwordActionRow ? `${passwordAction.title} untuk ${passwordActionRow.fullName}?` : `${passwordAction.title}?`}
-        description={passwordAction.description}
-        confirmLabel={passwordAction.confirm}
+        eyebrow={passwordDeliveryMode === "manual" ? "Password Manual" : passwordActionType === "setup" ? "Buat Password" : "Reset Password"}
+        title={passwordActionRow ? `${passwordDeliveryMode === "manual" ? "Buat password manual" : passwordAction.title} untuk ${passwordActionRow.fullName}?` : `${passwordAction.title}?`}
+        description={passwordDialogDescription}
+        confirmLabel={passwordDialogConfirmLabel}
         cancelLabel="Batal"
         loading={saving}
         onClose={() => {
-          if (!saving) setPasswordActionRow(null)
+          if (!saving) {
+            setPasswordActionRow(null)
+            setPasswordActionError("")
+            setManualPassword("")
+            setManualPasswordConfirm("")
+          }
         }}
         onConfirm={() => void handlePasswordAction()}
       >
         {passwordActionRow && (
-          <div className="confirmDialogPreview">
-            <span>{passwordActionRow.userCode}</span>
-            <strong>{passwordActionRow.fullName}</strong>
-            <small>{passwordActionRow.email}</small>
-          </div>
+          <>
+            <div className="confirmDialogPreview">
+              <span>{passwordActionRow.userCode}</span>
+              <strong>{passwordActionRow.fullName}</strong>
+              <small>{passwordActionRow.email}</small>
+            </div>
+            <div className="passwordModeSwitch" role="group" aria-label="Pilih metode password">
+              <button className={clsx(passwordDeliveryMode === "manual" && "active")} type="button" onClick={() => {
+                setPasswordDeliveryMode("manual")
+                setPasswordActionError("")
+              }}>
+                Buat Manual
+              </button>
+              <button className={clsx(passwordDeliveryMode === "email" && "active")} type="button" onClick={() => {
+                setPasswordDeliveryMode("email")
+                setPasswordActionError("")
+              }}>
+                Kirim Link
+              </button>
+            </div>
+            {passwordDeliveryMode === "manual" && (
+              <div className="passwordManualFields">
+                <TextFormField label="Password Baru" type="password" value={manualPassword} onChange={(event) => setManualPassword(event.target.value)} placeholder="Minimal 8 karakter" autoComplete="new-password" required />
+                <TextFormField label="Konfirmasi Password" type="password" value={manualPasswordConfirm} onChange={(event) => setManualPasswordConfirm(event.target.value)} placeholder="Ulangi password" autoComplete="new-password" required />
+              </div>
+            )}
+            {passwordActionError && (
+              <div className="dialogInlineAlert">
+                <AlertTriangle size={16} />
+                <span>{passwordActionError}</span>
+              </div>
+            )}
+          </>
         )}
       </ConfirmDialog>
       <ToastViewport toast={toast} onClose={() => setToast(null)} />
@@ -2732,6 +2815,7 @@ function UserAccessDetailDialog({
             <div className="masterDetailField"><span>Invited</span><strong>{formatUserDateTime(row.invitedAt)}</strong></div>
             <div className="masterDetailField"><span>Setup Password</span><strong>{formatUserDateTime(row.passwordSetupSentAt, "Belum dikirim")}</strong></div>
             <div className="masterDetailField"><span>Reset Password</span><strong>{formatUserDateTime(row.passwordResetSentAt, "Belum dikirim")}</strong></div>
+            <div className="masterDetailField"><span>Password Manual</span><strong>{formatUserDateTime(row.passwordManualSetAt, "Belum dibuat")}</strong></div>
             <div className="masterDetailField"><span>Catatan</span><strong>{row.notes || "-"}</strong></div>
           </div>
         </div>
