@@ -1932,7 +1932,28 @@ async function invokeAppUsersFunction(action: string, payload: Record<string, un
     body: { action, payload },
   })
 
-  if (error) throw error
+  if (error) {
+    const context = "context" in error ? (error as { context?: unknown }).context : null
+
+    if (context instanceof Response) {
+      const text = await context.clone().text()
+
+      if (text) {
+        let parsedMessage = ""
+
+        try {
+          const parsed = JSON.parse(text) as { error?: unknown; message?: unknown }
+          parsedMessage = String(parsed.error || parsed.message || "")
+        } catch {
+          parsedMessage = ""
+        }
+
+        throw new Error(parsedMessage || text)
+      }
+    }
+
+    throw error
+  }
   if (data?.error) throw new Error(String(data.error))
 
   return data

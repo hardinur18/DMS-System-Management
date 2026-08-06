@@ -47,6 +47,10 @@ function assertPayload(condition: unknown, message: string) {
   if (!condition) throw new Error(message)
 }
 
+function isEmailRateLimitError(error: unknown) {
+  return error instanceof Error && error.message.toLowerCase().includes("email rate limit")
+}
+
 async function findAuthUserIdByEmail(adminClient: ReturnType<typeof createClient>, email: string) {
   for (let page = 1; page <= 10; page += 1) {
     const { data, error } = await adminClient.auth.admin.listUsers({ page, perPage: 100 })
@@ -173,7 +177,13 @@ Deno.serve(async (request) => {
           data: { full_name: payload.fullName.trim(), user_code: payload.userCode },
         })
 
-        if (inviteError) throw inviteError
+        if (inviteError) {
+          if (isEmailRateLimitError(inviteError)) {
+            return jsonResponse({ error: "Limit email Supabase tercapai. Tunggu beberapa menit atau aktifkan SMTP custom sebelum kirim invite lagi." }, 429)
+          }
+
+          throw inviteError
+        }
         authUserId = inviteData.user?.id || null
       }
 
@@ -259,7 +269,13 @@ Deno.serve(async (request) => {
           data: { full_name: target.full_name },
         })
 
-        if (inviteError) throw inviteError
+        if (inviteError) {
+          if (isEmailRateLimitError(inviteError)) {
+            return jsonResponse({ error: "Limit email Supabase tercapai. Tunggu beberapa menit atau aktifkan SMTP custom sebelum kirim link buat password lagi." }, 429)
+          }
+
+          throw inviteError
+        }
         targetAuthUserId = inviteData.user?.id || null
 
         if (targetAuthUserId) {
@@ -270,6 +286,26 @@ Deno.serve(async (request) => {
 
           if (linkError) throw linkError
         }
+
+        const timestampColumn = passwordActionType === "setup" ? "password_setup_sent_at" : "password_reset_sent_at"
+        const { error: timestampError } = await adminClient
+          .from("app_users")
+          .update({ [timestampColumn]: new Date().toISOString() })
+          .eq("id", target.id)
+
+        if (timestampError) throw timestampError
+
+        await adminClient.from("audit_logs").insert({
+          actor_user_id: actor.id,
+          actor_name: actor.full_name,
+          action: `App user ${action}`,
+          target_table: "app_users",
+          target_id: target.id,
+          status: "success",
+          metadata: { email: target.email, source: "edge-function", flow: "invite" },
+        })
+
+        return jsonResponse({ ok: true, id: target.id })
       } else if (!target.auth_user_id) {
         const { error: linkError } = await adminClient
           .from("app_users")
@@ -284,7 +320,13 @@ Deno.serve(async (request) => {
           redirectTo: `${siteUrl}/?flow=reset-password`,
         })
 
-        if (resetError) throw resetError
+        if (resetError) {
+          if (isEmailRateLimitError(resetError)) {
+            return jsonResponse({ error: "Limit email Supabase tercapai. Tunggu beberapa menit atau aktifkan SMTP custom sebelum kirim reset password lagi." }, 429)
+          }
+
+          throw resetError
+        }
       }
 
       const timestampColumn = passwordActionType === "setup" ? "password_setup_sent_at" : "password_reset_sent_at"
