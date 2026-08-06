@@ -2,7 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0"
 
 type UserStatus = "active" | "invited" | "locked"
 type TwoFactorStatus = "enabled" | "pending" | "disabled"
-type AppUserAction = "create" | "update" | "delete" | "lock" | "unlock" | "send_password_link" | "set_password"
+type AppUserAction = "claim_profile" | "complete_email_password_link" | "complete_password_change" | "create" | "update" | "delete" | "lock" | "unlock" | "send_password_link" | "set_password"
 
 interface AppUserPayload {
   id?: string
@@ -24,7 +24,7 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 }
 
-const permissionByAction: Record<AppUserAction, string> = {
+const permissionByAction: Record<Exclude<AppUserAction, "claim_profile" | "complete_email_password_link" | "complete_password_change">, string> = {
   create: "users.create",
   update: "users.edit",
   delete: "users.edit",
@@ -55,8 +55,14 @@ function isEmailRateLimitError(error: unknown) {
 
 function assertStrongEnoughPassword(password?: string) {
   const value = password || ""
-  assertPayload(value.length >= 8, "Password minimal 8 karakter.")
-  assertPayload(/[A-Za-z]/.test(value) && /\d/.test(value), "Password wajib berisi huruf dan angka.")
+  const weakPasswords = ["password", "password123", "admin123", "qwerty123", "dms12345", "12345678", "123456789", "letmein123"]
+
+  assertPayload(value.length >= 12, "Password minimal 12 karakter.")
+  assertPayload(/[a-z]/.test(value), "Password wajib berisi huruf kecil.")
+  assertPayload(/[A-Z]/.test(value), "Password wajib berisi huruf besar.")
+  assertPayload(/\d/.test(value), "Password wajib berisi angka.")
+  assertPayload(/[^A-Za-z0-9]/.test(value), "Password wajib berisi simbol.")
+  assertPayload(!weakPasswords.includes(value.toLowerCase()), "Password terlalu umum. Gunakan password yang lebih unik.")
 }
 
 async function findAuthUserIdByEmail(adminClient: ReturnType<typeof createClient>, email: string) {
@@ -101,11 +107,94 @@ Deno.serve(async (request) => {
     const action = body.action
     const payload = body.payload || {}
 
-    assertPayload(action && permissionByAction[action], "Action tidak valid.")
+    assertPayload(action, "Action tidak valid.")
 
     const token = authorization.replace(/^Bearer\s+/i, "")
     const { data: authData, error: authError } = await userClient.auth.getUser(token)
     if (authError || !authData.user) return jsonResponse({ error: "Session tidak valid." }, 401)
+
+    if (action === "claim_profile") {
+      const email = normalizeEmail(authData.user.email)
+      assertPayload(email, "Email session tidak ditemukan.")
+
+      const { data: profile, error: profileError } = await adminClient
+        .from("app_users")
+        .select("id, auth_user_id, email, status")
+        .or(`auth_user_id.eq.${authData.user.id},email.eq.${email}`)
+        .maybeSingle()
+
+      if (profileError) throw profileError
+      if (!profile) return jsonResponse({ ok: true, profile: null })
+
+      const emailConfirmedAt = authData.user.email_confirmed_at || authData.user.confirmed_at || null
+      const manualPasswordAuth = authData.user.user_metadata?.dms_manual_password === true
+      const normalizedProfileEmail = normalizeEmail(profile.email)
+      const shouldVerifyEmail = normalizedProfileEmail === email && Boolean(emailConfirmedAt) && !manualPasswordAuth
+
+      const { error: claimError } = await adminClient
+        .from("app_users")
+        .update({
+          auth_user_id: profile.auth_user_id || authData.user.id,
+          email_verified_at: shouldVerifyEmail ? emailConfirmedAt : null,
+          last_login_at: new Date().toISOString(),
+        })
+        .eq("id", profile.id)
+
+      if (claimError) throw claimError
+
+      return jsonResponse({ ok: true, profileId: profile.id })
+    }
+
+    if (action === "complete_email_password_link") {
+      const email = normalizeEmail(authData.user.email)
+      const emailConfirmedAt = authData.user.email_confirmed_at || authData.user.confirmed_at || new Date().toISOString()
+
+      const { data: profile, error: profileError } = await adminClient
+        .from("app_users")
+        .select("id, email")
+        .eq("auth_user_id", authData.user.id)
+        .maybeSingle()
+
+      if (profileError) throw profileError
+      if (!profile || normalizeEmail(profile.email) !== email) return jsonResponse({ error: "Profil user tidak cocok dengan email session." }, 403)
+
+      const { error: updateError } = await adminClient
+        .from("app_users")
+        .update({ email_verified_at: emailConfirmedAt, force_password_change: false })
+        .eq("id", profile.id)
+
+      if (updateError) throw updateError
+
+      await adminClient.auth.admin.updateUserById(authData.user.id, {
+        user_metadata: { ...authData.user.user_metadata, dms_manual_password: false },
+      }).catch(() => {})
+
+      return jsonResponse({ ok: true, profileId: profile.id })
+    }
+
+    if (action === "complete_password_change") {
+      const { data: profile, error: profileError } = await adminClient
+        .from("app_users")
+        .select("id, status")
+        .eq("auth_user_id", authData.user.id)
+        .maybeSingle()
+
+      if (profileError) throw profileError
+      if (!profile) return jsonResponse({ error: "Profil user tidak ditemukan." }, 404)
+      if (profile.status !== "active") return jsonResponse({ error: "Akses user tidak aktif." }, 403)
+
+      const { error: updateError } = await adminClient
+        .from("app_users")
+        .update({ force_password_change: false })
+        .eq("id", profile.id)
+
+      if (updateError) throw updateError
+
+      return jsonResponse({ ok: true, profileId: profile.id })
+    }
+
+    const permissionKey = permissionByAction[action as Exclude<AppUserAction, "claim_profile" | "complete_email_password_link" | "complete_password_change">]
+    assertPayload(permissionKey, "Action tidak valid.")
 
     const { data: actor, error: actorError } = await adminClient
       .from("app_users")
@@ -120,7 +209,7 @@ Deno.serve(async (request) => {
       .from("role_permissions")
       .select("permission_key")
       .eq("role_id", actor.role_id)
-      .eq("permission_key", permissionByAction[action])
+      .eq("permission_key", permissionKey)
       .eq("enabled", true)
       .maybeSingle()
 
@@ -142,14 +231,14 @@ Deno.serve(async (request) => {
       }
 
       let authUserId: string | null = null
-      let currentProfile: { id: string; auth_user_id: string | null; email: string | null } | null = null
+      let currentProfile: { id: string; auth_user_id: string | null; email: string | null; email_verified_at: string | null } | null = null
 
       if (action === "update") {
         assertPayload(payload.id, "ID user wajib ada.")
 
         const { data: profile, error: profileError } = await adminClient
           .from("app_users")
-          .select("id, auth_user_id, email")
+          .select("id, auth_user_id, email, email_verified_at")
           .eq("id", payload.id)
           .single()
 
@@ -214,6 +303,7 @@ Deno.serve(async (request) => {
         status: payload.status || "invited",
         two_factor_status: payload.twoFactorStatus || "pending",
         invited_at: payload.status === "invited" ? new Date().toISOString() : null,
+        email_verified_at: action === "update" && currentProfile && normalizeEmail(currentProfile.email || "") === email ? currentProfile.email_verified_at : null,
         notes: payload.notes?.trim() || null,
       }
 
@@ -356,7 +446,7 @@ Deno.serve(async (request) => {
         const { error: updatePasswordError } = await adminClient.auth.admin.updateUserById(targetAuthUserId, {
           password: payload.password,
           email_confirm: true,
-          user_metadata: { full_name: target.full_name, user_code: target.user_code },
+          user_metadata: { full_name: target.full_name, user_code: target.user_code, dms_manual_password: true },
         })
 
         if (updatePasswordError) throw updatePasswordError
@@ -365,7 +455,7 @@ Deno.serve(async (request) => {
           email: target.email,
           password: payload.password,
           email_confirm: true,
-          user_metadata: { full_name: target.full_name, user_code: target.user_code },
+          user_metadata: { full_name: target.full_name, user_code: target.user_code, dms_manual_password: true },
         })
 
         if (createAuthError) throw createAuthError
@@ -379,7 +469,9 @@ Deno.serve(async (request) => {
         .update({
           auth_user_id: targetAuthUserId,
           status: target.status === "locked" ? "locked" : "active",
+          email_verified_at: null,
           password_manual_set_at: new Date().toISOString(),
+          force_password_change: true,
         })
         .eq("id", target.id)
 

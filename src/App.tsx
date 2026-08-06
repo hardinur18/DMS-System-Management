@@ -161,6 +161,8 @@ interface UserAccessRow {
   passwordSetupSentAt: string
   passwordResetSentAt: string
   passwordManualSetAt: string
+  emailVerifiedAt: string
+  forcePasswordChange: boolean
   twoFactorStatus: TwoFactorStatus
   status: UserStatus
   notes: string
@@ -195,6 +197,8 @@ interface AppAccessProfile {
   divisionName: string
   status: UserStatus
   permissions: string[]
+  emailVerifiedAt: string
+  forcePasswordChange: boolean
 }
 
 interface AuditEvent {
@@ -1722,6 +1726,14 @@ function UserStatusBadge({ status }: { status: UserStatus }) {
   return <UiStatusBadge tone={tone[status]}>{label[status]}</UiStatusBadge>
 }
 
+function EmailVerifiedBadge({ verifiedAt }: { verifiedAt: string }) {
+  return (
+    <UiStatusBadge tone={verifiedAt ? "valid" : "pending"}>
+      {verifiedAt ? "Verified" : "Belum verified"}
+    </UiStatusBadge>
+  )
+}
+
 function ProgressRing({ value }: { value: number }) {
   const percent = Math.min(100, Math.round((value / 26) * 100))
   return (
@@ -1757,8 +1769,10 @@ function mapAccessStatus(status: unknown): UserStatus {
 
 async function loadAppAccessProfile(session: Session): Promise<AppAccessProfile | null> {
   const userEmail = session.user.email?.trim().toLowerCase()
-  const columns = "id, auth_user_id, full_name, email, role_id, division_id, status"
+  const columns = "id, auth_user_id, full_name, email, role_id, division_id, status, email_verified_at, force_password_change"
   let row: Record<string, unknown> | null = null
+
+  await invokeAppUsersFunction("claim_profile", {}).catch(() => {})
 
   const linkedProfile = await supabase
     .from("app_users")
@@ -1779,15 +1793,7 @@ async function loadAppAccessProfile(session: Session): Promise<AppAccessProfile 
     if (emailProfile.error) throw emailProfile.error
     row = emailProfile.data
 
-    if (row && !row.auth_user_id) {
-      const { error } = await supabase
-        .from("app_users")
-        .update({ auth_user_id: session.user.id })
-        .eq("id", String(row.id))
-
-      if (error) throw error
-      row.auth_user_id = session.user.id
-    }
+    if (row && !row.auth_user_id) row.auth_user_id = session.user.id
   }
 
   if (!row) return null
@@ -1815,6 +1821,8 @@ async function loadAppAccessProfile(session: Session): Promise<AppAccessProfile 
     divisionName: String(division.data?.name || "Belum pilih divisi"),
     status: mapAccessStatus(row.status),
     permissions: (permissions.data || []).map((permission) => String(permission.permission_key)),
+    emailVerifiedAt: row.email_verified_at ? String(row.email_verified_at) : "",
+    forcePasswordChange: row.force_password_change === true,
   }
 }
 
@@ -1862,6 +1870,8 @@ function mapUserAccessRow(
     passwordSetupSentAt: row.password_setup_sent_at ? String(row.password_setup_sent_at) : "",
     passwordResetSentAt: row.password_reset_sent_at ? String(row.password_reset_sent_at) : "",
     passwordManualSetAt: row.password_manual_set_at ? String(row.password_manual_set_at) : "",
+    emailVerifiedAt: row.email_verified_at ? String(row.email_verified_at) : "",
+    forcePasswordChange: row.force_password_change === true,
     twoFactorStatus: (row.two_factor_status === "enabled" || row.two_factor_status === "disabled") ? row.two_factor_status : "pending",
     status: (row.status === "active" || row.status === "locked") ? row.status : "invited",
     notes: String(row.notes || ""),
@@ -1870,7 +1880,7 @@ function mapUserAccessRow(
 
 async function loadUserAccessData() {
   const [users, roles, divisions] = await Promise.all([
-    supabase.from("app_users").select("id, user_code, full_name, email, role_id, division_id, status, two_factor_status, last_login_at, invited_at, password_setup_sent_at, password_reset_sent_at, password_manual_set_at, notes, created_at").order("created_at", { ascending: false }),
+    supabase.from("app_users").select("id, user_code, full_name, email, role_id, division_id, status, two_factor_status, last_login_at, invited_at, password_setup_sent_at, password_reset_sent_at, password_manual_set_at, email_verified_at, force_password_change, notes, created_at").order("created_at", { ascending: false }),
     supabase.from("roles").select("id, code, name, is_active, sort_order, level").order("sort_order", { ascending: true }).order("level", { ascending: true }),
     supabase.from("divisions").select("id, code, name, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
   ])
@@ -2040,21 +2050,58 @@ async function setUserManualPassword(row: UserAccessRow, password: string) {
 
 function validateManualPassword(password: string, confirmPassword: string) {
   const errors: string[] = []
+  const weakPasswords = ["password", "password123", "admin123", "qwerty123", "dms12345", "12345678", "123456789", "letmein123"]
 
-  if (password.length < 8) errors.push("Password minimal 8 karakter.")
-  if (password && !(/[A-Za-z]/.test(password) && /\d/.test(password))) errors.push("Password wajib berisi huruf dan angka.")
+  if (password.length < 12) errors.push("Password minimal 12 karakter.")
+  if (password && !/[a-z]/.test(password)) errors.push("Password wajib berisi huruf kecil.")
+  if (password && !/[A-Z]/.test(password)) errors.push("Password wajib berisi huruf besar.")
+  if (password && !/\d/.test(password)) errors.push("Password wajib berisi angka.")
+  if (password && !/[^A-Za-z0-9]/.test(password)) errors.push("Password wajib berisi simbol.")
+  if (weakPasswords.includes(password.toLowerCase())) errors.push("Password terlalu umum.")
   if (password !== confirmPassword) errors.push("Konfirmasi password belum sama.")
 
   return errors
 }
 
+function getManualPasswordScore(password: string) {
+  return [
+    password.length >= 12,
+    /[a-z]/.test(password),
+    /[A-Z]/.test(password),
+    /\d/.test(password),
+    /[^A-Za-z0-9]/.test(password),
+  ].filter(Boolean).length
+}
+
+function generateSecurePassword(length = 16) {
+  const groups = ["abcdefghijkmnopqrstuvwxyz", "ABCDEFGHJKLMNPQRSTUVWXYZ", "23456789", "!@#$%&*?"]
+  const allCharacters = groups.join("")
+  const randomValues = new Uint32Array(length)
+  crypto.getRandomValues(randomValues)
+
+  const requiredCharacters = groups.map((group, index) => group[randomValues[index] % group.length])
+  const remainingCharacters = Array.from({ length: length - requiredCharacters.length }, (_, index) => {
+    const value = randomValues[index + requiredCharacters.length]
+    return allCharacters[value % allCharacters.length]
+  })
+  const password = [...requiredCharacters, ...remainingCharacters]
+
+  for (let index = password.length - 1; index > 0; index -= 1) {
+    const swapIndex = randomValues[index] % (index + 1)
+    ;[password[index], password[swapIndex]] = [password[swapIndex], password[index]]
+  }
+
+  return password.join("")
+}
+
 function exportUserAccessCsv(rows: UserAccessRow[]) {
-  const header = ["No", "Kode", "Nama", "Email", "Role", "Divisi", "Last Login", "2FA", "Status"]
+  const header = ["No", "Kode", "Nama", "Email", "Email Verified", "Role", "Divisi", "Last Login", "2FA", "Status"]
   const body = rows.map((row, index) => [
     index + 1,
     row.userCode,
     row.fullName,
     row.email,
+    row.emailVerifiedAt ? "Verified" : "Belum verified",
     row.roleName,
     row.divisionName,
     formatUserDateTime(row.lastLoginAt),
@@ -2173,6 +2220,8 @@ function UsersPage({ activeView }: { activeView: ViewId }) {
   const passwordDialogConfirmLabel = passwordDeliveryMode === "manual"
     ? "Simpan Password"
     : passwordAction.confirm
+  const manualPasswordScore = getManualPasswordScore(manualPassword)
+  const manualPasswordScoreLabel = manualPasswordScore >= 5 ? "Kuat" : manualPasswordScore >= 4 ? "Cukup" : "Lemah"
 
   const showToast = (message: Omit<ToastMessage, "id">) => {
     setToast({ ...message, id: Date.now() })
@@ -2302,6 +2351,13 @@ function UsersPage({ activeView }: { activeView: ViewId }) {
     setPasswordActionError("")
   }
 
+  const handleGeneratePassword = () => {
+    const nextPassword = generateSecurePassword()
+    setManualPassword(nextPassword)
+    setManualPasswordConfirm(nextPassword)
+    setPasswordActionError("")
+  }
+
   const handlePasswordAction = async () => {
     if (!passwordActionRow) return
     const targetRow = passwordActionRow
@@ -2423,6 +2479,7 @@ function UsersPage({ activeView }: { activeView: ViewId }) {
                 <col className="tableNumberColumn" />
                 <col style={{ width: "240px" }} />
                 <col style={{ width: "250px" }} />
+                <col style={{ width: "150px" }} />
                 <col style={{ width: "170px" }} />
                 <col style={{ width: "170px" }} />
                 <col style={{ width: "150px" }} />
@@ -2435,6 +2492,7 @@ function UsersPage({ activeView }: { activeView: ViewId }) {
                   <th className="tableNumberHeader">No</th>
                   <th>User</th>
                   <th>Email</th>
+                  <th>Verified</th>
                   <th>Role</th>
                   <th>Divisi</th>
                   <th>Last Login</th>
@@ -2446,21 +2504,21 @@ function UsersPage({ activeView }: { activeView: ViewId }) {
               <tbody>
                 {loading && (
                   <tr>
-                    <td className="tableStateCell" colSpan={9}>
+                    <td className="tableStateCell" colSpan={10}>
                       <TableState title="Memuat user" description="Mengambil pengguna, role, dan divisi dari Supabase." icon={UsersRound} />
                     </td>
                   </tr>
                 )}
                 {!loading && errorMessage && rows.length === 0 && (
                   <tr>
-                    <td className="tableStateCell" colSpan={9}>
+                    <td className="tableStateCell" colSpan={10}>
                       <TableState title="Gagal memuat user" description={errorMessage} icon={AlertTriangle} tone="danger" />
                     </td>
                   </tr>
                 )}
                 {!loading && !errorMessage && filteredRows.length === 0 && (
                   <tr>
-                    <td className="tableStateCell" colSpan={9}>
+                    <td className="tableStateCell" colSpan={10}>
                       <TableState title="User tidak ditemukan" description="Ubah filter atau invite user baru." icon={Search} />
                     </td>
                   </tr>
@@ -2470,6 +2528,7 @@ function UsersPage({ activeView }: { activeView: ViewId }) {
                     <td className="tableNumberCell"><TableNumberCell value={(currentPage - 1) * Math.min(pageSize, 50) + index + 1} /></td>
                     <td><TableText primary={user.fullName} secondary={user.userCode} /></td>
                     <td><TableText primary={user.email} /></td>
+                    <td><EmailVerifiedBadge verifiedAt={user.emailVerifiedAt} /></td>
                     <td><TableText primary={user.roleName} /></td>
                     <td><TableText primary={user.divisionName} /></td>
                     <td><TableText primary={formatUserDateTime(user.lastLoginAt)} /></td>
@@ -2593,6 +2652,7 @@ function UsersPage({ activeView }: { activeView: ViewId }) {
         open={Boolean(passwordActionRow)}
         tone="default"
         icon={KeyRound}
+        className="passwordDialog"
         eyebrow={passwordDeliveryMode === "manual" ? "Password Manual" : passwordActionType === "setup" ? "Buat Password" : "Reset Password"}
         title={passwordActionRow ? `${passwordDeliveryMode === "manual" ? "Buat password manual" : passwordAction.title} untuk ${passwordActionRow.fullName}?` : `${passwordAction.title}?`}
         description={passwordDialogDescription}
@@ -2632,8 +2692,19 @@ function UsersPage({ activeView }: { activeView: ViewId }) {
             </div>
             {passwordDeliveryMode === "manual" && (
               <div className="passwordManualFields">
-                <TextFormField label="Password Baru" type="password" value={manualPassword} onChange={(event) => setManualPassword(event.target.value)} placeholder="Minimal 8 karakter" autoComplete="new-password" required />
+                <div className="passwordManualToolbar">
+                  <span>Password sementara wajib diganti user setelah login.</span>
+                  <button className="secondaryButton compactButton" type="button" onClick={handleGeneratePassword}>
+                    <KeyRound size={15} />
+                    Generate
+                  </button>
+                </div>
+                <TextFormField label="Password Baru" type="password" value={manualPassword} onChange={(event) => setManualPassword(event.target.value)} placeholder="Minimal 12 karakter" autoComplete="new-password" required />
                 <TextFormField label="Konfirmasi Password" type="password" value={manualPasswordConfirm} onChange={(event) => setManualPasswordConfirm(event.target.value)} placeholder="Ulangi password" autoComplete="new-password" required />
+                <div className={clsx("passwordStrength", manualPasswordScore >= 5 && "strong", manualPasswordScore === 4 && "medium")}>
+                  <span><i style={{ width: `${Math.max(12, manualPasswordScore * 20)}%` }} /></span>
+                  <small>{manualPassword ? manualPasswordScoreLabel : "Belum diisi"} · 12+ karakter, huruf besar/kecil, angka, simbol</small>
+                </div>
               </div>
             )}
             {passwordActionError && (
@@ -2808,6 +2879,7 @@ function UserAccessDetailDialog({
           <div className="masterDetailGrid">
             <div className="masterDetailField"><span>Kode User</span><strong>{row.userCode}</strong></div>
             <div className="masterDetailField"><span>Status</span><strong><UserStatusBadge status={row.status} /></strong></div>
+            <div className="masterDetailField"><span>Email Verified</span><strong><EmailVerifiedBadge verifiedAt={row.emailVerifiedAt} /></strong></div>
             <div className="masterDetailField"><span>Role</span><strong>{row.roleName}</strong></div>
             <div className="masterDetailField"><span>Divisi</span><strong>{row.divisionName}</strong></div>
             <div className="masterDetailField"><span>2FA</span><strong>{twoFactorLabel[row.twoFactorStatus]}</strong></div>
@@ -2816,6 +2888,7 @@ function UserAccessDetailDialog({
             <div className="masterDetailField"><span>Setup Password</span><strong>{formatUserDateTime(row.passwordSetupSentAt, "Belum dikirim")}</strong></div>
             <div className="masterDetailField"><span>Reset Password</span><strong>{formatUserDateTime(row.passwordResetSentAt, "Belum dikirim")}</strong></div>
             <div className="masterDetailField"><span>Password Manual</span><strong>{formatUserDateTime(row.passwordManualSetAt, "Belum dibuat")}</strong></div>
+            <div className="masterDetailField"><span>Wajib Ganti Password</span><strong>{row.forcePasswordChange ? "Ya" : "Tidak"}</strong></div>
             <div className="masterDetailField"><span>Catatan</span><strong>{row.notes || "-"}</strong></div>
           </div>
         </div>
@@ -4123,7 +4196,7 @@ function clearAuthCallbackUrl() {
   window.history.replaceState({}, document.title, window.location.pathname)
 }
 
-function PasswordRecoveryPage({ email, onCancel, onComplete }: { email?: string; onCancel: () => void; onComplete: () => Promise<void> | void }) {
+function PasswordRecoveryPage({ email, forced, onCancel, onComplete }: { email?: string; forced?: boolean; onCancel: () => void; onComplete: () => Promise<void> | void }) {
   const [password, setPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
@@ -4134,13 +4207,10 @@ function PasswordRecoveryPage({ email, onCancel, onComplete }: { email?: string;
     event.preventDefault()
     setErrorMessage("")
 
-    if (password.length < 8) {
-      setErrorMessage("Password minimal 8 karakter.")
-      return
-    }
+    const validationErrors = validateManualPassword(password, confirmPassword)
 
-    if (password !== confirmPassword) {
-      setErrorMessage("Konfirmasi password belum sama.")
+    if (validationErrors.length > 0) {
+      setErrorMessage(validationErrors.join(" "))
       return
     }
 
@@ -4149,6 +4219,7 @@ function PasswordRecoveryPage({ email, onCancel, onComplete }: { email?: string;
       const { error } = await supabase.auth.updateUser({ password })
 
       if (error) throw error
+      await invokeAppUsersFunction(forced ? "complete_password_change" : "complete_email_password_link", {})
       clearAuthCallbackUrl()
       await onComplete()
     } catch (error) {
@@ -4166,9 +4237,9 @@ function PasswordRecoveryPage({ email, onCancel, onComplete }: { email?: string;
         </span>
         <div className="loginHeading">
           <p className="loginEyebrow">Password Access</p>
-          <h1>Buat Password Baru</h1>
+          <h1>{forced ? "Ganti Password Wajib" : "Buat Password Baru"}</h1>
         </div>
-        <p className="loginSub">Masukkan password baru untuk akun DMS{email ? ` ${email}` : ""}.</p>
+        <p className="loginSub">{forced ? "Password sementara dari admin wajib diganti sebelum masuk dashboard." : "Masukkan password baru untuk akun DMS"}{email ? ` ${email}` : ""}.</p>
 
         <form className="loginForm" onSubmit={handleSubmit}>
           {errorMessage && (
@@ -4182,7 +4253,7 @@ function PasswordRecoveryPage({ email, onCancel, onComplete }: { email?: string;
             <label htmlFor="new-password">Password Baru</label>
             <div className="inputWithIcon">
               <KeyRound size={17} />
-              <input id="new-password" type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Minimal 8 karakter" autoComplete="new-password" required />
+              <input id="new-password" type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Minimal 12 karakter" autoComplete="new-password" required />
               <button
                 type="button"
                 onClick={() => setShowPassword((value) => !value)}
@@ -4368,6 +4439,17 @@ export function App() {
 
   if (!accessProfile || accessProfile.status !== "active") {
     return <AccessDeniedPage error={authError} profile={accessProfile} onLogout={handleLogout} />
+  }
+
+  if (accessProfile.forcePasswordChange) {
+    return (
+      <PasswordRecoveryPage
+        email={session.user.email}
+        forced
+        onCancel={handleLogout}
+        onComplete={handlePasswordRecoveryComplete}
+      />
+    )
   }
 
   return (

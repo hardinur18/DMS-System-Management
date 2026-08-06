@@ -21,6 +21,7 @@ export function ConfirmDialog({
   confirmLabel = "Konfirmasi",
   cancelLabel = "Batal",
   loading,
+  className,
   children,
   onClose,
   onConfirm,
@@ -34,6 +35,7 @@ export function ConfirmDialog({
   confirmLabel?: string
   cancelLabel?: string
   loading?: boolean
+  className?: string
   children?: ReactNode
   onClose: () => void
   onConfirm: () => void
@@ -43,7 +45,7 @@ export function ConfirmDialog({
   return (
     <div className="dialogBackdrop confirmDialogBackdrop" role="presentation" onMouseDown={onClose}>
       <section
-        className={clsx("dialogPanel confirmDialog", tone)}
+        className={clsx("dialogPanel confirmDialog", tone, className)}
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="confirm-dialog-title"

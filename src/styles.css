@@ -1680,13 +1680,17 @@ button {
   border-radius: 30px;
 }
 
+.passwordDialog {
+  width: min(560px, 100%);
+}
+
 .masterDetailDialog {
   width: min(780px, 100%);
 }
 
 .inviteDialog,
 .masterDataDialog {
-  width: min(760px, 100%);
+  width: min(920px, 100%);
 }
 
 .confirmDialogClose {
@@ -1852,6 +1856,64 @@ button {
   gap: 10px;
   margin-top: 12px;
   text-align: left;
+}
+
+.passwordManualToolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.passwordManualToolbar span {
+  color: #64748b;
+  font-size: 0.74rem;
+  font-weight: 680;
+  line-height: 1.4;
+}
+
+.compactButton {
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 14px;
+  font-size: 0.76rem;
+}
+
+.passwordStrength {
+  display: grid;
+  gap: 6px;
+}
+
+.passwordStrength > span {
+  position: relative;
+  display: block;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e7edf5;
+}
+
+.passwordStrength i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #fb7185, #f59e0b);
+  transition: width 180ms ease, background 180ms ease;
+}
+
+.passwordStrength.medium i {
+  background: linear-gradient(90deg, #f59e0b, #22aec8);
+}
+
+.passwordStrength.strong i {
+  background: linear-gradient(90deg, #22c55e, #22aec8);
+}
+
+.passwordStrength small {
+  color: #718096;
+  font-size: 0.72rem;
+  font-weight: 680;
+  line-height: 1.4;
 }
 
 .dialogInlineAlert {
@@ -2126,8 +2188,8 @@ button {
 .inviteDialog .dialogForm,
 .masterDataDialog .dialogForm {
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  column-gap: 14px;
-  row-gap: 13px;
+  column-gap: 18px;
+  row-gap: 15px;
 }
 
 .inviteDialog .formField {
@@ -2143,7 +2205,7 @@ button {
 .inviteDialog .formField select,
 .masterDataDialog .formField input,
 .masterDataDialog .formField select {
-  min-height: 50px;
+  min-height: 54px;
   font-size: 0.9rem;
   font-weight: 600;
 }
@@ -3640,6 +3702,10 @@ button {
 
   .confirmDialog {
     padding: 26px 18px calc(18px + env(safe-area-inset-bottom));
+  }
+
+  .passwordManualToolbar {
+    grid-template-columns: 1fr;
   }
 
   .confirmDialogClose {
