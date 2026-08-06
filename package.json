@@ -11,7 +11,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
-    "db:migrate": "node scripts/run-migration.mjs"
+    "db:migrate": "node scripts/run-migration.mjs",
+    "supabase:functions:deploy": "supabase functions deploy app-users --project-ref heibhxempixiiqmalyuf"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.0",

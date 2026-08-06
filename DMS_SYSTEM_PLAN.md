@@ -36,6 +36,9 @@ DMS System akan dibangun sebagai sistem HRIS, attendance, dan payroll cycle cust
 - File `.env.local` dipakai untuk local development dan sudah di-ignore oleh git.
 - File `.env.example` menjadi template env tanpa credential real.
 - Schema database akan dibuat setelah struktur Master Data, User, Role, dan Permission disepakati.
+- Pengguna & Akses memakai Supabase Auth untuk login/logout dan `app_users` sebagai access profile.
+- Invite/reset password production harus lewat Edge Function `supabase/functions/app-users`, bukan langsung dari browser.
+- RLS production untuk `app_users` hanya diaplikasikan setelah Edge Function deploy dan `VITE_USE_APP_USERS_FUNCTION=true`.
 
 ## Fokus Tahap Pertama: Management App
 
@@ -120,6 +123,10 @@ Management App menjadi pondasi karena semua aturan bisnis, master data, dan payr
     - Role employee.
     - Akses per modul.
     - Audit login dan aktivitas penting.
+    - Login/logout wajib melalui Supabase Auth.
+    - User harus punya `app_users.status = active`.
+    - Menu dan routing management mengikuti permission role.
+    - Admin tidak melihat password user; reset/setup password dikirim lewat email link.
 
 ## Employee App
 

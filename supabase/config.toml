@@ -1,0 +1,4 @@
+project_id = "heibhxempixiiqmalyuf"
+
+[functions.app-users]
+verify_jwt = false

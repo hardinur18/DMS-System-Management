@@ -122,6 +122,7 @@ Komponen yang perlu dibuat sejak awal:
 - `DateRangeFilter`
 - `SearchInput`
 - `ActionMenu`
+- `ConfirmDialog`
 
 ## Modul UI Form
 
@@ -132,6 +133,17 @@ Form DMS memakai foundation reusable di `src/components/form-field.tsx`:
 - `SelectFormField` untuk dropdown native yang sudah distyling ulang.
 - `DateFormField` untuk field tanggal dengan kalender custom.
 - `DatePickerField` berada di `src/components/date-picker-field.tsx` dan menggantikan native browser date picker.
+- `SwitchFormField` untuk status aktif/nonaktif dengan animasi switch.
+
+## Modul UI Validasi
+
+Validasi aksi memakai `ConfirmDialog` di `src/components/confirm-dialog.tsx`.
+
+- Jangan memakai `window.confirm` atau alert native browser.
+- Gunakan tone `danger` untuk hapus data.
+- Dialog wajib menampilkan judul aksi, deskripsi konsekuensi, tombol batal, tombol konfirmasi, dan preview data bila aksinya menyasar record tertentu.
+- Mobile mengikuti pola bottom sheet DMS.
+- Untuk master data, aksi destruktif default adalah nonaktif/arsip, bukan hard delete.
 
 Standar dialog form:
 
@@ -150,6 +162,9 @@ Komponen operasional reusable:
 - Card filter memakai `OperationalFilterPanel` di `src/components/operational-page.tsx`.
 - Tab kategori memakai `CategoryTabs` di `src/components/category-tabs.tsx`.
 - Table wrapper memakai `OperationalTableCard` di `src/components/operational-page.tsx`.
+- Data table memakai `TableText`, `TableNumberCell`, `RowActionMenu`, dan `RowActionMenuItem` di `src/components/data-table.tsx`.
+- Row table yang membuka detail memakai `ClickableTableRow` di `src/components/data-table.tsx`.
+- Pagination table memakai `DataTablePagination` di `src/components/data-table.tsx`.
 
 Standar tab kategori:
 
@@ -157,6 +172,78 @@ Standar tab kategori:
 - Mobile memakai horizontal scroll tanpa scrollbar visual.
 - Active state memakai border, soft gradient layer, shadow kecil, dan count badge aktif.
 - Tab tidak boleh dibungkus card tambahan bila hanya berfungsi sebagai selector ringan.
+
+## Master Data Form Mapping
+
+Form Master Data harus mengikuti kategori aktif:
+
+- Role Management: nama role, kode otomatis, level akses, deskripsi, status.
+- Divisi: nama divisi, kode otomatis, deskripsi divisi, status.
+- Jabatan: nama jabatan, kode otomatis, divisi terkait, deskripsi jabatan, status.
+- Shift: nama shift, kode otomatis, jam mulai, jam selesai, catatan shift, status.
+- Lokasi Kerja: nama lokasi, kode otomatis, alamat, latitude, longitude, radius meter, status.
+- Komponen Gaji: nama komponen, kode otomatis, jenis komponen, deskripsi komponen, status.
+
+Tombol tambah data harus mengikuti tab aktif. Jika tab `Semua` aktif, default form boleh memakai kategori `Divisi`.
+Semua kategori memiliki `Urutan Dropdown` untuk mengatur prioritas tampilan data pilihan.
+Form wajib menampilkan panel validasi bila input domain tidak valid, seperti radius di luar batas, koordinat tidak lengkap, level role bukan angka positif, atau shift tanpa jam lengkap.
+
+## Master Data Table Mapping
+
+Table Master Data memakai kolom adaptif berdasarkan tab aktif:
+
+- Semua: nama data + kode, kategori, detail, dipakai di, status.
+- Role Management: nama role + kode, level akses, permission scope, status.
+- Divisi: nama divisi + kode, fungsi divisi, dipakai di, status.
+- Jabatan: nama jabatan + kode, divisi, deskripsi jabatan, status.
+- Shift: nama shift + kode, jam kerja, catatan, status.
+- Lokasi Kerja: nama lokasi + kode, radius GPS, koordinat/alamat, status.
+- Komponen Gaji: nama komponen + kode, jenis, aturan, status.
+
+Kolom aksi wajib memakai menu titik tiga vertikal, bukan tombol teks inline.
+Klik baris table membuka detail record. Klik button, link, input, atau action menu di dalam row tidak boleh membuka detail.
+Action menu dapat berisi edit, lihat maps, naikkan/turunkan urutan, dan aktif/nonaktif. Menu harus floating di atas table, tidak boleh tenggelam di dalam scroller.
+Table registry maksimal menampilkan 50 baris per halaman. Footer table wajib menyediakan pilihan jumlah baris dan navigasi halaman berikut/sebelumnya.
+
+Untuk kategori `Lokasi Kerja`, cell koordinat/radius dapat memiliki icon lokasi kecil. Klik icon atau menu `Lihat Maps` membuka dialog preview peta internal yang menampilkan pin lokasi, radius absensi, koordinat, alamat, copy koordinat, dan link ke Google Maps.
+
+Master Data tidak memakai KPI card besar. Rekapan data ditampilkan sebagai inline stats kecil di bawah subtitle halaman agar halaman tetap ringan dan fokus ke filter, tab, dan registry table.
+
+Master Data memakai `sort_order` di database. Urutan table/dropdown harus mengikuti `sort_order`, lalu fallback ke kode atau level.
+Feedback create/update/reorder/status memakai toast sukses/error. Error duplicate dari Supabase wajib diterjemahkan ke bahasa user.
+Audit log ditulis setelah aksi create, update, reorder, aktif, dan nonaktif berhasil.
+RLS production tersedia di migration `20260806000100_master_data_production_rls.sql` dan hanya diterapkan setelah Supabase Auth + bootstrap `app_users` siap.
+
+## Pengguna & Akses
+
+Page Pengguna & Akses memakai data live Supabase:
+
+- User profile berasal dari `app_users`.
+- Login/logout app memakai Supabase Auth.
+- User wajib punya profile `app_users` yang terhubung ke `auth.users`.
+- Access guard hanya mengizinkan status `active`.
+- Status `invited`, `locked`, atau email tanpa profile harus ditolak sebelum masuk dashboard.
+- Dropdown role berasal dari Master Data `roles`.
+- Dropdown divisi berasal dari Master Data `divisions`.
+- Table memakai `ClickableTableRow`, `RowActionMenu`, dan `DataTablePagination`.
+- Form invite/edit memakai dialog foundation dan validasi form.
+- Lock/unlock/delete memakai `ConfirmDialog`.
+- Create, update, delete, lock, dan unlock menulis `audit_logs`.
+- Buat/reset password memakai Supabase Auth email link. Admin tidak boleh melihat atau menentukan password user.
+- Link buat/reset password diarahkan ke `?flow=reset-password` dan wajib menampilkan form `Buat Password Baru` sebelum user masuk dashboard.
+- Setelah password disimpan, app memeriksa ulang `app_users`; hanya status `active` yang boleh lanjut.
+- Page `Profil Saya` wajib menampilkan profile login aktif, role, divisi, security session, reset password, dan tombol logout.
+- Logout tersedia dari sidebar user card, topbar mobile, dan page profil. Jangan bergantung pada tombol floating tersembunyi.
+- Toast sukses/error wajib dipakai untuk feedback user.
+
+Production readiness:
+
+- Ikuti checklist di `docs/SUPABASE_AUTH_STEPS.md`.
+- Deploy Edge Function `supabase/functions/app-users` sebelum mengaktifkan mode production user CRUD.
+- Set Function secrets `SUPABASE_SERVICE_ROLE_KEY` dan `APP_SITE_URL`.
+- Set frontend env `VITE_USE_APP_USERS_FUNCTION=true` setelah function deployed.
+- Setelah function mode aktif dan owner bisa login, apply migration `20260806000500_app_users_production_rls.sql`.
+- Jangan apply migration production RLS saat frontend masih memakai dev direct CRUD.
 
 ## Token Visual Awal
 

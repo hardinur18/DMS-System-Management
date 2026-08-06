@@ -20,6 +20,7 @@ export function OperationalPageHeader({
   eyebrow,
   icon: Icon,
   actions,
+  meta,
   className,
 }: {
   title: string
@@ -27,6 +28,7 @@ export function OperationalPageHeader({
   eyebrow?: string
   icon?: LucideIcon
   actions?: ReactNode
+  meta?: ReactNode
   className?: string
 }) {
   return (
@@ -40,6 +42,7 @@ export function OperationalPageHeader({
         )}
         <h1>{title}</h1>
         {subtitle && <p>{subtitle}</p>}
+        {meta && <div className="topbarMeta">{meta}</div>}
       </div>
       {actions && <div className="topbarActions">{actions}</div>}
     </section>
