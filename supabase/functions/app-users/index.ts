@@ -122,7 +122,30 @@ Deno.serve(async (request) => {
       assertPayload(payload.roleId, "Role wajib dipilih.")
       assertPayload(payload.divisionId, "Divisi wajib dipilih.")
 
+      if (action === "update" && payload.id === actor.id) {
+        const nextStatus = payload.status || actor.status
+        assertPayload(email === actor.email, "Email akun sendiri tidak bisa diubah dari halaman user.")
+        assertPayload(payload.roleId === actor.role_id, "Role akun sendiri tidak bisa diubah dari halaman user.")
+        assertPayload(nextStatus === actor.status, "Status akun sendiri tidak bisa diubah dari halaman user.")
+      }
+
       let authUserId: string | null = null
+      let currentProfile: { id: string; auth_user_id: string | null; email: string | null } | null = null
+
+      if (action === "update") {
+        assertPayload(payload.id, "ID user wajib ada.")
+
+        const { data: profile, error: profileError } = await adminClient
+          .from("app_users")
+          .select("id, auth_user_id, email")
+          .eq("id", payload.id)
+          .single()
+
+        if (profileError) throw profileError
+        currentProfile = profile
+        authUserId = profile.auth_user_id || null
+      }
+
       const { data: existingProfile, error: existingProfileError } = await adminClient
         .from("app_users")
         .select("id, auth_user_id")
@@ -130,13 +153,21 @@ Deno.serve(async (request) => {
         .maybeSingle()
 
       if (existingProfileError) throw existingProfileError
-      authUserId = existingProfile?.auth_user_id || null
+      if (action === "create") {
+        assertPayload(!existingProfile, "Email sudah terdaftar di Pengguna & Akses.")
+        authUserId = null
+      }
+
+      if (action === "update") {
+        assertPayload(!existingProfile || existingProfile.id === payload.id, "Email sudah dipakai user lain.")
+        authUserId = authUserId || existingProfile?.auth_user_id || null
+      }
 
       if (!authUserId) {
         authUserId = await findAuthUserIdByEmail(adminClient, email)
       }
 
-      if (!authUserId) {
+      if (!authUserId && action === "create") {
         const { data: inviteData, error: inviteError } = await adminClient.auth.admin.inviteUserByEmail(email, {
           redirectTo: `${siteUrl}/?flow=reset-password`,
           data: { full_name: payload.fullName.trim(), user_code: payload.userCode },
@@ -144,6 +175,15 @@ Deno.serve(async (request) => {
 
         if (inviteError) throw inviteError
         authUserId = inviteData.user?.id || null
+      }
+
+      if (action === "update" && authUserId && currentProfile?.email && normalizeEmail(currentProfile.email) !== email) {
+        const { error: updateAuthError } = await adminClient.auth.admin.updateUserById(authUserId, {
+          email,
+          user_metadata: { full_name: payload.fullName.trim(), user_code: payload.userCode },
+        })
+
+        if (updateAuthError) throw updateAuthError
       }
 
       const profilePayload = {
@@ -189,6 +229,8 @@ Deno.serve(async (request) => {
     if (targetError) throw targetError
 
     if (action === "delete") {
+      assertPayload(target.id !== actor.id, "Akun sendiri tidak bisa dihapus.")
+
       if (target.auth_user_id) {
         const { error: deleteAuthError } = await adminClient.auth.admin.deleteUser(target.auth_user_id)
         if (deleteAuthError) throw deleteAuthError
@@ -199,6 +241,8 @@ Deno.serve(async (request) => {
     }
 
     if (action === "lock" || action === "unlock") {
+      assertPayload(target.id !== actor.id, "Status akun sendiri tidak bisa diubah.")
+
       const nextStatus = action === "lock" ? "locked" : "active"
       const { error: statusError } = await adminClient.from("app_users").update({ status: nextStatus }).eq("id", target.id)
       if (statusError) throw statusError
@@ -206,11 +250,42 @@ Deno.serve(async (request) => {
 
     if (action === "send_password_link") {
       const passwordActionType = payload.passwordActionType || (target.status === "invited" ? "setup" : "reset")
-      const { error: resetError } = await adminClient.auth.resetPasswordForEmail(target.email, {
-        redirectTo: `${siteUrl}/?flow=reset-password`,
-      })
 
-      if (resetError) throw resetError
+      let targetAuthUserId = target.auth_user_id || await findAuthUserIdByEmail(adminClient, target.email)
+
+      if (!targetAuthUserId) {
+        const { data: inviteData, error: inviteError } = await adminClient.auth.admin.inviteUserByEmail(target.email, {
+          redirectTo: `${siteUrl}/?flow=reset-password`,
+          data: { full_name: target.full_name },
+        })
+
+        if (inviteError) throw inviteError
+        targetAuthUserId = inviteData.user?.id || null
+
+        if (targetAuthUserId) {
+          const { error: linkError } = await adminClient
+            .from("app_users")
+            .update({ auth_user_id: targetAuthUserId })
+            .eq("id", target.id)
+
+          if (linkError) throw linkError
+        }
+      } else if (!target.auth_user_id) {
+        const { error: linkError } = await adminClient
+          .from("app_users")
+          .update({ auth_user_id: targetAuthUserId })
+          .eq("id", target.id)
+
+        if (linkError) throw linkError
+      }
+
+      if (targetAuthUserId) {
+        const { error: resetError } = await adminClient.auth.resetPasswordForEmail(target.email, {
+          redirectTo: `${siteUrl}/?flow=reset-password`,
+        })
+
+        if (resetError) throw resetError
+      }
 
       const timestampColumn = passwordActionType === "setup" ? "password_setup_sent_at" : "password_reset_sent_at"
       const { error: timestampError } = await adminClient
