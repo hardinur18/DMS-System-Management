@@ -148,6 +148,11 @@ Deno.serve(async (request) => {
     if (action === "complete_email_password_link") {
       const email = normalizeEmail(authData.user.email)
       const emailConfirmedAt = authData.user.email_confirmed_at || authData.user.confirmed_at || new Date().toISOString()
+      const manualPasswordAuth = authData.user.user_metadata?.dms_manual_password === true
+
+      if (manualPasswordAuth) {
+        return jsonResponse({ error: "Email belum diverifikasi lewat link. Gunakan Kirim Link setelah SMTP aktif." }, 403)
+      }
 
       const { data: profile, error: profileError } = await adminClient
         .from("app_users")
