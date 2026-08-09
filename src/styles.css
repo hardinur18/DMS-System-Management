@@ -1462,7 +1462,7 @@ button {
 
 .formSegmentedControl {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--segment-count, 3), minmax(0, 1fr));
   gap: 7px;
   padding: 6px;
   border: 1px solid rgba(15, 23, 42, 0.1);
@@ -1821,26 +1821,37 @@ button {
 .dialogBackdrop {
   position: fixed;
   inset: 0;
-  z-index: 90;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  background: rgba(6, 15, 38, 0.22);
-  backdrop-filter: blur(10px) saturate(130%);
+  z-index: 130;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow-y: auto;
+  padding: max(28px, env(safe-area-inset-top)) 24px max(28px, env(safe-area-inset-bottom));
+  background:
+    radial-gradient(circle at 78% 18%, rgba(34, 174, 202, 0.14), transparent 30%),
+    rgba(15, 23, 42, 0.34);
+  backdrop-filter: blur(14px) saturate(128%);
   animation: dialogBackdropIn 180ms ease both;
+  -webkit-overflow-scrolling: touch;
 }
 
 .employeeDialogBackdrop {
-  align-items: start;
+  width: 100vw;
+  min-height: 100vh;
+  min-height: 100dvh;
+  align-items: center;
   justify-items: center;
   overflow: hidden;
-  padding-top: max(18px, env(safe-area-inset-top));
-  padding-bottom: max(18px, env(safe-area-inset-bottom));
+  padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
+  background: rgba(148, 163, 184, 0.68);
+  backdrop-filter: none;
 }
 
 .dialogPanel {
   position: relative;
+  flex: 0 0 auto;
   width: min(500px, 100%);
+  max-height: calc(100dvh - 56px);
   overflow: hidden;
   border: 1px solid var(--glass-border);
   border-radius: var(--ops-radius);
@@ -1860,7 +1871,54 @@ button {
 }
 
 .masterDetailDialog {
+  display: flex;
   width: min(780px, 100%);
+  flex-direction: column;
+}
+
+.userDetailDialog {
+  width: min(760px, calc(100vw - 48px));
+  max-height: min(820px, calc(100dvh - 56px));
+  border-radius: 30px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow:
+    0 38px 90px -42px rgba(7, 24, 74, 0.84),
+    0 0 0 1px rgba(255, 255, 255, 0.7) inset;
+}
+
+.userDetailDialog .masterDetailHeader {
+  flex: 0 0 auto;
+  padding: 22px 24px 18px;
+  background: #ffffff;
+}
+
+.userDetailDialog .masterDetailBody {
+  overflow-y: auto;
+  padding: 18px 24px 12px;
+  background: linear-gradient(180deg, #ffffff, #fbfdff);
+  -webkit-overflow-scrolling: touch;
+}
+
+.userDetailDialog .masterDetailGrid {
+  gap: 9px;
+}
+
+.userDetailDialog .masterDetailField {
+  min-height: 72px;
+  padding: 12px 14px;
+  border-color: rgba(15, 23, 42, 0.07);
+  border-radius: 16px;
+  background: #fbfdff;
+}
+
+.userDetailDialog .masterDetailActions {
+  position: sticky;
+  bottom: 0;
+  flex: 0 0 auto;
+  padding: 12px 24px 22px;
+  border-top: 1px solid rgba(15, 23, 42, 0.07);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.82), #ffffff 34%);
+  box-shadow: 0 -22px 42px -38px rgba(7, 24, 74, 0.55);
 }
 
 .inviteDialog,
@@ -1871,15 +1929,19 @@ button {
 
 .employeeDialog {
   display: flex;
-  width: min(1180px, calc(100vw - 48px));
+  width: min(960px, calc(100vw - 48px));
   max-height: calc(100dvh - 40px);
   flex-direction: column;
   overflow: hidden;
+  box-shadow:
+    0 0 42px -28px rgba(7, 24, 74, 0.46),
+    0 32px 78px -38px rgba(7, 24, 74, 0.78),
+    0 0 0 1px rgba(255, 255, 255, 0.72) inset;
 }
 
 .employeeDialog .dialogCompactHeader {
   flex: 0 0 auto;
-  padding: 20px 24px 14px;
+  padding: 22px 28px 16px;
   border-bottom: 1px solid var(--ops-line);
   animation: employeeFormEnter 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
@@ -1896,9 +1958,9 @@ button {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 11px 14px;
-  padding: 14px 24px 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 18px;
+  padding: 18px 28px 18px;
   overscroll-behavior: contain;
   scroll-behavior: smooth;
   overflow-anchor: none;
@@ -2444,9 +2506,9 @@ button {
 }
 
 .employeeDialog .dialogForm.employeeFormGrid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  column-gap: 14px;
-  row-gap: 11px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 18px;
+  row-gap: 14px;
 }
 
 .employeeFormFull,
@@ -2456,8 +2518,1551 @@ button {
   min-width: 0;
 }
 
+.employeePhotoField {
+  display: grid;
+  position: relative;
+  grid-column: 1 / -1;
+  grid-template-columns: 64px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 13px;
+  min-height: 82px;
+  padding: 9px 14px;
+  overflow: visible;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 20px;
+  background: #ffffff;
+  box-shadow: 0 18px 42px -36px rgba(7, 24, 74, 0.5);
+}
+
+.employeePhotoPreview {
+  display: grid;
+  position: relative;
+  width: 64px;
+  height: 64px;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(34, 174, 202, 0.22);
+  border-radius: 999px;
+  color: var(--cyan-strong);
+  background: linear-gradient(145deg, rgba(234, 247, 251, 0.92), rgba(255, 255, 255, 0.98));
+  box-shadow: 0 16px 30px -24px rgba(7, 24, 74, 0.78);
+  cursor: pointer;
+  outline: 0;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease, background 160ms ease;
+}
+
+.employeePhotoPreview:hover,
+.employeePhotoPreview:focus-visible {
+  border-color: rgba(34, 174, 202, 0.48);
+  background: linear-gradient(145deg, rgba(219, 243, 249, 0.95), rgba(255, 255, 255, 1));
+  box-shadow: 0 20px 34px -24px rgba(7, 24, 74, 0.82), 0 0 0 4px rgba(34, 174, 202, 0.1);
+  transform: translateY(-1px);
+}
+
+.employeePhotoPreview img,
+.employeeMiniAvatar img,
+.employeeDetailAvatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.employeePhotoEmptyIcon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(34, 174, 202, 0.1);
+}
+
+.employeePhotoOverlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #ffffff;
+  background: rgba(7, 24, 74, 0.46);
+  font-size: 0.68rem;
+  font-weight: 820;
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+
+.employeePhotoPreview:hover .employeePhotoOverlay,
+.employeePhotoPreview:focus-visible .employeePhotoOverlay {
+  opacity: 1;
+}
+
+.employeePhotoRemove {
+  position: absolute;
+  top: 5px;
+  left: 60px;
+  z-index: 2;
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border: 2px solid #ffffff;
+  border-radius: 999px;
+  color: #ffffff;
+  background: #f43f5e;
+  box-shadow: 0 12px 24px -14px rgba(190, 18, 60, 0.82);
+  cursor: pointer;
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+.employeePhotoRemove:hover,
+.employeePhotoRemove:focus-visible {
+  outline: 0;
+  transform: translateY(-1px) scale(1.04);
+  box-shadow: 0 16px 28px -14px rgba(190, 18, 60, 0.9);
+}
+
+.employeePhotoControl {
+  display: grid;
+  align-content: center;
+  min-width: 0;
+  gap: 3px;
+}
+
+.employeePhotoControl > span {
+  color: var(--cyan-strong);
+  font-size: 0.66rem;
+  font-weight: 820;
+  text-transform: uppercase;
+}
+
+.employeePhotoControl > strong {
+  overflow: hidden;
+  color: var(--ops-ink);
+  font-size: 0.86rem;
+  font-weight: 820;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.employeePhotoControl > small {
+  color: var(--ops-muted);
+  font-size: 0.65rem;
+  font-weight: 580;
+  line-height: 1.32;
+}
+
+.employeePhotoControl input[type="file"] {
+  display: none;
+}
+
+.employeePhotoActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-self: center;
+  justify-self: end;
+  gap: 8px;
+  padding-top: 0;
+}
+
+.compactButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 13px;
+  font-size: 0.72rem;
+}
+
+.dangerGhostButton {
+  color: #e11d48;
+  border-color: rgba(225, 29, 72, 0.16);
+}
+
+.dangerGhostButton:hover:not(:disabled) {
+  color: #be123c;
+  border-color: rgba(225, 29, 72, 0.28);
+  background: rgba(255, 241, 242, 0.86);
+}
+
+.fieldAttendanceDialog {
+  width: min(620px, calc(100vw - 32px));
+  overflow: hidden;
+}
+
+.fieldAttendanceHeader {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid var(--ops-line);
+}
+
+.fieldAttendanceHeader h2 {
+  margin: 2px 0 0;
+  color: var(--ops-ink);
+  font-size: 1.2rem;
+  font-weight: 860;
+  letter-spacing: 0;
+  line-height: 1.15;
+}
+
+.fieldAttendanceHeader p {
+  margin: 5px 0 0;
+  color: var(--ops-muted);
+  font-size: 0.78rem;
+  font-weight: 580;
+  line-height: 1.42;
+}
+
+.fieldAttendanceIcon,
+.fieldAttendanceCardIcon {
+  display: grid;
+  place-items: center;
+  color: var(--cyan-strong);
+  background: linear-gradient(145deg, rgba(234, 247, 251, 0.96), rgba(255, 255, 255, 0.98));
+  box-shadow: 0 18px 34px -28px rgba(7, 24, 74, 0.72);
+}
+
+.fieldAttendanceIcon {
+  width: 58px;
+  height: 58px;
+  border: 1px solid rgba(34, 174, 202, 0.16);
+  border-radius: 20px;
+  overflow: hidden;
+}
+
+.fieldAttendanceIcon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.fieldAttendanceForm {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+  padding: 20px 24px 24px;
+}
+
+.fieldAttendanceForm .formSegmentedControl {
+  min-height: 50px;
+  padding: 5px;
+  border-radius: 18px;
+}
+
+.fieldAttendanceForm .formSegmentedOption {
+  border-radius: 14px;
+}
+
+.fieldAttendanceCard {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 70px;
+  padding: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(244, 252, 255, 0.86));
+  box-shadow: 0 18px 38px -34px rgba(7, 24, 74, 0.62);
+}
+
+.fieldAttendanceSignalCard.ready {
+  border-color: rgba(16, 185, 129, 0.28);
+  background: linear-gradient(135deg, rgba(240, 253, 244, 0.96), rgba(244, 252, 255, 0.86));
+}
+
+.fieldAttendanceMeta {
+  display: block;
+  grid-column: 2 / -1;
+  min-width: 0;
+  color: #8a98ad;
+  font-size: 0.64rem;
+  font-weight: 680;
+  line-height: 1.35;
+}
+
+.fieldAttendanceMeta span {
+  display: inline;
+}
+
+.fieldAttendanceMeta span + span::before {
+  color: rgba(138, 152, 173, 0.72);
+  content: " · ";
+}
+
+.fieldAttendanceCardIcon {
+  width: 46px;
+  height: 46px;
+  border: 1px solid rgba(34, 174, 202, 0.14);
+  border-radius: 16px;
+}
+
+.fieldAttendanceCardCopy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.fieldAttendanceCardCopy strong {
+  overflow: hidden;
+  color: var(--ops-ink);
+  font-size: 0.84rem;
+  font-weight: 820;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fieldAttendanceCardCopy span {
+  overflow: hidden;
+  color: var(--ops-muted);
+  font-size: 0.72rem;
+  font-weight: 620;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fieldAttendanceGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.fieldAttendanceDialog .formField {
+  gap: 6px;
+}
+
+.fieldAttendanceDialog .formField label {
+  font-size: 0.74rem;
+}
+
+.fieldAttendanceDialog .formField input,
+.fieldAttendanceDialog .formField select {
+  min-height: 50px;
+  border-radius: 18px;
+  font-size: 0.88rem;
+  font-weight: 620;
+}
+
+.fieldAttendanceAlert {
+  margin: 0;
+}
+
+.fieldAttendanceDialog .dialogActions {
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.4fr);
+}
+
+.fieldFaceScreen {
+  display: grid;
+  gap: 16px;
+  overflow-y: auto;
+  padding: 22px 24px 24px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.fieldFacePreview {
+  position: relative;
+  display: grid;
+  min-height: 260px;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(34, 174, 202, 0.2);
+  border-radius: 28px;
+  background:
+    radial-gradient(circle at 50% 40%, rgba(34, 174, 202, 0.18), transparent 34%),
+    linear-gradient(135deg, rgba(9, 34, 86, 0.94), rgba(7, 153, 183, 0.78));
+  box-shadow: 0 24px 58px -42px rgba(7, 24, 74, 0.86);
+}
+
+.fieldFacePreview video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+
+.fieldFaceScanFrame {
+  position: relative;
+  display: grid;
+  width: 166px;
+  height: 166px;
+  place-items: center;
+  border: 2px solid rgba(255, 255, 255, 0.78);
+  border-radius: 999px;
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 0 0 18px rgba(255, 255, 255, 0.06);
+}
+
+.fieldFaceScanFrame::before,
+.fieldFaceScanFrame::after {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  border-color: #ffffff;
+  content: "";
+}
+
+.fieldFaceScanFrame::before {
+  top: 24px;
+  left: 24px;
+  border-top: 3px solid;
+  border-left: 3px solid;
+  border-radius: 8px 0 0;
+}
+
+.fieldFaceScanFrame::after {
+  right: 24px;
+  bottom: 24px;
+  border-right: 3px solid;
+  border-bottom: 3px solid;
+  border-radius: 0 0 8px;
+}
+
+.fieldFaceScanFrame i {
+  position: absolute;
+  inset: 28px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, transparent 0%, rgba(255, 255, 255, 0.38) 48%, transparent 100%);
+  animation: faceScanSweep 1.5s ease-in-out infinite;
+}
+
+.fieldFacePulse {
+  position: absolute;
+  inset: auto 22px 22px;
+  height: 5px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.9), transparent);
+  animation: fieldFaceShimmer 1.8s ease-in-out infinite;
+}
+
+.fieldFaceCopy {
+  display: grid;
+  gap: 5px;
+  text-align: center;
+}
+
+.fieldFaceCopy h3 {
+  margin: 0;
+  color: var(--ops-ink);
+  font-size: 1.08rem;
+  font-weight: 860;
+  line-height: 1.12;
+}
+
+.fieldFaceCopy p {
+  max-width: 440px;
+  margin: 0 auto;
+  color: var(--ops-muted);
+  font-size: 0.78rem;
+  font-weight: 620;
+  line-height: 1.4;
+}
+
+.fieldFaceChecks {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.fieldFaceChecks span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 14px;
+  color: #526179;
+  background: rgba(248, 251, 255, 0.9);
+  font-size: 0.68rem;
+  font-weight: 760;
+  text-align: center;
+}
+
+.fieldFaceActions {
+  position: static;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.faceEnrollmentDialog {
+  display: flex;
+  width: min(620px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+  border-radius: 30px;
+}
+
+.faceEnrollmentBody {
+  display: grid;
+  gap: 16px;
+  overflow-y: auto;
+  padding: 22px 26px 26px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.faceEnrollmentTargetCard {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 3px 10px;
+  justify-self: center;
+  width: min(360px, 100%);
+  padding: 12px 14px;
+  border: 1px solid rgba(34, 174, 202, 0.16);
+  border-radius: 18px;
+  background: linear-gradient(145deg, rgba(235, 251, 254, 0.72), rgba(255, 255, 255, 0.96));
+  box-shadow: 0 18px 42px -34px rgba(7, 24, 74, 0.45);
+}
+
+.faceEnrollmentTargetCard span {
+  grid-row: span 2;
+  display: inline-grid;
+  min-width: 64px;
+  height: 42px;
+  place-items: center;
+  padding: 0 10px;
+  border-radius: 14px;
+  color: #0789a0;
+  background: rgba(226, 248, 253, 0.92);
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.faceEnrollmentTargetCard strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ops-ink);
+  font-size: 0.86rem;
+  font-weight: 880;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.faceEnrollmentTargetCard small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ops-muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.faceEnrollmentCamera {
+  position: relative;
+  display: grid;
+  width: min(360px, 78vw);
+  aspect-ratio: 3 / 4;
+  place-self: center;
+  overflow: visible;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.faceEnrollmentCamera video,
+.faceEnrollmentCamera img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  clip-path: ellipse(48% 48.5% at 50% 50%);
+  filter: saturate(1.04) contrast(1.02);
+}
+
+.faceEnrollmentCamera video {
+  transform: scaleX(-1);
+}
+
+.faceEnrollmentCamera.capturing {
+  animation: faceCaptureFlash 260ms ease;
+}
+
+.faceEnrollmentCamera.scanning::before {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  content: "";
+  border-radius: 999px;
+  border: 0;
+  clip-path: ellipse(48% 48.5% at 50% 50%);
+  box-shadow:
+    inset 0 0 0 16px var(--face-scan-soft, rgba(244, 63, 94, 0.08)),
+    0 0 34px var(--face-scan-glow, rgba(244, 63, 94, 0.22));
+  animation: faceScanPulse 1.2s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.faceEnrollmentFrame {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  border: 0;
+  border-radius: 999px;
+  clip-path: ellipse(48% 48.5% at 50% 50%);
+  box-shadow:
+    inset 0 0 0 999px rgba(8, 19, 45, 0.1),
+    inset 0 0 0 16px var(--face-scan-soft, rgba(244, 63, 94, 0.08));
+}
+
+.faceEnrollmentOvalProgress {
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.faceEnrollmentOvalTrack,
+.faceEnrollmentOvalBar {
+  fill: none;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.faceEnrollmentOvalTrack {
+  stroke: rgba(255, 255, 255, 0.9);
+  stroke-width: 2.8;
+}
+
+.faceEnrollmentOvalBar {
+  stroke: var(--face-scan-color, #f43f5e);
+  stroke-width: 4.4;
+  stroke-dasharray: 100;
+  stroke-dashoffset: var(--face-progress, 100);
+  filter: drop-shadow(0 0 8px var(--face-scan-glow, rgba(244, 63, 94, 0.36)));
+  transition:
+    stroke 180ms ease,
+    stroke-dashoffset 80ms linear,
+    filter 180ms ease;
+}
+
+.faceEnrollmentCamera.tone-danger,
+.faceEnrollmentStatusPanel.tone-danger {
+  --face-scan-color: #f43f5e;
+  --face-scan-soft: rgba(244, 63, 94, 0.11);
+  --face-scan-glow: rgba(244, 63, 94, 0.36);
+}
+
+.faceEnrollmentCamera.tone-warning,
+.faceEnrollmentStatusPanel.tone-warning {
+  --face-scan-color: #f59e0b;
+  --face-scan-soft: rgba(245, 158, 11, 0.13);
+  --face-scan-glow: rgba(245, 158, 11, 0.38);
+}
+
+.faceEnrollmentCamera.tone-success,
+.faceEnrollmentStatusPanel.tone-success {
+  --face-scan-color: #1fc46a;
+  --face-scan-soft: rgba(31, 196, 106, 0.13);
+  --face-scan-glow: rgba(31, 196, 106, 0.42);
+}
+
+.faceEnrollmentGuide {
+  position: absolute;
+  z-index: 4;
+  right: 16px;
+  bottom: 16px;
+  left: 16px;
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  border-radius: 999px;
+  color: #ffffff;
+  background: rgba(7, 24, 74, 0.54);
+  font-size: 0.74rem;
+  font-weight: 780;
+  backdrop-filter: blur(12px);
+}
+
+.faceEnrollmentProgress {
+  position: absolute;
+  z-index: 4;
+  right: 20px;
+  bottom: 58px;
+  left: 20px;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.36);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+
+.faceEnrollmentProgress span {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #1fc46a, #22aeca);
+  transition: width 320ms ease;
+}
+
+.faceEnrollmentChecklist {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.faceEnrollmentChecklist span {
+  display: flex;
+  min-height: 54px;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 16px;
+  color: #526179;
+  background: rgba(248, 251, 255, 0.92);
+  font-size: 0.72rem;
+  font-weight: 760;
+  line-height: 1.28;
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    color 180ms ease,
+    transform 180ms ease;
+}
+
+.faceEnrollmentChecklist svg {
+  flex: 0 0 auto;
+  color: #0789a0;
+}
+
+.faceEnrollmentChecklist span.active {
+  border-color: rgba(34, 174, 202, 0.3);
+  color: #07182e;
+  background: linear-gradient(135deg, rgba(234, 250, 254, 0.98), rgba(255, 255, 255, 0.94));
+  transform: translateY(-1px);
+}
+
+.faceEnrollmentChecklist span.done {
+  border-color: rgba(31, 196, 106, 0.22);
+  color: #0f8b50;
+  background: rgba(237, 252, 244, 0.92);
+}
+
+.faceEnrollmentStatusPanel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--face-scan-soft, rgba(34, 174, 202, 0.18));
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(235, 251, 254, 0.72), rgba(255, 255, 255, 0.96));
+  box-shadow: 0 18px 44px -36px rgba(7, 24, 74, 0.48), inset 0 1px 0 rgba(255, 255, 255, 0.82);
+}
+
+.faceEnrollmentStatusPanel strong,
+.faceEnrollmentStatusPanel small {
+  display: block;
+}
+
+.faceEnrollmentStatusPanel strong {
+  margin-top: 2px;
+  color: #07182e;
+  font-size: 0.88rem;
+  font-weight: 850;
+  line-height: 1.25;
+}
+
+.faceEnrollmentStatusPanel small {
+  margin-top: 3px;
+  color: #66758d;
+  font-size: 0.72rem;
+  font-weight: 740;
+  line-height: 1.3;
+}
+
+.faceEnrollmentCounter {
+  display: inline-grid;
+  width: 46px;
+  height: 46px;
+  place-items: center;
+  border-radius: 17px;
+  color: #0789a0;
+  background: rgba(226, 248, 253, 0.9);
+  font-size: 0.86rem;
+  font-weight: 900;
+  box-shadow: inset 0 0 0 1px rgba(34, 174, 202, 0.14);
+}
+
+.faceEnrollmentSamples {
+  display: inline-flex;
+  width: max-content;
+  align-items: center;
+  justify-self: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 999px;
+  background: rgba(248, 251, 255, 0.78);
+}
+
+.faceEnrollmentSamples span {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 999px;
+  color: #728098;
+  background: rgba(248, 251, 255, 0.86);
+  font-size: 0.68rem;
+  font-weight: 800;
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.faceEnrollmentSamples span.active {
+  border-color: rgba(34, 174, 202, 0.32);
+  color: #0789a0;
+  background: rgba(235, 251, 254, 0.92);
+  box-shadow: 0 0 0 5px rgba(34, 174, 202, 0.1);
+}
+
+.faceEnrollmentSamples span.done {
+  border-color: rgba(31, 196, 106, 0.22);
+  color: #0f8b50;
+  background: rgba(237, 252, 244, 0.92);
+}
+
+.faceEnrollmentActions {
+  position: static;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.attendanceReviewDialog {
+  display: flex;
+  width: min(820px, calc(100vw - 48px));
+  max-height: calc(100dvh - 40px);
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+  border-radius: 30px;
+}
+
+.attendanceReviewHeader {
+  position: relative;
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) 50px;
+  gap: 14px;
+  align-items: center;
+  padding: 22px 26px 18px;
+  border-bottom: 1px solid var(--ops-line);
+  background: rgba(255, 255, 255, 0.98);
+}
+
+.attendanceReviewHeaderAvatar,
+.attendanceReviewAvatar {
+  display: grid;
+  overflow: hidden;
+  place-items: center;
+  border: 1px solid rgba(34, 174, 202, 0.2);
+  border-radius: 999px;
+  color: #ffffff;
+  background: linear-gradient(135deg, #0d2a68, #0799b7);
+  font-weight: 850;
+  box-shadow: 0 18px 42px -32px rgba(7, 24, 74, 0.74);
+}
+
+.attendanceReviewHeaderAvatar {
+  width: 62px;
+  height: 62px;
+  font-size: 0.95rem;
+}
+
+.attendanceReviewHeaderAvatar img,
+.attendanceReviewAvatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.attendanceReviewHeader span:not(.attendanceReviewHeaderAvatar) {
+  color: var(--blue-ink);
+  font-size: 0.72rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.attendanceReviewHeader h2 {
+  margin: 2px 0 0;
+  color: var(--ops-ink);
+  font-size: 1.28rem;
+  font-weight: 850;
+  letter-spacing: 0;
+  line-height: 1.12;
+}
+
+.attendanceReviewHeader p {
+  margin: 5px 0 0;
+  color: var(--ops-muted);
+  font-size: 0.8rem;
+  font-weight: 640;
+  line-height: 1.35;
+}
+
+.attendanceReviewContent {
+  display: grid;
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: 14px;
+  overflow-y: auto;
+  padding: 18px 26px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.attendanceReviewActions {
+  display: grid;
+  flex: 0 0 auto;
+  grid-template-columns: 1fr 1fr 1.35fr;
+  gap: 12px;
+  padding: 16px 26px 22px;
+  border-top: 1px solid var(--ops-line);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 -18px 38px -36px rgba(7, 24, 74, 0.62);
+}
+
+.attendanceReviewActions .primaryButton,
+.attendanceReviewActions .secondaryButton {
+  min-height: 50px;
+}
+
+.attendanceMonitorDetailDialog {
+  width: min(820px, calc(100vw - 48px));
+}
+
+.payrollProcessDialog {
+  display: flex;
+  width: min(760px, calc(100vw - 48px));
+  max-height: calc(100dvh - 40px);
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+  border-radius: 30px;
+}
+
+.payrollProcessHeader {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 7px;
+  padding: 28px 30px 20px;
+  border-bottom: 1px solid var(--ops-line);
+  text-align: center;
+}
+
+.payrollProcessHeader .dialogClose {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+}
+
+.payrollProcessIcon {
+  display: grid;
+  width: 74px;
+  height: 74px;
+  place-items: center;
+  border: 1px solid rgba(34, 174, 202, 0.22);
+  border-radius: 24px;
+  color: var(--blue-ink);
+  background: linear-gradient(145deg, rgba(232, 250, 255, 0.95), rgba(255, 255, 255, 0.96));
+  box-shadow: 0 20px 48px -34px rgba(7, 24, 74, 0.72);
+}
+
+.payrollProcessHeader > span:not(.payrollProcessIcon) {
+  color: var(--blue-ink);
+  font-size: 0.73rem;
+  font-weight: 860;
+  letter-spacing: 0;
+}
+
+.payrollProcessHeader h2 {
+  margin: 0;
+  color: var(--ops-ink);
+  font-size: clamp(1.25rem, 1.7vw, 1.85rem);
+  font-weight: 860;
+  line-height: 1.08;
+}
+
+.payrollProcessHeader p {
+  max-width: 520px;
+  margin: 0;
+  color: var(--ops-muted);
+  font-size: 0.86rem;
+  font-weight: 660;
+  line-height: 1.4;
+}
+
+.payrollProcessSummary {
+  display: grid;
+  gap: 13px;
+  padding: 18px 28px 0;
+}
+
+.payrollProcessEmployee {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 13px 14px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 18px;
+  background: rgba(248, 251, 255, 0.88);
+}
+
+.payrollProcessGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.payrollProcessGrid > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 13px 14px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.84);
+}
+
+.payrollProcessGrid small,
+.payrollProcessNotes span {
+  color: #7b8aa3;
+  font-size: 0.68rem;
+  font-weight: 820;
+  text-transform: uppercase;
+}
+
+.payrollProcessGrid strong {
+  overflow: hidden;
+  color: var(--ops-ink);
+  font-size: 0.9rem;
+  font-weight: 780;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.payrollProcessGrid .payrollProcessTotal {
+  grid-column: 1 / -1;
+  border-color: rgba(34, 174, 202, 0.22);
+  background: linear-gradient(135deg, rgba(237, 252, 255, 0.92), rgba(255, 255, 255, 0.92));
+}
+
+.payrollProcessGrid .payrollProcessTotal strong {
+  font-size: 1.15rem;
+}
+
+.payrollProcessNotes {
+  display: grid;
+  gap: 8px;
+  padding: 16px 28px 0;
+}
+
+.payrollProcessNotes textarea {
+  min-height: 82px;
+  resize: vertical;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 18px;
+  padding: 14px 15px;
+  color: var(--ops-ink);
+  background: #ffffff;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 660;
+  outline: none;
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.payrollProcessNotes textarea:focus {
+  border-color: rgba(34, 174, 202, 0.55);
+  box-shadow: 0 0 0 4px rgba(34, 174, 202, 0.12);
+}
+
+.payrollProcessDialog .attendanceReviewActions {
+  grid-template-columns: 1fr 1.35fr;
+}
+
+.attendanceMonitorSnapshot {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.attendanceMonitorSnapshotItem {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 13px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 18px;
+  background:
+    linear-gradient(145deg, rgba(236, 253, 255, 0.46), rgba(255, 255, 255, 0.94)),
+    #ffffff;
+}
+
+.attendanceMonitorIcon {
+  display: inline-grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border: 1px solid rgba(34, 174, 202, 0.18);
+  border-radius: 16px;
+  color: var(--blue-ink);
+  background: rgba(232, 250, 254, 0.86);
+}
+
+.attendanceMonitorIcon.valid,
+.attendanceMonitorIcon.verified {
+  color: var(--green-ink);
+  background: var(--green-soft);
+}
+
+.attendanceMonitorIcon.failed,
+.attendanceMonitorIcon.out_of_radius {
+  color: var(--danger-ink);
+  background: var(--danger-soft);
+}
+
+.attendanceMonitorIcon.pending,
+.attendanceMonitorIcon.missing {
+  color: var(--amber-ink);
+  background: var(--amber-soft);
+}
+
+.attendanceMonitorIcon.cycle {
+  background: #ffffff;
+}
+
+.attendanceMonitorIcon.cycle .cycleRing {
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+}
+
+.attendanceMonitorSnapshotItem small,
+.attendanceMonitorSnapshotItem p {
+  margin: 0;
+  color: var(--ops-muted);
+  font-size: 0.68rem;
+  font-weight: 720;
+  line-height: 1.3;
+}
+
+.attendanceMonitorSnapshotItem strong {
+  display: block;
+  margin: 1px 0;
+  overflow: hidden;
+  color: var(--ops-ink);
+  font-size: 0.82rem;
+  font-weight: 820;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overtimeReviewDialog {
+  width: min(760px, calc(100vw - 48px));
+}
+
+.overtimeHero {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+  padding: 16px;
+  border: 1px solid rgba(34, 174, 202, 0.18);
+  border-radius: 22px;
+  background:
+    linear-gradient(135deg, rgba(34, 174, 202, 0.12), rgba(255, 255, 255, 0.9) 52%),
+    #ffffff;
+  box-shadow: 0 18px 42px -36px rgba(7, 24, 74, 0.66);
+}
+
+.overtimeHero > span {
+  display: grid;
+  width: 64px;
+  height: 64px;
+  place-items: center;
+  border: 1px solid rgba(34, 174, 202, 0.18);
+  border-radius: 22px;
+  color: var(--blue-ink);
+  background: rgba(232, 250, 254, 0.9);
+}
+
+.overtimeHero small {
+  display: block;
+  color: var(--blue-ink);
+  font-size: 0.72rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.overtimeHero strong {
+  display: block;
+  margin-top: 2px;
+  color: var(--ops-ink);
+  font-size: 1.55rem;
+  font-weight: 850;
+  line-height: 1.05;
+}
+
+.overtimeHero p {
+  margin: 5px 0 0;
+  color: var(--ops-muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.dangerSoftButton {
+  border-color: rgba(244, 63, 94, 0.22);
+  color: #e11d48;
+  background: #fff1f2;
+}
+
+.dangerSoftButton:hover,
+.dangerSoftButton:focus-visible {
+  border-color: rgba(244, 63, 94, 0.36);
+  color: #be123c;
+  background: #ffe4e6;
+}
+
+.attendanceReviewEmployeeCell {
+  display: inline-grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+}
+
+.attendanceReviewAvatar {
+  width: 42px;
+  height: 42px;
+  font-size: 0.7rem;
+}
+
+.attendanceEvidenceCell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.attendanceEvidencePill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  gap: 7px;
+  padding: 0 10px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 999px;
+  color: #64748b;
+  background: rgba(248, 250, 252, 0.84);
+  font-size: 0.72rem;
+  font-weight: 760;
+  white-space: nowrap;
+}
+
+.attendanceEvidencePill.valid {
+  border-color: rgba(16, 185, 129, 0.22);
+  color: #059669;
+  background: rgba(236, 253, 245, 0.9);
+}
+
+.attendanceEvidencePill.pending {
+  border-color: rgba(245, 158, 11, 0.28);
+  color: #b45309;
+  background: rgba(255, 251, 235, 0.92);
+}
+
+.attendanceEvidencePill.failed {
+  border-color: rgba(244, 63, 94, 0.24);
+  color: #e11d48;
+  background: rgba(255, 241, 242, 0.92);
+}
+
+.attendanceEvidenceBoard {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(230px, 0.8fr);
+  gap: 12px;
+}
+
+.attendanceEvidenceMapCard,
+.attendanceEvidenceFaceCard {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 22px;
+  background: rgba(248, 251, 255, 0.9);
+  box-shadow: 0 22px 54px -44px rgba(7, 24, 74, 0.7);
+}
+
+.attendanceEvidenceMapCard {
+  grid-template-columns: 150px minmax(0, 1fr);
+  align-items: center;
+}
+
+.attendanceEvidenceMapCard .compactButton {
+  grid-column: 2;
+  justify-self: start;
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 14px;
+  font-size: 0.76rem;
+}
+
+.attendanceEvidenceMap {
+  position: relative;
+  overflow: hidden;
+  width: 150px;
+  height: 138px;
+  border: 1px solid rgba(34, 174, 202, 0.18);
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(34, 174, 202, 0.16), transparent 18%),
+    linear-gradient(135deg, rgba(241, 245, 249, 0.98), rgba(236, 253, 255, 0.92));
+  box-shadow: 0 24px 50px -38px rgba(7, 24, 74, 0.75) inset;
+  isolation: isolate;
+}
+
+.attendanceMapGrid {
+  position: absolute;
+  inset: -30px;
+  opacity: 0.54;
+  background-image:
+    linear-gradient(rgba(15, 23, 42, 0.065) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(15, 23, 42, 0.065) 1px, transparent 1px);
+  background-size: 34px 34px;
+  transform: rotate(-5deg);
+}
+
+.attendanceMapRadius {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 1;
+  width: 76px;
+  height: 76px;
+  border: 2px solid rgba(34, 174, 202, 0.72);
+  border-radius: 999px;
+  background: rgba(34, 174, 202, 0.1);
+  transform: translate(-50%, -50%);
+  animation: mapRadiusPulse 2.4s ease-in-out infinite;
+}
+
+.attendanceMapRadius.out_of_radius,
+.attendanceMapRadius.missing {
+  border-color: rgba(244, 63, 94, 0.66);
+  background: rgba(255, 241, 242, 0.42);
+}
+
+.attendanceMapOfficePin,
+.attendanceMapUserPin {
+  position: absolute;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  color: #ffffff;
+  box-shadow: 0 16px 34px -22px rgba(7, 24, 74, 0.8);
+}
+
+.attendanceMapOfficePin {
+  top: 50%;
+  left: 50%;
+  width: 42px;
+  height: 42px;
+  border: 6px solid rgba(255, 255, 255, 0.92);
+  border-radius: 16px;
+  background: linear-gradient(135deg, #0d2a68, #0799b7);
+  transform: translate(-50%, -50%);
+}
+
+.attendanceMapUserPin {
+  top: var(--attendance-user-top, 50%);
+  left: var(--attendance-user-left, 50%);
+  width: 34px;
+  height: 34px;
+  border: 5px solid rgba(255, 255, 255, 0.94);
+  border-radius: 999px;
+  background: linear-gradient(135deg, #22c55e, #14b8a6);
+  transform: translate(-50%, -50%);
+}
+
+.attendanceMapUserPin.out_of_radius,
+.attendanceMapUserPin.missing {
+  background: linear-gradient(135deg, #fb7185, #f43f5e);
+}
+
+.attendanceMapDistance {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 3;
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  padding: 0 10px;
+  border-radius: 999px;
+  color: #0789a0;
+  background: rgba(255, 255, 255, 0.92);
+  font-size: 0.72rem;
+  font-weight: 850;
+  box-shadow: 0 14px 30px -24px rgba(7, 24, 74, 0.7);
+}
+
+.attendanceEvidenceFaceCard {
+  grid-template-columns: 82px minmax(0, 1fr);
+  align-items: center;
+}
+
+.attendanceFacePreview {
+  position: relative;
+  display: grid;
+  overflow: hidden;
+  width: 78px;
+  height: 78px;
+  place-items: center;
+  border: 1px solid rgba(34, 174, 202, 0.2);
+  border-radius: 999px;
+  color: var(--blue-ink);
+  background: linear-gradient(145deg, rgba(236, 253, 255, 0.96), rgba(255, 255, 255, 0.98));
+  box-shadow: 0 20px 44px -32px rgba(7, 24, 74, 0.78);
+}
+
+.attendanceFacePreview::after {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  width: 24px;
+  height: 24px;
+  border: 4px solid #ffffff;
+  border-radius: 999px;
+  background: #22c55e;
+  content: "";
+  box-shadow: 0 8px 18px -12px rgba(7, 24, 74, 0.75);
+}
+
+.attendanceFacePreview.empty::after {
+  background: #f59e0b;
+}
+
+.attendanceFacePreview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.attendanceEvidenceCardCopy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.attendanceEvidenceCardCopy span {
+  color: var(--blue-ink);
+  font-size: 0.7rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.attendanceEvidenceCardCopy strong {
+  overflow: hidden;
+  color: var(--ops-ink);
+  font-size: 0.9rem;
+  font-weight: 820;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attendanceEvidenceCardCopy small {
+  color: var(--ops-muted);
+  font-size: 0.72rem;
+  font-weight: 640;
+  line-height: 1.35;
+}
+
+.attendanceReviewSummary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.attendanceReviewSummary > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 12px 13px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 16px;
+  background: rgba(248, 251, 255, 0.86);
+  text-align: left;
+}
+
+.attendanceReviewSummary span {
+  color: #7b8aa3;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.attendanceReviewSummary strong {
+  overflow: hidden;
+  color: var(--ops-ink);
+  font-size: 0.82rem;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attendanceReviewSummary small {
+  overflow: hidden;
+  color: var(--ops-muted);
+  font-size: 0.68rem;
+  font-weight: 620;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attendanceReviewDialog .formField {
+  gap: 6px;
+  text-align: left;
+}
+
+.attendanceReviewDialog .formField label {
+  font-size: 0.72rem;
+}
+
+.attendanceReviewDialog .formField input {
+  min-height: 46px;
+  border-radius: 16px;
+  font-size: 0.82rem;
+}
+
 .employeeStatusField {
-  grid-column: span 2;
+  grid-column: 1 / -1;
 }
 
 .employeeNoteField {
@@ -2484,19 +4089,19 @@ button {
 .masterDataDialog .formField select,
 .employeeDialog .formField input,
 .employeeDialog .formField select {
-  min-height: 46px;
-  border-radius: 16px;
-  font-size: 0.84rem;
+  min-height: 50px;
+  border-radius: 18px;
+  font-size: 0.88rem;
   font-weight: 600;
 }
 
 .employeeDialog .formField {
-  gap: 5px;
+  gap: 6px;
   animation: employeeFormEnter 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .employeeDialog .formField label {
-  font-size: 0.72rem;
+  font-size: 0.74rem;
 }
 
 .employeeDialog .formSegmentedControl {
@@ -2516,7 +4121,298 @@ button {
 }
 
 .employeeDialog .formSegmentedOption small {
-  font-size: 0.63rem;
+  font-size: 0.65rem;
+}
+
+.employeeTableIdentity {
+  display: inline-grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+
+.employeeMiniAvatar {
+  display: inline-grid;
+  flex: 0 0 42px;
+  width: 42px;
+  min-width: 42px;
+  height: 42px;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(34, 174, 202, 0.16);
+  border-radius: 999px;
+  color: #ffffff;
+  background: linear-gradient(145deg, rgba(234, 247, 251, 0.96), rgba(255, 255, 255, 0.98));
+  font-size: 0.72rem;
+  font-weight: 850;
+  box-shadow: 0 12px 24px -20px rgba(7, 24, 74, 0.62);
+}
+
+.employeeMiniAvatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.employeeDetailAvatar {
+  width: 58px;
+  height: 58px;
+  overflow: hidden;
+  border-radius: 999px;
+}
+
+.masterDetailTitle .employeeDetailAvatar .employeeDetailInitials {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  place-items: center;
+  color: #ffffff;
+  background: linear-gradient(135deg, var(--blue-ink), var(--cyan));
+  font-size: 0.84rem;
+  font-weight: 860;
+  text-transform: uppercase;
+}
+
+.employeeDetailDialog {
+  width: min(720px, calc(100vw - 48px));
+  overflow: hidden;
+  box-shadow:
+    0 0 42px -28px rgba(7, 24, 74, 0.46),
+    0 32px 78px -38px rgba(7, 24, 74, 0.78),
+    0 0 0 1px rgba(255, 255, 255, 0.72) inset;
+}
+
+.employeeDetailDialog .masterDetailHeader {
+  padding: 20px 24px 16px;
+  background: #ffffff;
+}
+
+.employeeDetailDialog .masterDetailBody {
+  max-height: min(64dvh, 620px);
+  overflow-y: auto;
+  padding: 16px 24px 14px;
+  background: linear-gradient(180deg, #ffffff, #fbfdff);
+  -webkit-overflow-scrolling: touch;
+}
+
+.employeeDetailDialog .masterDetailGrid {
+  gap: 9px;
+}
+
+.employeeProfileBrief {
+  padding: 15px 16px;
+  border: 1px solid rgba(34, 174, 202, 0.16);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 4% 0%, rgba(34, 174, 202, 0.12), transparent 34%),
+    linear-gradient(135deg, rgba(247, 252, 255, 0.98), rgba(255, 255, 255, 0.98));
+}
+
+.employeeProfileBrief p {
+  margin: 0;
+  color: var(--ops-muted);
+  font-size: 0.82rem;
+  font-weight: 650;
+  line-height: 1.55;
+}
+
+.employeeProfileBrief strong {
+  color: var(--ops-ink);
+  font-weight: 880;
+}
+
+.employeeDetailSections {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.employeeDetailSection {
+  min-width: 0;
+  padding: 2px 0 0;
+}
+
+.employeeDetailSection.wide {
+  grid-column: 1 / -1;
+}
+
+.employeeDetailSection h3 {
+  margin: 0 0 8px;
+  color: var(--ops-ink);
+  font-size: 0.86rem;
+  font-weight: 900;
+}
+
+.employeeDetailList {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.employeeDetailList.compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.employeeDetailLine {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.8fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  min-height: 42px;
+  padding: 10px 13px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.employeeDetailList.compact .employeeDetailLine:nth-last-child(-n + 2),
+.employeeDetailList:not(.compact) .employeeDetailLine:last-child {
+  border-bottom: 0;
+}
+
+.employeeDetailList.compact .employeeDetailLine:nth-child(odd) {
+  border-right: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.employeeDetailLine span {
+  color: #738197;
+  font-size: 0.72rem;
+  font-weight: 760;
+}
+
+.employeeDetailLine strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ops-ink);
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.3;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.employeeDetailDialog .masterDetailField {
+  min-height: 70px;
+  padding: 12px 14px;
+  border-color: rgba(15, 23, 42, 0.07);
+  border-radius: 16px;
+  background: #fbfdff;
+}
+
+.employeeDetailDialog .masterDetailField span {
+  font-size: 0.66rem;
+  font-weight: 760;
+}
+
+.employeeDetailDialog .masterDetailField strong {
+  font-size: 0.82rem;
+  font-weight: 640;
+}
+
+.employeeDetailDialog .masterDetailRelation {
+  border-radius: 18px;
+}
+
+.employeeFaceProfilePanel {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  margin-top: 14px;
+  padding: 18px;
+  border: 1px solid rgba(34, 174, 202, 0.18);
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 8% 12%, rgba(34, 174, 202, 0.14), transparent 28%),
+    rgba(248, 251, 255, 0.86);
+  box-shadow: 0 20px 52px -44px rgba(7, 24, 74, 0.74);
+}
+
+.employeeFacePreview {
+  display: grid;
+  width: 96px;
+  height: 96px;
+  overflow: hidden;
+  place-items: center;
+  border: 1px solid rgba(34, 174, 202, 0.24);
+  border-radius: 999px;
+  color: #0789a0;
+  background: linear-gradient(145deg, rgba(236, 253, 255, 0.95), rgba(248, 250, 252, 0.98));
+}
+
+.employeeFacePreview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.employeeFaceCopy {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.employeeFaceCopy > span {
+  color: #0789a0;
+  font-size: 0.68rem;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.employeeFaceCopy strong {
+  color: var(--ops-ink);
+  font-size: 1.12rem;
+  font-weight: 850;
+}
+
+.employeeFaceCopy small,
+.employeeFaceCopy p {
+  max-width: 520px;
+  margin: 0;
+  color: var(--ops-muted);
+  font-size: 0.78rem;
+  font-weight: 660;
+  line-height: 1.45;
+}
+
+.employeeFaceMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-items: center;
+}
+
+.employeeFaceMeta > span:not(.statusPill) {
+  color: #718096;
+  font-size: 0.7rem;
+  font-weight: 720;
+}
+
+.employeeFaceActions {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 9px;
+  align-items: stretch;
+  padding-top: 2px;
+}
+
+.employeeFaceActions .compactButton {
+  width: 100%;
+  min-height: 44px;
+  padding-inline: 12px;
+  border-radius: 16px;
+  font-size: 0.76rem;
+}
+
+.employeeDetailDialog .masterDetailActions {
+  padding: 14px 24px 20px;
+  border-top: 1px solid var(--ops-line);
+  background: #ffffff;
 }
 
 .employeeTableScroller {
@@ -2543,12 +4439,12 @@ button {
 .employeeDialog .dialogActions {
   position: static;
   flex: 0 0 auto;
-  grid-template-columns: minmax(136px, 210px) minmax(220px, 360px);
+  grid-template-columns: minmax(150px, 220px) minmax(220px, 360px);
   justify-content: end;
   justify-self: stretch;
   width: 100%;
   margin: 0;
-  padding: 14px 24px 18px;
+  padding: 16px 28px 22px;
   border-top: 1px solid var(--ops-line);
   background: rgba(255, 255, 255, 0.98);
   box-shadow: 0 -18px 32px -32px rgba(7, 24, 74, 0.52);
@@ -2560,19 +4456,10 @@ button {
   min-height: 48px;
 }
 
-@media (min-width: 761px) and (max-width: 1180px) {
-  .employeeDialog .dialogForm.employeeFormGrid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .employeeStatusField,
-  .employeeNoteField {
-    grid-column: 1 / -1;
-  }
-}
-
 .employeeStatusField,
-.employeeNoteField {
+.employeeNoteField,
+.employeePhotoField {
+  grid-column: 1 / -1;
   animation: employeeFormEnter 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
@@ -3052,7 +4939,7 @@ button {
 .rowActionMenuScrim {
   position: fixed;
   inset: 0;
-  z-index: 118;
+  z-index: 78;
   background: transparent;
 }
 
@@ -3109,7 +4996,7 @@ button {
 .rowActionMenuPanel.floating {
   top: auto;
   right: auto;
-  z-index: 119;
+  z-index: 79;
   min-width: 168px;
   border-radius: 16px;
   box-shadow:
@@ -3341,6 +5228,56 @@ button {
   }
 }
 
+@keyframes faceScanSweep {
+  0%,
+  100% {
+    transform: translateY(-34px);
+    opacity: 0.34;
+  }
+
+  50% {
+    transform: translateY(34px);
+    opacity: 0.92;
+  }
+}
+
+@keyframes fieldFaceShimmer {
+  0%,
+  100% {
+    transform: translateX(-28%);
+    opacity: 0.4;
+  }
+
+  50% {
+    transform: translateX(28%);
+    opacity: 0.95;
+  }
+}
+
+@keyframes faceCaptureFlash {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+
+  50% {
+    filter: brightness(1.2);
+  }
+}
+
+@keyframes faceScanPulse {
+  0%,
+  100% {
+    opacity: 0.42;
+    transform: scale(0.98);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.03);
+  }
+}
+
 .uiDataTableScroller .tableActionCell .rowActions {
   margin-top: -3px;
 }
@@ -3484,6 +5421,7 @@ button {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 92px;
 }
 
 .statusPill {
@@ -3530,17 +5468,49 @@ button {
 .faceScore.bad { color: var(--danger-ink); }
 
 .cycleRing {
-  display: grid;
+  display: inline-grid;
+  position: relative;
+  flex: 0 0 34px;
   width: 34px;
+  min-width: 34px;
   height: 34px;
   place-items: center;
   border-radius: 999px;
 }
 
+.cycleRing svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  transform: rotate(-90deg);
+}
+
+.cycleRingTrack,
+.cycleRingValue {
+  fill: none;
+  stroke-width: 6;
+}
+
+.cycleRingTrack {
+  stroke: #e5edf7;
+}
+
+.cycleRingValue {
+  stroke: var(--blue);
+  stroke-linecap: round;
+  transition: stroke-dashoffset 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 .cycleRing span {
-  display: grid;
-  width: 24px;
-  height: 24px;
+  position: relative;
+  z-index: 1;
+  display: inline-grid;
+  width: 23px;
+  min-width: 23px;
+  height: auto;
+  aspect-ratio: 1 / 1;
   place-items: center;
   border-radius: 999px;
   color: var(--ink);
@@ -4119,6 +6089,345 @@ button {
   display: none;
 }
 
+.employeeAppShell {
+  min-height: 100dvh;
+  padding: 16px 14px calc(24px + env(safe-area-inset-bottom));
+  color: #07182e;
+  background:
+    radial-gradient(circle at 18% 0%, rgba(34, 174, 202, 0.18), transparent 28%),
+    linear-gradient(180deg, #f7fbff 0%, #eef3f8 100%);
+}
+
+.employeeAppTop,
+.employeeHeroCard,
+.employeeActionCard,
+.employeeMiniCard,
+.employeeCycleCard,
+.employeeHistoryCard,
+.employeeAppLoading,
+.employeeAppError {
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 26px 70px -52px rgba(7, 24, 74, 0.64);
+  backdrop-filter: blur(18px);
+}
+
+.employeeAppTop {
+  position: sticky;
+  z-index: 20;
+  top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 10px;
+  border-radius: 24px;
+}
+
+.employeeAppBrand {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.employeeAppBrand .brandLogo {
+  width: 46px;
+  height: 46px;
+  flex: 0 0 auto;
+}
+
+.employeeAppBrand div {
+  min-width: 0;
+}
+
+.employeeAppBrand small,
+.employeeAppBrand em {
+  display: block;
+  overflow: hidden;
+  color: #6b7890;
+  font-style: normal;
+  font-size: 0.64rem;
+  font-weight: 780;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.employeeAppBrand strong {
+  display: block;
+  color: #07182e;
+  font-size: 0.94rem;
+  font-weight: 900;
+}
+
+.employeeIconButton {
+  display: inline-grid;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 17px;
+  color: #ff3b63;
+  background: #ffffff;
+}
+
+.employeeHeroCard,
+.employeeActionCard,
+.employeeCycleCard,
+.employeeHistoryCard,
+.employeeAppLoading,
+.employeeAppError {
+  margin: 0 auto 14px;
+  max-width: 560px;
+  padding: 16px;
+  border-radius: 28px;
+}
+
+.employeeHeroCard {
+  background:
+    linear-gradient(135deg, rgba(235, 251, 254, 0.92), rgba(255, 255, 255, 0.98)),
+    #ffffff;
+}
+
+.employeeHeroIdentity {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+}
+
+.employeeHeroAvatar {
+  display: inline-grid;
+  width: 72px;
+  height: 72px;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(34, 174, 202, 0.22);
+  border-radius: 26px;
+  color: #ffffff;
+  background: linear-gradient(135deg, #0b1f5f, #22aeca);
+  font-size: 1rem;
+  font-weight: 900;
+  box-shadow: 0 18px 36px -28px rgba(7, 24, 74, 0.9);
+}
+
+.employeeHeroAvatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.employeeHeroIdentity span,
+.employeeHeroMeta span,
+.employeeMiniCard span,
+.employeeMiniCard small,
+.employeeCycleCard p,
+.employeeSectionHeader p,
+.employeeHistoryItem small,
+.employeeEmptyState {
+  color: #65748c;
+  font-size: 0.74rem;
+  font-weight: 760;
+}
+
+.employeeHeroIdentity h1,
+.employeeActionHeader h2,
+.employeeCycleCard h2,
+.employeeSectionHeader h2 {
+  margin: 0;
+  color: #07182e;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+.employeeHeroIdentity h1 {
+  overflow: hidden;
+  font-size: 1.5rem;
+  line-height: 1.05;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.employeeHeroIdentity p,
+.employeeActionHeader p {
+  margin: 4px 0 0;
+  color: #65748c;
+  font-size: 0.78rem;
+  font-weight: 760;
+  line-height: 1.35;
+}
+
+.employeeHeroMeta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.employeeHeroMeta span {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 10px;
+  border: 1px solid rgba(34, 174, 202, 0.14);
+  border-radius: 15px;
+  background: rgba(248, 251, 255, 0.84);
+}
+
+.employeeActionHeader,
+.employeeSectionHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.employeeActionHeader h2,
+.employeeCycleCard h2,
+.employeeSectionHeader h2 {
+  font-size: 1.08rem;
+}
+
+.employeeActionButtons {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.employeeInlineNotice {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 184, 63, 0.24);
+  border-radius: 17px;
+  color: #8a5b00;
+  background: rgba(255, 248, 232, 0.9);
+  font-size: 0.74rem;
+  font-weight: 780;
+  line-height: 1.35;
+}
+
+.employeeStatusGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  max-width: 560px;
+  margin: 0 auto 14px;
+}
+
+.employeeMiniCard {
+  min-height: 132px;
+  padding: 13px;
+  border-radius: 23px;
+}
+
+.employeeMiniCard svg {
+  color: #0789a0;
+}
+
+.employeeMiniCard span,
+.employeeMiniCard small,
+.employeeMiniCard strong {
+  display: block;
+}
+
+.employeeMiniCard strong {
+  margin-top: 6px;
+  color: #07182e;
+  font-size: 0.9rem;
+  font-weight: 900;
+  line-height: 1.15;
+}
+
+.employeeMiniCard button,
+.employeeTextButton {
+  margin-top: 9px;
+  border: 0;
+  color: #0789a0;
+  background: transparent;
+  font-size: 0.74rem;
+  font-weight: 900;
+}
+
+.employeeCycleTrack {
+  height: 12px;
+  margin-top: 14px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e8eef6;
+}
+
+.employeeCycleTrack span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #1fc46a, #22aeca);
+  transition: width 260ms ease;
+}
+
+.employeeHistoryList {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.employeeHistoryItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  border-radius: 18px;
+  background: rgba(248, 251, 255, 0.86);
+}
+
+.employeeHistoryItem strong,
+.employeeHistoryItem small {
+  display: block;
+}
+
+.employeeHistoryItem strong {
+  color: #07182e;
+  font-size: 0.86rem;
+  font-weight: 880;
+}
+
+.employeeHistoryItem > div:last-child {
+  text-align: right;
+}
+
+.employeeEmptyState,
+.employeeAppLoading,
+.employeeAppError {
+  display: grid;
+  min-height: 180px;
+  place-items: center;
+  text-align: center;
+}
+
+.employeeAppLoading strong,
+.employeeAppError strong {
+  color: #07182e;
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.employeeAppLoading small,
+.employeeAppError small {
+  max-width: 300px;
+  color: #65748c;
+  font-size: 0.76rem;
+  font-weight: 760;
+  line-height: 1.45;
+}
+
 @media (min-width: 1024px) {
   .appTopbar {
     display: none;
@@ -4251,6 +6560,8 @@ button {
   .masterDataDialog,
   .employeeDialog,
   .masterDetailDialog,
+  .fieldAttendanceDialog,
+  .faceEnrollmentDialog,
   .locationMapDialog {
     display: flex;
     width: 100%;
@@ -4332,14 +6643,60 @@ button {
   }
 
   .masterDetailGrid,
-  .masterDetailRelation > div {
+  .employeeFaceProfilePanel,
+  .employeeDetailSections,
+  .masterDetailRelation > div,
+  .attendanceMonitorSnapshot {
     grid-template-columns: 1fr;
+  }
+
+  .employeeFacePreview {
+    width: 82px;
+    height: 82px;
+  }
+
+  .employeeFaceActions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .employeeDetailList.compact {
+    grid-template-columns: 1fr;
+  }
+
+  .employeeDetailList.compact .employeeDetailLine:nth-child(odd) {
+    border-right: 0;
+  }
+
+  .employeeDetailList.compact .employeeDetailLine:nth-last-child(-n + 2) {
+    border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+  }
+
+  .employeeDetailList.compact .employeeDetailLine:last-child {
+    border-bottom: 0;
+  }
+
+  .employeeDetailLine {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .employeeDetailLine strong {
+    text-align: left;
+    white-space: normal;
   }
 
   .masterDetailActions {
     display: grid;
     grid-template-columns: 1fr;
     padding: 12px 18px calc(16px + env(safe-area-inset-bottom));
+  }
+
+  .employeeFaceActions {
+    justify-content: stretch;
+  }
+
+  .employeeFaceActions .compactButton {
+    flex: 1 1 120px;
   }
 
   .dataTablePagination {
@@ -4412,9 +6769,256 @@ button {
     padding: 8px 18px 14px;
   }
 
+  .fieldAttendanceHeader {
+    grid-template-columns: 46px minmax(0, 1fr) auto;
+    gap: 10px;
+    padding: 28px 18px 14px;
+  }
+
+  .fieldAttendanceHeader h2 {
+    font-size: 1rem;
+    line-height: 1.1;
+  }
+
+  .fieldAttendanceHeader p {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    font-size: 0.7rem;
+    line-height: 1.28;
+  }
+
+  .fieldAttendanceIcon {
+    width: 46px;
+    height: 46px;
+    border-radius: 17px;
+  }
+
+  .fieldAttendanceForm {
+    gap: 12px;
+    overflow-y: auto;
+    padding: 14px 18px calc(14px + env(safe-area-inset-bottom));
+  }
+
+  .fieldAttendanceGrid,
+  .attendanceEvidenceBoard,
+  .attendanceEvidenceMapCard,
+  .attendanceEvidenceFaceCard,
+  .attendanceReviewSummary {
+    grid-template-columns: 1fr;
+  }
+
+  .attendanceEvidenceMapCard .compactButton {
+    grid-column: 1;
+    width: 100%;
+  }
+
+  .attendanceEvidenceMap {
+    width: 100%;
+    height: 180px;
+  }
+
+  .attendanceEvidenceCell {
+    gap: 6px;
+  }
+
+  .fieldAttendanceCard {
+    grid-template-columns: 42px minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    min-height: auto;
+    padding: 10px;
+    border-radius: 18px;
+  }
+
+  .fieldAttendanceCardIcon {
+    width: 42px;
+    height: 42px;
+    border-radius: 15px;
+  }
+
+  .fieldAttendanceCardCopy strong {
+    font-size: 0.8rem;
+  }
+
+  .fieldAttendanceCardCopy span {
+    white-space: normal;
+    font-size: 0.67rem;
+    line-height: 1.28;
+  }
+
+  .fieldAttendanceCard .compactButton {
+    grid-column: 1 / -1;
+    width: 100%;
+    justify-content: center;
+  }
+
+  .fieldAttendanceMeta {
+    grid-column: 1 / -1;
+    padding-left: 2px;
+  }
+
+  .fieldAttendanceMeta span {
+    display: block;
+  }
+
+  .fieldAttendanceMeta span + span::before {
+    content: "";
+  }
+
+  .fieldAttendanceDialog .formField {
+    gap: 7px;
+  }
+
+  .fieldAttendanceDialog .formField label {
+    font-size: 0.7rem;
+    line-height: 1.1;
+  }
+
+  .fieldAttendanceDialog .formField input,
+  .fieldAttendanceDialog .formField select {
+    min-height: 48px;
+    border-radius: 17px;
+    font-size: 0.82rem;
+  }
+
+  .fieldAttendanceDialog .formSegmentedControl {
+    align-items: stretch;
+    min-height: auto;
+  }
+
+  .fieldAttendanceDialog .formSegmentedOption {
+    min-height: 54px;
+    padding: 9px 10px;
+  }
+
+  .fieldAttendanceDialog .formSegmentedOption span {
+    font-size: 0.76rem;
+  }
+
+  .fieldAttendanceDialog .formSegmentedOption small {
+    font-size: 0.62rem;
+    line-height: 1.25;
+  }
+
+  .fieldAttendanceDialog .dialogActions {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .fieldFaceScreen {
+    overflow-y: auto;
+    padding: 14px 18px calc(16px + env(safe-area-inset-bottom));
+  }
+
+  .fieldFacePreview {
+    min-height: 220px;
+    border-radius: 24px;
+  }
+
+  .fieldFaceScanFrame {
+    width: 136px;
+    height: 136px;
+  }
+
+  .fieldFaceChecks {
+    grid-template-columns: 1fr;
+  }
+
+  .fieldFaceActions {
+    grid-template-columns: 1fr;
+  }
+
+  .faceEnrollmentBody {
+    gap: 12px;
+    padding: 14px 18px calc(16px + env(safe-area-inset-bottom));
+  }
+
+  .faceEnrollmentCamera {
+    width: min(300px, calc(100vw - 120px));
+    border-radius: 28px;
+  }
+
+  .faceEnrollmentChecklist {
+    grid-template-columns: 1fr;
+  }
+
+  .faceEnrollmentSamples {
+    display: inline-flex;
+  }
+
+  .faceEnrollmentActions {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .faceEnrollmentStatusPanel {
+    padding: 12px;
+    border-radius: 18px;
+  }
+
+  .faceEnrollmentStatusPanel strong {
+    font-size: 0.8rem;
+  }
+
+  .faceEnrollmentStatusPanel small {
+    font-size: 0.66rem;
+  }
+
+  .faceEnrollmentCounter {
+    width: 40px;
+    height: 40px;
+    border-radius: 15px;
+    font-size: 0.78rem;
+  }
+
   .employeeStatusField,
   .employeeNoteField {
     grid-column: 1 / -1;
+  }
+
+  .employeePhotoField {
+    grid-template-columns: 54px minmax(0, 1fr);
+    gap: 9px;
+    min-height: 72px;
+    padding: 8px;
+    border-radius: 18px;
+  }
+
+  .employeePhotoPreview {
+    width: 54px;
+    height: 54px;
+  }
+
+  .employeePhotoEmptyIcon {
+    width: 34px;
+    height: 34px;
+  }
+
+  .employeePhotoRemove {
+    top: 4px;
+    left: 48px;
+    width: 24px;
+    height: 24px;
+  }
+
+  .employeePhotoControl > strong {
+    font-size: 0.84rem;
+  }
+
+  .employeePhotoControl > small {
+    font-size: 0.64rem;
+  }
+
+  .employeePhotoActions {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .employeePhotoActions .compactButton {
+    min-height: 34px;
+    padding: 0 12px;
   }
 
   .locationMapBody {

@@ -1,4 +1,4 @@
-import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react"
+import type { CSSProperties, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react"
 import clsx from "clsx"
 
 import { DatePickerField } from "./date-picker-field"
@@ -55,6 +55,7 @@ export function SegmentedFormField<TValue extends string>({
   options,
   onChange,
   required,
+  columns = 3,
 }: {
   label: string
   value: TValue
@@ -65,10 +66,11 @@ export function SegmentedFormField<TValue extends string>({
   }>
   onChange: (value: TValue) => void
   required?: boolean
+  columns?: 2 | 3
 }) {
   return (
     <FormField label={label} required={required}>
-      <div className="formSegmentedControl" role="radiogroup" aria-label={label}>
+      <div className="formSegmentedControl" role="radiogroup" aria-label={label} style={{ "--segment-count": columns } as CSSProperties}>
         {options.map((option) => (
           <button
             className={clsx("formSegmentedOption", value === option.value && "active")}
@@ -113,6 +115,8 @@ export function SwitchFormField({
   onChange,
   onLabel = "Aktif",
   offLabel = "Nonaktif",
+  onDescription = "Data aktif dan bisa dipakai modul lain.",
+  offDescription = "Data disimpan, tapi tidak dipakai pilihan aktif.",
   required,
 }: {
   label: string
@@ -120,6 +124,8 @@ export function SwitchFormField({
   onChange: (checked: boolean) => void
   onLabel?: string
   offLabel?: string
+  onDescription?: string
+  offDescription?: string
   required?: boolean
 }) {
   return (
@@ -136,7 +142,7 @@ export function SwitchFormField({
         </span>
         <span className="formSwitchCopy">
           <strong>{checked ? onLabel : offLabel}</strong>
-          <small>{checked ? "Data aktif dan bisa dipakai modul lain." : "Data disimpan, tapi tidak dipakai pilihan aktif."}</small>
+          <small>{checked ? onDescription : offDescription}</small>
         </span>
       </button>
     </FormField>

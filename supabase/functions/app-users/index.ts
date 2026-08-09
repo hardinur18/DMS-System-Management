@@ -2,6 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0"
 
 type UserStatus = "active" | "invited" | "locked"
 type TwoFactorStatus = "enabled" | "pending" | "disabled"
+type AppScope = "management" | "field" | "both"
 type AppUserAction = "claim_profile" | "complete_email_password_link" | "complete_password_change" | "create" | "update" | "delete" | "lock" | "unlock" | "send_password_link" | "set_password"
 
 interface AppUserPayload {
@@ -11,6 +12,8 @@ interface AppUserPayload {
   email?: string
   roleId?: string
   divisionId?: string
+  employeeId?: string
+  appScope?: AppScope
   status?: UserStatus
   twoFactorStatus?: TwoFactorStatus
   notes?: string
@@ -227,6 +230,8 @@ Deno.serve(async (request) => {
       assertPayload(email, "Email wajib diisi.")
       assertPayload(payload.roleId, "Role wajib dipilih.")
       assertPayload(payload.divisionId, "Divisi wajib dipilih.")
+      assertPayload(!payload.appScope || ["management", "field", "both"].includes(payload.appScope), "Scope app tidak valid.")
+      assertPayload(payload.appScope !== "field" && payload.appScope !== "both" || payload.employeeId, "User lapangan wajib dikaitkan ke karyawan.")
 
       if (action === "update" && payload.id === actor.id) {
         const nextStatus = payload.status || actor.status
@@ -269,6 +274,20 @@ Deno.serve(async (request) => {
         authUserId = authUserId || existingProfile?.auth_user_id || null
       }
 
+      if (payload.employeeId) {
+        const { data: linkedEmployeeUser, error: linkedEmployeeError } = await adminClient
+          .from("app_users")
+          .select("id, full_name, email")
+          .eq("employee_id", payload.employeeId)
+          .maybeSingle()
+
+        if (linkedEmployeeError) throw linkedEmployeeError
+        assertPayload(
+          !linkedEmployeeUser || linkedEmployeeUser.id === payload.id,
+          `Karyawan terkait sudah dipakai oleh user ${linkedEmployeeUser?.full_name || linkedEmployeeUser?.email}. Satu karyawan hanya boleh punya satu user login.`,
+        )
+      }
+
       if (!authUserId) {
         authUserId = await findAuthUserIdByEmail(adminClient, email)
       }
@@ -305,6 +324,8 @@ Deno.serve(async (request) => {
         email,
         role_id: payload.roleId,
         division_id: payload.divisionId,
+        employee_id: payload.employeeId || null,
+        app_scope: payload.appScope || "management",
         status: payload.status || "invited",
         two_factor_status: payload.twoFactorStatus || "pending",
         invited_at: payload.status === "invited" ? new Date().toISOString() : null,

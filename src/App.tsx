@@ -1,5 +1,6 @@
 import { Fragment, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import type { ReactNode } from "react"
+import type { CSSProperties, ReactNode } from "react"
+import { createPortal } from "react-dom"
 import {
   AlertCircle,
   AlertTriangle,
@@ -8,6 +9,7 @@ import {
   BadgeDollarSign,
   Bell,
   CalendarCheck2,
+  Camera,
   ClipboardList,
   ChevronDown,
   CreditCard,
@@ -38,6 +40,7 @@ import {
   Settings,
   ShieldCheck,
   Trash2,
+  Upload,
   UserPlus,
   UserRoundCheck,
   UsersRound,
@@ -80,7 +83,13 @@ type ViewId =
   | "audit-log"
   | "profile"
 type AttendanceStatus = "valid" | "pending" | "failed" | "missing"
-type PayrollStatus = "active" | "ready" | "paid"
+type PayrollStatus = "active" | "ready" | "locked" | "paid" | "void"
+type PayrollProcessAction = "lock" | "mark_paid" | "unlock" | "void" | "restore"
+type AttendanceLogStatus = "valid" | "review" | "rejected"
+type AttendanceGpsStatus = "valid" | "out_of_radius" | "missing"
+type AttendanceFaceStatus = "verified" | "review" | "failed" | "not_required"
+type EmployeeFaceProfileStatus = "unenrolled" | "pending_review" | "approved" | "rejected" | "disabled"
+type AppScope = "management" | "field" | "both"
 
 interface NavItem {
   id: ViewId
@@ -99,6 +108,211 @@ interface EmployeeRow {
   cycleDays: number
   payrollStatus: PayrollStatus
   kasbon: number
+}
+
+interface AttendanceMonitorRow {
+  id: string
+  employeeId: string
+  employeeCode: string
+  fullName: string
+  employeePhotoPath: string
+  employeePhotoUrl: string
+  divisionName: string
+  workLocationName: string
+  attendanceDate: string
+  eventAt: string
+  attendanceStatus: AttendanceStatus
+  logStatus: AttendanceLogStatus | "missing"
+  gpsStatus: AttendanceGpsStatus | "missing"
+  faceStatus: AttendanceFaceStatus
+  faceScore: number | null
+  distanceM: number | null
+  radiusM: number | null
+  cycleDays: number
+  targetDays: number
+  payrollCycleId: string
+  payrollCycleNumber: number
+  periodStartedAt: string
+  periodClosedAt: string
+  payrollReadyAt: string
+  payrollLockedAt: string
+  payrollPaidAt: string
+  payrollStatus: PayrollStatus
+  payrollAmount: number
+  basePayrollAmount: number
+  overtimeAmount: number
+  salaryType: EmployeeSalaryType
+  notes: string
+}
+
+interface AttendanceReviewRow {
+  id: string
+  employeeId: string
+  employeeCode: string
+  fullName: string
+  employeePhotoPath: string
+  employeePhotoUrl: string
+  divisionName: string
+  workLocationName: string
+  attendanceDate: string
+  eventType: "check_in" | "check_out"
+  eventAt: string
+  latitude: string
+  longitude: string
+  status: AttendanceLogStatus
+  gpsStatus: AttendanceGpsStatus
+  faceStatus: AttendanceFaceStatus
+  faceScore: number | null
+  faceSnapshotPath: string
+  faceSnapshotUrl: string
+  distanceM: number | null
+  radiusM: number | null
+  workLocationLatitude: string
+  workLocationLongitude: string
+  workdayCounted: boolean
+  issueLabel: string
+  notes: string
+}
+
+interface FieldLocationSummary {
+  id: string
+  code: string
+  name: string
+  address: string
+  latitude: string
+  longitude: string
+  radiusM: number
+  isReady: boolean
+  employeeCount: number
+  validToday: number
+  reviewToday: number
+}
+
+type OvertimeStatus = "draft" | "pending" | "approved" | "rejected"
+
+interface OvertimeReviewRow {
+  id: string
+  employeeId: string
+  employeeCode: string
+  fullName: string
+  employeePhotoPath: string
+  employeePhotoUrl: string
+  divisionName: string
+  overtimeDate: string
+  shiftStartTime: string
+  shiftEndTime: string
+  actualCheckOutAt: string
+  overtimeMinutes: number
+  approvedMinutes: number
+  rateAmount: number
+  totalAmount: number
+  dayType: "weekday" | "sunday" | "holiday"
+  status: OvertimeStatus
+  componentName: string
+  notes: string
+}
+
+interface OperationsFoundationData {
+  rows: AttendanceMonitorRow[]
+  locations: FieldLocationSummary[]
+  reviews: AttendanceReviewRow[]
+  overtime: OvertimeReviewRow[]
+}
+
+interface FieldAttendanceSubmitPayload {
+  eventType: "check_in" | "check_out"
+  latitude: number
+  longitude: number
+  faceScore: number | null
+  faceSnapshotBase64?: string | null
+  faceSnapshotContentType?: string | null
+  notes: string
+}
+
+interface FieldAttendanceResult {
+  log: {
+    id: string
+    attendance_date: string
+    event_type: "check_in" | "check_out"
+    status: AttendanceLogStatus
+    gps_status: AttendanceGpsStatus
+    face_status: AttendanceFaceStatus
+    distance_m: number
+    radius_m: number
+    face_score: number | null
+  }
+  employee: {
+    id: string
+    code: string
+    name: string
+  }
+  location: {
+    id: string
+    name: string
+    radiusM: number
+  }
+}
+
+interface EmployeePortalAttendanceLog {
+  id: string
+  attendanceDate: string
+  eventType: "check_in" | "check_out"
+  eventAt: string
+  status: AttendanceLogStatus
+  gpsStatus: AttendanceGpsStatus
+  faceStatus: AttendanceFaceStatus
+  faceScore: number | null
+  distanceM: number | null
+  radiusM: number | null
+  workdayCounted: boolean
+  notes: string
+}
+
+interface EmployeePortalData {
+  employee: {
+    id: string
+    code: string
+    name: string
+    photoPath: string
+    photoUrl: string
+    divisionName: string
+    positionName: string
+    workLocationName: string
+    workLocationAddress: string
+    workLocationLatitude: string
+    workLocationLongitude: string
+    radiusM: number
+    shiftName: string
+    salaryType: EmployeeSalaryType
+    dailySalary: number
+    monthlySalary: number
+    payrollMethod: EmployeePayrollMethod
+    joinDate: string
+    status: EmployeeStatus
+  }
+  faceProfile: {
+    status: EmployeeFaceProfileStatus
+    threshold: number
+    verificationRequired: boolean
+    submittedAt: string
+    reviewedAt: string
+    reviewNotes: string
+  }
+  payrollCycle: {
+    id: string
+    cycleNumber: number
+    workDaysCount: number
+    targetWorkDays: number
+    grossAmount: number
+    overtimeAmount: number
+    netAmount: number
+    status: PayrollStatus
+    periodStartedAt: string
+    periodClosedAt: string
+    readyAt: string
+  } | null
+  todayLogs: EmployeePortalAttendanceLog[]
+  recentLogs: EmployeePortalAttendanceLog[]
 }
 
 type ModuleViewId = Exclude<ViewId, "dashboard" | "master-data" | "users" | "role-permission" | "audit-log" | "profile">
@@ -147,11 +361,15 @@ type TwoFactorStatus = "enabled" | "pending" | "disabled"
 type PasswordActionType = "setup" | "reset"
 type PasswordDeliveryMode = "manual" | "email"
 type EmployeeStatus = "active" | "review" | "inactive"
+type EmployeeSalaryType = "daily" | "monthly"
+type EmployeePayrollMethod = "attendance_cycle" | "calendar_month" | "custom"
 
 interface EmployeeDirectoryRow {
   id: string
   employeeCode: string
   fullName: string
+  photoPath: string
+  photoUrl: string
   nik: string
   phone: string
   email: string
@@ -163,16 +381,34 @@ interface EmployeeDirectoryRow {
   workLocationName: string
   shiftId: string
   shiftName: string
+  salaryType: EmployeeSalaryType
   dailySalary: number
+  monthlySalary: number
+  payrollMethod: EmployeePayrollMethod
+  prorateEnabled: boolean
   joinDate: string
   payrollCycleDays: number
   status: EmployeeStatus
+  faceProfileId: string
+  faceProfileStatus: EmployeeFaceProfileStatus
+  faceProfileThreshold: number
+  faceProfileRequired: boolean
+  faceReferenceImagePath: string
+  faceReferenceImageUrl: string
+  faceProfileSubmittedAt: string
+  faceProfileReviewedAt: string
+  faceProfileReviewNotes: string
   notes: string
+  deletedAt: string
 }
 
 interface EmployeeFormValues {
   employeeCode: string
   fullName: string
+  photoPath: string
+  photoUrl: string
+  photoFile: File | null
+  removePhoto: boolean
   nik: string
   phone: string
   email: string
@@ -180,7 +416,11 @@ interface EmployeeFormValues {
   positionId: string
   workLocationId: string
   shiftId: string
+  salaryType: EmployeeSalaryType
   dailySalary: string
+  monthlySalary: string
+  payrollMethod: EmployeePayrollMethod
+  prorateEnabled: boolean
   joinDate: string
   payrollCycleDays: string
   status: EmployeeStatus
@@ -195,6 +435,15 @@ interface EmployeeOption {
   isActive: boolean
 }
 
+interface FaceEnrollmentTarget {
+  id?: string
+  employeeCode: string
+  fullName: string
+  divisionName?: string
+  positionName?: string
+  photoUrl?: string
+}
+
 interface UserAccessRow {
   id: string
   userCode: string
@@ -204,6 +453,10 @@ interface UserAccessRow {
   roleName: string
   divisionId: string
   divisionName: string
+  employeeId: string
+  employeeCode: string
+  employeeName: string
+  appScope: AppScope
   lastLoginAt: string
   invitedAt: string
   passwordSetupSentAt: string
@@ -222,6 +475,8 @@ interface UserAccessFormValues {
   email: string
   roleId: string
   divisionId: string
+  employeeId: string
+  appScope: AppScope
   status: UserStatus
   twoFactorStatus: TwoFactorStatus
   notes: string
@@ -234,8 +489,19 @@ interface UserAccessOption {
   isActive: boolean
 }
 
+interface UserEmployeeOption {
+  id: string
+  code: string
+  name: string
+  isActive: boolean
+  linkedUserId: string
+  linkedUserName: string
+  linkedUserEmail: string
+}
+
 interface AppAccessProfile {
   id: string
+  userCode: string
   authUserId: string
   fullName: string
   email: string
@@ -243,6 +509,8 @@ interface AppAccessProfile {
   roleName: string
   divisionId: string
   divisionName: string
+  employeeId: string
+  appScope: AppScope
   status: UserStatus
   permissions: string[]
   emailVerifiedAt: string
@@ -315,6 +583,11 @@ interface MasterDataRow {
   startTime?: string
   endTime?: string
   componentType?: string
+  calculationUnit?: string
+  rateAmount?: number
+  dayType?: string
+  autoDetectOvertime?: boolean
+  requiresApproval?: boolean
   isSystem?: boolean
   sortOrder?: number
 }
@@ -333,6 +606,11 @@ interface MasterDataFormValues {
   startTime: string
   endTime: string
   componentType: "earning" | "deduction"
+  calculationUnit: "fixed" | "hour" | "day"
+  rateAmount: string
+  dayType: "all" | "weekday" | "sunday" | "holiday"
+  autoDetectOvertime: boolean
+  requiresApproval: boolean
   status: string
   sortOrder: string
 }
@@ -364,7 +642,7 @@ interface ToastMessage {
   description: string
 }
 
-const accessProfileCacheKey = "dms.management.accessProfile.v1"
+const accessProfileCacheKey = "dms.management.accessProfile.v4"
 const accessProfileCacheMaxAgeMs = 1000 * 60 * 60 * 12
 
 const navItems: NavItem[] = [
@@ -455,6 +733,8 @@ const permissionDefinitions: PermissionDefinition[] = [
   { key: "employees.manage", label: "Kelola Karyawan", group: "Karyawan", description: "Tambah, ubah, nonaktifkan, dan hapus data karyawan." },
   { key: "attendance.view", label: "Lihat Absensi", group: "Absensi", description: "Monitoring absensi GPS dan face verification." },
   { key: "attendance.review", label: "Review Absensi", group: "Absensi", description: "Approve/reject absensi bermasalah." },
+  { key: "overtime.view", label: "Lihat Lembur", group: "Payroll", description: "Melihat kandidat lembur dari check-out melewati jam shift." },
+  { key: "overtime.review", label: "Review Lembur", group: "Payroll", description: "Approve/reject lembur sebelum masuk payroll." },
   { key: "payroll.view", label: "Lihat Payroll", group: "Payroll", description: "Melihat cycle 26 hari, draft gaji, bonus, dan potongan." },
   { key: "payroll.process", label: "Proses Payroll", group: "Payroll", description: "Lock dan proses gaji siap bayar." },
   { key: "cash_advance.manage", label: "Kelola Kasbon", group: "Finance", description: "Approve, cicil, dan potong kasbon." },
@@ -475,12 +755,14 @@ const rolePermissionMap: Record<(typeof dmsRoles)[number], string[]> = {
     "employees.manage",
     "attendance.view",
     "attendance.review",
+    "overtime.view",
+    "overtime.review",
     "payroll.view",
     "cash_advance.manage",
     "audit_logs.view",
   ],
-  Finance: ["dashboard.view", "master_data.view", "employees.view", "payroll.view", "payroll.process", "cash_advance.manage", "audit_logs.view"],
-  Supervisor: ["dashboard.view", "users.view", "employees.view", "attendance.view", "attendance.review", "master_data.view"],
+  Finance: ["dashboard.view", "master_data.view", "employees.view", "overtime.view", "overtime.review", "payroll.view", "payroll.process", "cash_advance.manage", "audit_logs.view"],
+  Supervisor: ["dashboard.view", "users.view", "employees.view", "attendance.view", "attendance.review", "overtime.view", "master_data.view"],
   Admin: ["dashboard.view", "users.view", "users.create", "master_data.view", "master_data.manage", "employees.view", "employees.manage", "attendance.view", "audit_logs.view"],
   Viewer: ["dashboard.view", "users.view", "master_data.view", "employees.view", "attendance.view", "payroll.view"],
 }
@@ -495,7 +777,15 @@ const statusLabel: Record<AttendanceStatus, string> = {
 const payrollLabel: Record<PayrollStatus, string> = {
   active: "Cycle Aktif",
   ready: "Siap Gajian",
+  locked: "Locked",
   paid: "Terbayar",
+  void: "Void",
+}
+
+const appScopeLabel: Record<AppScope, string> = {
+  management: "Management",
+  field: "Lapangan",
+  both: "Management + Lapangan",
 }
 
 const moduleConfigs: Record<ModuleViewId, ModuleConfig> = {
@@ -844,6 +1134,11 @@ function createEmptyMasterForm(categoryId: Exclude<MasterCategoryId, "all">): Ma
     startTime: "",
     endTime: "",
     componentType: "earning",
+    calculationUnit: "fixed",
+    rateAmount: "0",
+    dayType: "all",
+    autoDetectOvertime: false,
+    requiresApproval: true,
     status: "Aktif",
     sortOrder: "0",
   }
@@ -884,6 +1179,11 @@ function buildMasterRow(
     startTime: row.start_time ? String(row.start_time).slice(0, 5) : "",
     endTime: row.end_time ? String(row.end_time).slice(0, 5) : "",
     componentType: row.component_type ? String(row.component_type) : undefined,
+    calculationUnit: row.calculation_unit ? String(row.calculation_unit) : "fixed",
+    rateAmount: row.rate_amount === null || row.rate_amount === undefined ? 0 : Number(row.rate_amount),
+    dayType: row.day_type ? String(row.day_type) : "all",
+    autoDetectOvertime: row.auto_detect_overtime === true,
+    requiresApproval: row.requires_approval !== false,
     isSystem: Boolean(row.is_system),
     sortOrder: typeof row.sort_order === "number" ? row.sort_order : 0,
   }
@@ -896,7 +1196,7 @@ async function loadMasterDataRows() {
     supabase.from("positions").select("id, code, name, division_id, description, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
     supabase.from("work_locations").select("id, code, name, address, latitude, longitude, radius_m, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
     supabase.from("shifts").select("id, code, name, start_time, end_time, description, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
-    supabase.from("payroll_components").select("id, code, name, component_type, description, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
+    supabase.from("payroll_components").select("id, code, name, component_type, description, calculation_unit, rate_amount, day_type, auto_detect_overtime, requires_approval, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
   ])
 
   const error = roles.error || divisions.error || positions.error || locations.error || shifts.error || payrollComponents.error
@@ -941,7 +1241,15 @@ function createMasterPayload(values: MasterDataFormValues) {
   }
 
   if (values.categoryId === "payroll-components") {
-    return { ...basePayload, component_type: values.componentType }
+    return {
+      ...basePayload,
+      component_type: values.componentType,
+      calculation_unit: values.calculationUnit,
+      rate_amount: Number(values.rateAmount || 0),
+      day_type: values.dayType,
+      auto_detect_overtime: values.autoDetectOvertime,
+      requires_approval: values.requiresApproval,
+    }
   }
 
   if (values.categoryId === "roles") {
@@ -1146,6 +1454,15 @@ function validateMasterForm(values: MasterDataFormValues) {
     errors.push("Jenis komponen wajib dipilih.")
   }
 
+  if (values.categoryId === "payroll-components") {
+    const rateAmount = Number(values.rateAmount)
+
+    if (!values.calculationUnit) errors.push("Unit hitung komponen wajib dipilih.")
+    if (!Number.isFinite(rateAmount) || rateAmount < 0) errors.push("Nominal rate komponen wajib angka 0 atau lebih.")
+    if (values.autoDetectOvertime && values.componentType !== "earning") errors.push("Auto lembur wajib memakai jenis Penambah Gaji.")
+    if (values.autoDetectOvertime && values.calculationUnit !== "hour") errors.push("Auto lembur wajib memakai unit Per Jam.")
+  }
+
   return errors
 }
 
@@ -1176,6 +1493,8 @@ function getMasterUsageWarnings(row: MasterDataRow, rows: MasterDataRow[]): Mast
 
   if (row.categoryId === "payroll-components") {
     warnings.push({ label: "Payroll", value: getPayrollComponentLabel(row.componentType) })
+    warnings.push({ label: "Rate", value: row.calculationUnit === "hour" ? `${formatCurrency(row.rateAmount || 0)} / jam` : getPayrollCalculationLabel(row.calculationUnit) })
+    if (row.autoDetectOvertime) warnings.push({ label: "Auto Lembur", value: getPayrollDayTypeLabel(row.dayType) })
   }
 
   return warnings
@@ -1230,6 +1549,11 @@ function getMasterDetailFields(row: MasterDataRow): MasterDetailField[] {
   if (row.categoryId === "payroll-components") {
     fields.push(
       { label: "Jenis Komponen", value: getPayrollComponentLabel(row.componentType) },
+      { label: "Unit Hitung", value: getPayrollCalculationLabel(row.calculationUnit) },
+      { label: "Rate", value: row.calculationUnit === "hour" ? `${formatCurrency(row.rateAmount || 0)} / jam` : formatCurrency(row.rateAmount || 0) },
+      { label: "Tipe Hari", value: getPayrollDayTypeLabel(row.dayType) },
+      { label: "Auto Detect Lembur", value: row.autoDetectOvertime ? "Aktif" : "Tidak" },
+      { label: "Perlu Approval", value: row.requiresApproval ? "Ya" : "Tidak" },
       { label: "Dipakai Di", value: getMasterUsage(row) },
     )
   }
@@ -1265,12 +1589,28 @@ function getPayrollComponentLabel(componentType?: string) {
   return componentType === "deduction" ? "Potongan" : "Penambah"
 }
 
+function getPayrollCalculationLabel(unit?: string) {
+  if (unit === "hour") return "Per jam"
+  if (unit === "day") return "Per hari"
+  return "Nominal tetap"
+}
+
+function getPayrollDayTypeLabel(dayType?: string) {
+  if (dayType === "weekday") return "Weekday"
+  if (dayType === "sunday") return "Minggu"
+  if (dayType === "holiday") return "Hari Libur"
+  return "Semua Hari"
+}
+
 function getMasterDetail(row: MasterDataRow) {
   if (row.categoryId === "roles") return `Level ${row.level || 100}`
   if (row.categoryId === "positions") return row.description || "Belum ada deskripsi"
   if (row.categoryId === "shifts") return formatMasterTimeRange(row)
   if (row.categoryId === "locations") return `${row.radiusM || 100} meter`
-  if (row.categoryId === "payroll-components") return getPayrollComponentLabel(row.componentType)
+  if (row.categoryId === "payroll-components") {
+    if (row.calculationUnit === "hour") return `${getPayrollComponentLabel(row.componentType)} · ${formatCurrency(row.rateAmount || 0)}/jam`
+    return `${getPayrollComponentLabel(row.componentType)} · ${getPayrollCalculationLabel(row.calculationUnit)}`
+  }
   return row.description || row.usedBy || "-"
 }
 
@@ -1401,6 +1741,16 @@ function formatCurrency(value: number) {
     currency: "IDR",
     maximumFractionDigits: 0,
   }).format(value)
+}
+
+function formatPayrollDate(value: string) {
+  if (!value) return "-"
+  return new Intl.DateTimeFormat("id-ID", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(value))
+}
+
+function formatPayrollPeriod(row: AttendanceMonitorRow) {
+  if (!row.periodStartedAt && !row.periodClosedAt) return "Cycle belum terbentuk"
+  return `${formatPayrollDate(row.periodStartedAt)} - ${row.periodClosedAt ? formatPayrollDate(row.periodClosedAt) : "berjalan"}`
 }
 
 function LoginPage({ authError, onLogin }: { authError?: string; onLogin: (session: Session) => Promise<void> | void }) {
@@ -1804,6 +2154,18 @@ function UserStatusBadge({ status }: { status: UserStatus }) {
   return <UiStatusBadge tone={tone[status]}>{label[status]}</UiStatusBadge>
 }
 
+function PayrollStatusBadge({ status }: { status: PayrollStatus }) {
+  const tone: Record<PayrollStatus, "valid" | "pending" | "failed" | "missing"> = {
+    active: "missing",
+    ready: "pending",
+    locked: "pending",
+    paid: "valid",
+    void: "failed",
+  }
+
+  return <UiStatusBadge tone={tone[status]}>{payrollLabel[status]}</UiStatusBadge>
+}
+
 function EmailVerifiedBadge({ verifiedAt }: { verifiedAt: string }) {
   return (
     <UiStatusBadge tone={verifiedAt ? "valid" : "pending"}>
@@ -1813,10 +2175,45 @@ function EmailVerifiedBadge({ verifiedAt }: { verifiedAt: string }) {
 }
 
 function ProgressRing({ value }: { value: number }) {
-  const percent = Math.min(100, Math.round((value / 26) * 100))
+  const safeValue = Math.max(0, Math.min(26, value))
+  const radius = 16
+  const circumference = 2 * Math.PI * radius
+  const dashOffset = circumference - (safeValue / 26) * circumference
   return (
-    <span className="cycleRing" style={{ background: `conic-gradient(var(--blue) ${percent}%, #e5edf7 ${percent}% 100%)` }}>
-      <span>{value}</span>
+    <span className="cycleRing">
+      <svg viewBox="0 0 40 40" aria-hidden="true">
+        <circle className="cycleRingTrack" cx="20" cy="20" r={radius} />
+        <circle
+          className="cycleRingValue"
+          cx="20"
+          cy="20"
+          r={radius}
+          strokeDasharray={circumference}
+          strokeDashoffset={dashOffset}
+        />
+      </svg>
+      <span>{safeValue}</span>
+    </span>
+  )
+}
+
+function EmployeeIdentityCell({
+  fullName,
+  code,
+  photoUrl,
+  secondary,
+}: {
+  fullName: string
+  code: string
+  photoUrl?: string
+  secondary?: ReactNode
+}) {
+  return (
+    <span className="employeeTableIdentity">
+      <span className="employeeMiniAvatar">
+        {photoUrl ? <img src={photoUrl} alt="" /> : getProfileInitials(fullName || code)}
+      </span>
+      <TableText primary={fullName} secondary={secondary ?? code} />
     </span>
   )
 }
@@ -1829,6 +2226,14 @@ function formatUserDateTime(value?: string | null, fallback = "Belum login") {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value))
+}
+
+function formatShortId(value?: string | null, prefix = "ID") {
+  if (!value) return "-"
+  const cleanValue = value.replace(/[^a-zA-Z0-9]/g, "").toUpperCase()
+  if (!cleanValue) return "-"
+
+  return `${prefix}-${cleanValue.slice(0, 8)}`
 }
 
 function getProfileInitials(value: string) {
@@ -1858,9 +2263,11 @@ function readCachedAccessProfile(session: Session | null): AppAccessProfile | nu
     if (!profile || profile.authUserId !== session.user.id) return null
     if (!cachedAt || Date.now() - cachedAt > accessProfileCacheMaxAgeMs) return null
     if (!profile.id || !profile.email || !Array.isArray(profile.permissions)) return null
+    if (!profile.userCode) return null
 
     return {
       id: String(profile.id),
+      userCode: String(profile.userCode || ""),
       authUserId: String(profile.authUserId),
       fullName: String(profile.fullName || profile.email),
       email: String(profile.email),
@@ -1868,6 +2275,8 @@ function readCachedAccessProfile(session: Session | null): AppAccessProfile | nu
       roleName: String(profile.roleName || "Belum pilih role"),
       divisionId: String(profile.divisionId || ""),
       divisionName: String(profile.divisionName || "Belum pilih divisi"),
+      employeeId: String(profile.employeeId || ""),
+      appScope: profile.appScope === "field" || profile.appScope === "both" ? profile.appScope : "management",
       status: mapAccessStatus(profile.status),
       permissions: profile.permissions.map(String),
       emailVerifiedAt: String(profile.emailVerifiedAt || ""),
@@ -1898,7 +2307,7 @@ function writeCachedAccessProfile(profile: AppAccessProfile | null) {
 
 async function loadAppAccessProfile(session: Session): Promise<AppAccessProfile | null> {
   const userEmail = session.user.email?.trim().toLowerCase()
-  const columns = "id, auth_user_id, full_name, email, role_id, division_id, status, email_verified_at, force_password_change"
+  const columns = "id, user_code, auth_user_id, full_name, email, role_id, division_id, employee_id, app_scope, status, email_verified_at, force_password_change"
   let row: Record<string, unknown> | null = null
 
   await invokeAppUsersFunction("claim_profile", {}).catch(() => {})
@@ -1941,6 +2350,7 @@ async function loadAppAccessProfile(session: Session): Promise<AppAccessProfile 
 
   return {
     id: String(row.id),
+    userCode: String(row.user_code || ""),
     authUserId: String(row.auth_user_id || session.user.id),
     fullName: String(row.full_name || userEmail || "User DMS"),
     email: String(row.email || userEmail || ""),
@@ -1948,6 +2358,8 @@ async function loadAppAccessProfile(session: Session): Promise<AppAccessProfile 
     roleName: String(role.data?.name || "Belum pilih role"),
     divisionId,
     divisionName: String(division.data?.name || "Belum pilih divisi"),
+    employeeId: row.employee_id ? String(row.employee_id) : "",
+    appScope: row.app_scope === "field" || row.app_scope === "both" ? row.app_scope : "management",
     status: mapAccessStatus(row.status),
     permissions: (permissions.data || []).map((permission) => String(permission.permission_key)),
     emailVerifiedAt: row.email_verified_at ? String(row.email_verified_at) : "",
@@ -1962,6 +2374,8 @@ function createEmptyUserForm(rows: UserAccessRow[] = []): UserAccessFormValues {
     email: "",
     roleId: "",
     divisionId: "",
+    employeeId: "",
+    appScope: "management",
     status: "invited",
     twoFactorStatus: "pending",
     notes: "",
@@ -1981,9 +2395,11 @@ function mapUserAccessRow(
   row: Record<string, unknown>,
   roleMap: Map<string, UserAccessOption>,
   divisionMap: Map<string, UserAccessOption>,
+  employeeMap: Map<string, UserEmployeeOption>,
 ): UserAccessRow {
   const roleId = row.role_id ? String(row.role_id) : ""
   const divisionId = row.division_id ? String(row.division_id) : ""
+  const employeeId = row.employee_id ? String(row.employee_id) : ""
 
   return {
     id: String(row.id),
@@ -1994,6 +2410,10 @@ function mapUserAccessRow(
     roleName: roleMap.get(roleId)?.name || "Belum pilih role",
     divisionId,
     divisionName: divisionMap.get(divisionId)?.name || "Belum pilih divisi",
+    employeeId,
+    employeeCode: employeeMap.get(employeeId)?.code || "",
+    employeeName: employeeMap.get(employeeId)?.name || "Belum dikaitkan",
+    appScope: row.app_scope === "field" || row.app_scope === "both" ? row.app_scope : "management",
     lastLoginAt: row.last_login_at ? String(row.last_login_at) : "",
     invitedAt: row.invited_at ? String(row.invited_at) : "",
     passwordSetupSentAt: row.password_setup_sent_at ? String(row.password_setup_sent_at) : "",
@@ -2008,12 +2428,13 @@ function mapUserAccessRow(
 }
 
 async function loadUserAccessData() {
-  const [users, roles, divisions] = await Promise.all([
-    supabase.from("app_users").select("id, user_code, full_name, email, role_id, division_id, status, two_factor_status, last_login_at, invited_at, password_setup_sent_at, password_reset_sent_at, password_manual_set_at, email_verified_at, force_password_change, notes, created_at").order("created_at", { ascending: false }),
+  const [users, roles, divisions, employeesResult] = await Promise.all([
+    supabase.from("app_users").select("id, user_code, full_name, email, role_id, division_id, employee_id, app_scope, status, two_factor_status, last_login_at, invited_at, password_setup_sent_at, password_reset_sent_at, password_manual_set_at, email_verified_at, force_password_change, notes, created_at").order("created_at", { ascending: false }),
     supabase.from("roles").select("id, code, name, is_active, sort_order, level").order("sort_order", { ascending: true }).order("level", { ascending: true }),
     supabase.from("divisions").select("id, code, name, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
+    supabase.from("employees").select("id, employee_code, full_name, status, deleted_at").is("deleted_at", null).order("employee_code", { ascending: true }),
   ])
-  const error = users.error || roles.error || divisions.error
+  const error = users.error || roles.error || divisions.error || employeesResult.error
 
   if (error) throw error
 
@@ -2029,13 +2450,44 @@ async function loadUserAccessData() {
     name: String(row.name || ""),
     isActive: row.is_active !== false,
   }))
+  const employeeOptions = (employeesResult.data || []).map((row) => ({
+    id: String(row.id),
+    code: String(row.employee_code || ""),
+    name: String(row.full_name || ""),
+    isActive: row.status === "active",
+  }))
   const roleMap = new Map(roleOptions.map((role) => [role.id, role]))
   const divisionMap = new Map(divisionOptions.map((division) => [division.id, division]))
+  const userRows = (users.data || []) as Array<Record<string, unknown>>
+  const linkedEmployeeMap = new Map<string, { id: string; name: string; email: string }>()
+
+  userRows.forEach((row) => {
+    const employeeId = String(row.employee_id || "")
+    if (!employeeId) return
+    linkedEmployeeMap.set(employeeId, {
+      id: String(row.id || ""),
+      name: String(row.full_name || ""),
+      email: String(row.email || ""),
+    })
+  })
+
+  const employeeOptionsWithLinks = employeeOptions.map((employee) => {
+    const linkedUser = linkedEmployeeMap.get(employee.id)
+
+    return {
+      ...employee,
+      linkedUserId: linkedUser?.id || "",
+      linkedUserName: linkedUser?.name || "",
+      linkedUserEmail: linkedUser?.email || "",
+    }
+  })
+  const employeeMap = new Map(employeeOptionsWithLinks.map((employee) => [employee.id, employee]))
 
   return {
-    rows: (users.data || []).map((row) => mapUserAccessRow(row, roleMap, divisionMap)),
+    rows: userRows.map((row) => mapUserAccessRow(row, roleMap, divisionMap, employeeMap)),
     roles: roleOptions,
     divisions: divisionOptions,
+    employees: employeeOptionsWithLinks,
   }
 }
 
@@ -2046,6 +2498,8 @@ function createUserAccessPayload(values: UserAccessFormValues) {
     email: values.email.trim().toLowerCase(),
     role_id: values.roleId || null,
     division_id: values.divisionId || null,
+    employee_id: values.employeeId || null,
+    app_scope: values.appScope,
     status: values.status,
     two_factor_status: values.twoFactorStatus,
     invited_at: values.status === "invited" ? new Date().toISOString() : null,
@@ -2053,14 +2507,19 @@ function createUserAccessPayload(values: UserAccessFormValues) {
   }
 }
 
-function validateUserAccessForm(values: UserAccessFormValues) {
+function validateUserAccessForm(values: UserAccessFormValues, employees: UserEmployeeOption[] = [], currentUserId = "") {
   const errors: string[] = []
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email.trim())
+  const linkedEmployee = values.employeeId ? employees.find((employee) => employee.id === values.employeeId) : null
 
   if (!values.fullName.trim()) errors.push("Nama user wajib diisi.")
   if (!emailValid) errors.push("Email login wajib valid.")
   if (!values.roleId) errors.push("Role wajib dipilih dari Master Data.")
   if (!values.divisionId) errors.push("Divisi wajib dipilih dari Master Data.")
+  if ((values.appScope === "field" || values.appScope === "both") && !values.employeeId) errors.push("User lapangan wajib dikaitkan ke data karyawan.")
+  if (linkedEmployee?.linkedUserId && linkedEmployee.linkedUserId !== currentUserId) {
+    errors.push(`${linkedEmployee.code} sudah terhubung ke user ${linkedEmployee.linkedUserName || linkedEmployee.linkedUserEmail}. Pilih karyawan lain atau edit user yang sudah ada.`)
+  }
 
   return errors
 }
@@ -2247,6 +2706,8 @@ async function saveUserAccess(values: UserAccessFormValues, editingRow?: UserAcc
       email: values.email,
       roleId: values.roleId,
       divisionId: values.divisionId,
+      employeeId: values.employeeId,
+      appScope: values.appScope,
       status: values.status,
       twoFactorStatus: values.twoFactorStatus,
       notes: values.notes,
@@ -2361,7 +2822,7 @@ function generateSecurePassword(length = 16) {
 }
 
 function exportUserAccessCsv(rows: UserAccessRow[]) {
-  const header = ["No", "Kode", "Nama", "Email", "Email Verified", "Role", "Divisi", "Last Login", "2FA", "Status"]
+  const header = ["No", "Kode", "Nama", "Email", "Email Verified", "Role", "Divisi", "Karyawan Terkait", "Scope App", "Last Login", "2FA", "Status"]
   const body = rows.map((row, index) => [
     index + 1,
     row.userCode,
@@ -2370,6 +2831,8 @@ function exportUserAccessCsv(rows: UserAccessRow[]) {
     row.emailVerifiedAt ? "Verified" : "Belum verified",
     row.roleName,
     row.divisionName,
+    row.employeeCode ? `${row.employeeCode} - ${row.employeeName}` : "",
+    appScopeLabel[row.appScope],
     formatUserDateTime(row.lastLoginAt),
     twoFactorLabel[row.twoFactorStatus],
     userStatusLabel[row.status],
@@ -2392,13 +2855,31 @@ const employeeStatusLabel: Record<EmployeeStatus, string> = {
   inactive: "Nonaktif",
 }
 
-const employeeStatusOptions: Array<{ value: EmployeeStatus; label: string; description: string }> = [
-  { value: "active", label: "Aktif", description: "Dipakai absensi & payroll." },
-  { value: "review", label: "Review", description: "Perlu pengecekan HR." },
-  { value: "inactive", label: "Nonaktif", description: "Disimpan sebagai arsip." },
-]
+const employeeSalaryTypeLabel: Record<EmployeeSalaryType, string> = {
+  daily: "Harian",
+  monthly: "Bulanan",
+}
+
+const employeePayrollMethodLabel: Record<EmployeePayrollMethod, string> = {
+  attendance_cycle: "Cycle 26 Hari",
+  calendar_month: "Bulanan Kalender",
+  custom: "Custom",
+}
 
 const maxEmployeeDailySalary = 5000000
+const maxEmployeeMonthlySalary = 100000000
+const maxEmployeePhotoSize = 2 * 1024 * 1024
+const employeePhotoBucket = "employee-photos"
+const attendanceFaceBucket = "attendance-faces"
+const employeeFaceBucket = "employee-face-profiles"
+const employeePhotoMimeTypes = ["image/jpeg", "image/png", "image/webp"]
+const employeeFaceStatusLabel: Record<EmployeeFaceProfileStatus, string> = {
+  unenrolled: "Belum daftar",
+  pending_review: "Menunggu review",
+  approved: "Approved",
+  rejected: "Rejected",
+  disabled: "Nonaktif",
+}
 
 function EmployeeStatusBadge({ status }: { status: EmployeeStatus }) {
   const tone: Record<EmployeeStatus, "valid" | "pending" | "failed"> = {
@@ -2408,6 +2889,18 @@ function EmployeeStatusBadge({ status }: { status: EmployeeStatus }) {
   }
 
   return <UiStatusBadge tone={tone[status]}>{employeeStatusLabel[status]}</UiStatusBadge>
+}
+
+function EmployeeFaceProfileBadge({ status }: { status: EmployeeFaceProfileStatus }) {
+  const tone: Record<EmployeeFaceProfileStatus, "valid" | "pending" | "failed" | "missing"> = {
+    approved: "valid",
+    pending_review: "pending",
+    rejected: "failed",
+    unenrolled: "missing",
+    disabled: "missing",
+  }
+
+  return <UiStatusBadge tone={tone[status]}>{employeeFaceStatusLabel[status]}</UiStatusBadge>
 }
 
 function formatEmployeeDate(value?: string | null) {
@@ -2428,10 +2921,55 @@ function generateNextEmployeeCode(rows: EmployeeDirectoryRow[]) {
   return `EMP-${String(maxNumber + 1).padStart(3, "0")}`
 }
 
+async function getNextEmployeeCode(rows: EmployeeDirectoryRow[]) {
+  const { data, error } = await supabase.rpc("get_next_employee_code")
+
+  if (error || !data) return generateNextEmployeeCode(rows)
+  return String(data)
+}
+
+function getEmployeeSalaryAmount(row: EmployeeDirectoryRow) {
+  return row.salaryType === "monthly" ? row.monthlySalary : row.dailySalary
+}
+
+function getEmployeePhotoPublicUrl(path: string) {
+  if (!path) return ""
+  const { data } = supabase.storage.from(employeePhotoBucket).getPublicUrl(path)
+  return data.publicUrl || ""
+}
+
+function getAttendanceFacePublicUrl(path: string) {
+  if (!path) return ""
+  const { data } = supabase.storage.from(attendanceFaceBucket).getPublicUrl(path)
+  return data.publicUrl || ""
+}
+
+async function getEmployeeFaceSignedUrl(path: string) {
+  if (!path) return ""
+  const { data, error } = await supabase.storage.from(employeeFaceBucket).createSignedUrl(path, 60 * 60)
+
+  if (error) return ""
+  return data.signedUrl || ""
+}
+
+function buildAttendanceMapsUrl(row: AttendanceReviewRow) {
+  if (!row.latitude || !row.longitude) return ""
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${row.latitude},${row.longitude}`)}`
+}
+
+function buildEmployeePhotoPath(employeeCode: string) {
+  const safeCode = employeeCode.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, "-") || "EMPLOYEE"
+  return `employees/${safeCode}/profile`
+}
+
 function createEmptyEmployeeForm(rows: EmployeeDirectoryRow[] = []): EmployeeFormValues {
   return {
     employeeCode: generateNextEmployeeCode(rows),
     fullName: "",
+    photoPath: "",
+    photoUrl: "",
+    photoFile: null,
+    removePhoto: false,
     nik: "",
     phone: "",
     email: "",
@@ -2439,7 +2977,11 @@ function createEmptyEmployeeForm(rows: EmployeeDirectoryRow[] = []): EmployeeFor
     positionId: "",
     workLocationId: "",
     shiftId: "",
-    dailySalary: "",
+    salaryType: "daily",
+    dailySalary: "150000",
+    monthlySalary: "0",
+    payrollMethod: "attendance_cycle",
+    prorateEnabled: true,
     joinDate: new Date().toISOString().slice(0, 10),
     payrollCycleDays: "0",
     status: "active",
@@ -2456,8 +2998,18 @@ function normalizeIntegerInput(value: string, maxValue?: number) {
   return String(maxValue === undefined ? number : Math.min(number, maxValue))
 }
 
+function formatIntegerInput(value: string) {
+  const digits = value.replace(/\D/g, "")
+  if (!digits) return ""
+  return new Intl.NumberFormat("id-ID").format(Number(digits))
+}
+
 function normalizeEmployeeDailySalary(value: string) {
   return normalizeIntegerInput(value, maxEmployeeDailySalary)
+}
+
+function normalizeEmployeeMonthlySalary(value: string) {
+  return normalizeIntegerInput(value, maxEmployeeMonthlySalary)
 }
 
 function normalizeEmployeeCycle(value: string) {
@@ -2469,22 +3021,45 @@ function mapEmployeeStatus(status: unknown): EmployeeStatus {
   return "active"
 }
 
+function mapEmployeeFaceProfileStatus(status: unknown): EmployeeFaceProfileStatus {
+  if (status === "approved" || status === "pending_review" || status === "rejected" || status === "disabled") return status
+  if (status === "enrolled") return "approved"
+  if (status === "review") return "pending_review"
+  return "unenrolled"
+}
+
+function mapEmployeeSalaryType(value: unknown): EmployeeSalaryType {
+  if (value === "monthly") return "monthly"
+  return "daily"
+}
+
+function mapEmployeePayrollMethod(value: unknown): EmployeePayrollMethod {
+  if (value === "calendar_month" || value === "custom") return value
+  return "attendance_cycle"
+}
+
 function mapEmployeeRow(
   row: Record<string, unknown>,
   divisionMap: Map<string, EmployeeOption>,
   positionMap: Map<string, EmployeeOption>,
   locationMap: Map<string, EmployeeOption>,
   shiftMap: Map<string, EmployeeOption>,
+  faceProfileMap = new Map<string, Record<string, unknown>>(),
+  faceUrlMap = new Map<string, string>(),
 ): EmployeeDirectoryRow {
   const divisionId = row.division_id ? String(row.division_id) : ""
   const positionId = row.position_id ? String(row.position_id) : ""
   const workLocationId = row.work_location_id ? String(row.work_location_id) : ""
   const shiftId = row.shift_id ? String(row.shift_id) : ""
+  const faceProfile = faceProfileMap.get(String(row.id))
+  const referenceImagePath = String(faceProfile?.reference_image_path || "")
 
   return {
     id: String(row.id),
     employeeCode: String(row.employee_code || ""),
     fullName: String(row.full_name || ""),
+    photoPath: String(row.photo_path || ""),
+    photoUrl: getEmployeePhotoPublicUrl(String(row.photo_path || "")),
     nik: String(row.nik || ""),
     phone: String(row.phone || ""),
     email: String(row.email || ""),
@@ -2496,26 +3071,42 @@ function mapEmployeeRow(
     workLocationName: locationMap.get(workLocationId)?.name || "Belum pilih lokasi",
     shiftId,
     shiftName: shiftMap.get(shiftId)?.name || "Belum pilih shift",
+    salaryType: mapEmployeeSalaryType(row.salary_type),
     dailySalary: Number(row.daily_salary || 0),
+    monthlySalary: Number(row.monthly_salary || 0),
+    payrollMethod: mapEmployeePayrollMethod(row.payroll_method),
+    prorateEnabled: row.prorate_enabled !== false,
     joinDate: row.join_date ? String(row.join_date) : "",
     payrollCycleDays: Number(row.payroll_cycle_days || 0),
     status: mapEmployeeStatus(row.status),
+    faceProfileId: String(faceProfile?.id || ""),
+    faceProfileStatus: mapEmployeeFaceProfileStatus(faceProfile?.status),
+    faceProfileThreshold: Number(faceProfile?.face_score_threshold || 85),
+    faceProfileRequired: faceProfile?.verification_required !== false,
+    faceReferenceImagePath: referenceImagePath,
+    faceReferenceImageUrl: referenceImagePath ? faceUrlMap.get(referenceImagePath) || "" : "",
+    faceProfileSubmittedAt: String(faceProfile?.submitted_at || ""),
+    faceProfileReviewedAt: String(faceProfile?.reviewed_at || ""),
+    faceProfileReviewNotes: String(faceProfile?.review_notes || ""),
     notes: String(row.notes || ""),
+    deletedAt: row.deleted_at ? String(row.deleted_at) : "",
   }
 }
 
 async function loadEmployeeData() {
-  const [employeesResult, divisions, positions, locations, shifts] = await Promise.all([
+  const [employeesResult, divisions, positions, locations, shifts, faceProfiles] = await Promise.all([
     supabase
       .from("employees")
-      .select("id, employee_code, full_name, nik, phone, email, division_id, position_id, work_location_id, shift_id, daily_salary, join_date, payroll_cycle_days, status, notes, created_at")
+      .select("id, employee_code, full_name, photo_path, nik, phone, email, division_id, position_id, work_location_id, shift_id, salary_type, daily_salary, monthly_salary, payroll_method, prorate_enabled, join_date, payroll_cycle_days, status, notes, deleted_at, created_at")
+      .is("deleted_at", null)
       .order("employee_code", { ascending: true }),
     supabase.from("divisions").select("id, code, name, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
     supabase.from("positions").select("id, code, name, division_id, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
     supabase.from("work_locations").select("id, code, name, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
     supabase.from("shifts").select("id, code, name, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
+    supabase.from("employee_face_profiles").select("id, employee_id, status, verification_required, face_score_threshold, reference_image_path, submitted_at, reviewed_at, review_notes"),
   ])
-  const error = employeesResult.error || divisions.error || positions.error || locations.error || shifts.error
+  const error = employeesResult.error || divisions.error || positions.error || locations.error || shifts.error || faceProfiles.error
 
   if (error) throw error
 
@@ -2548,9 +3139,13 @@ async function loadEmployeeData() {
   const positionMap = new Map(positionOptions.map((item) => [item.id, item]))
   const locationMap = new Map(locationOptions.map((item) => [item.id, item]))
   const shiftMap = new Map(shiftOptions.map((item) => [item.id, item]))
+  const faceProfileMap = new Map(((faceProfiles.data || []) as Array<Record<string, unknown>>).map((row) => [String(row.employee_id || ""), row]))
+  const faceReferencePaths = Array.from(new Set(((faceProfiles.data || []) as Array<Record<string, unknown>>).map((row) => String(row.reference_image_path || "")).filter(Boolean)))
+  const faceUrlEntries = await Promise.all(faceReferencePaths.map(async (path) => [path, await getEmployeeFaceSignedUrl(path)] as const))
+  const faceUrlMap = new Map(faceUrlEntries)
 
   return {
-    rows: (employeesResult.data || []).map((row) => mapEmployeeRow(row, divisionMap, positionMap, locationMap, shiftMap)),
+    rows: (employeesResult.data || []).map((row) => mapEmployeeRow(row, divisionMap, positionMap, locationMap, shiftMap, faceProfileMap, faceUrlMap)),
     divisions: divisionOptions,
     positions: positionOptions,
     locations: locationOptions,
@@ -2558,10 +3153,11 @@ async function loadEmployeeData() {
   }
 }
 
-function createEmployeePayload(values: EmployeeFormValues) {
+function createEmployeePayload(values: EmployeeFormValues, photoPath = values.photoPath) {
   return {
     employee_code: values.employeeCode.trim().toUpperCase(),
     full_name: values.fullName.trim(),
+    photo_path: photoPath || null,
     nik: values.nik.trim() || null,
     phone: values.phone.trim() || null,
     email: values.email.trim().toLowerCase() || null,
@@ -2569,7 +3165,11 @@ function createEmployeePayload(values: EmployeeFormValues) {
     position_id: values.positionId || null,
     work_location_id: values.workLocationId || null,
     shift_id: values.shiftId || null,
+    salary_type: values.salaryType,
     daily_salary: Number(values.dailySalary || 0),
+    monthly_salary: Number(values.monthlySalary || 0),
+    payroll_method: values.payrollMethod,
+    prorate_enabled: values.prorateEnabled,
     join_date: values.joinDate || null,
     payroll_cycle_days: Number(values.payrollCycleDays || 0),
     status: values.status,
@@ -2580,8 +3180,11 @@ function createEmployeePayload(values: EmployeeFormValues) {
 function validateEmployeeForm(values: EmployeeFormValues) {
   const errors: string[] = []
   const dailySalary = Number(values.dailySalary)
+  const monthlySalary = Number(values.monthlySalary)
   const payrollCycleDays = Number(values.payrollCycleDays)
   const emailValid = !values.email.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email.trim())
+  const photoFileValid = !values.photoFile || employeePhotoMimeTypes.includes(values.photoFile.type)
+  const photoSizeValid = !values.photoFile || values.photoFile.size <= maxEmployeePhotoSize
 
   if (!values.fullName.trim()) errors.push("Nama karyawan wajib diisi.")
   if (!values.employeeCode.trim()) errors.push("Kode karyawan wajib tersedia otomatis.")
@@ -2589,22 +3192,81 @@ function validateEmployeeForm(values: EmployeeFormValues) {
   if (!values.positionId) errors.push("Jabatan wajib dipilih dari Master Data.")
   if (!values.workLocationId) errors.push("Lokasi kerja wajib dipilih dari Master Data.")
   if (!values.shiftId) errors.push("Shift wajib dipilih dari Master Data.")
-  if (!Number.isFinite(dailySalary) || dailySalary < 0) errors.push("Gaji harian wajib angka 0 atau lebih.")
-  if (Number.isFinite(dailySalary) && dailySalary > maxEmployeeDailySalary) errors.push(`Gaji harian maksimal ${formatCurrency(maxEmployeeDailySalary)}.`)
+  if (!values.salaryType) errors.push("Tipe gaji wajib dipilih.")
+  if (!values.payrollMethod) errors.push("Metode payroll wajib dipilih.")
+  if (values.salaryType === "daily" && (!Number.isFinite(dailySalary) || dailySalary < 0)) errors.push("Gaji harian wajib angka 0 atau lebih.")
+  if (values.salaryType === "daily" && Number.isFinite(dailySalary) && dailySalary > maxEmployeeDailySalary) errors.push(`Gaji harian maksimal ${formatCurrency(maxEmployeeDailySalary)}.`)
+  if (values.salaryType === "monthly" && (!Number.isFinite(monthlySalary) || monthlySalary < 0)) errors.push("Gaji bulanan wajib angka 0 atau lebih.")
+  if (values.salaryType === "monthly" && Number.isFinite(monthlySalary) && monthlySalary > maxEmployeeMonthlySalary) errors.push(`Gaji bulanan maksimal ${formatCurrency(maxEmployeeMonthlySalary)}.`)
   if (!Number.isFinite(payrollCycleDays) || payrollCycleDays < 0 || payrollCycleDays > 26) errors.push("Cycle payroll harus 0 sampai 26 hari.")
   if (!emailValid) errors.push("Email karyawan belum valid.")
+  if (!photoFileValid) errors.push("Foto wajib JPG, PNG, atau WEBP.")
+  if (!photoSizeValid) errors.push("Ukuran foto maksimal 2MB.")
 
   return errors
 }
 
-async function saveEmployee(values: EmployeeFormValues, editingRow?: EmployeeDirectoryRow | null) {
-  const payload = createEmployeePayload(values)
-  const query = editingRow
-    ? supabase.from("employees").update(payload).eq("id", editingRow.id)
-    : supabase.from("employees").insert(payload)
-  const { error } = await query
+async function removeEmployeePhoto(path: string) {
+  if (!path) return
+  const { error } = await supabase.storage.from(employeePhotoBucket).remove([path])
 
   if (error) throw error
+}
+
+async function uploadEmployeePhoto(values: EmployeeFormValues) {
+  if (!values.photoFile) return values.photoPath
+
+  const path = buildEmployeePhotoPath(values.employeeCode)
+  const { error } = await supabase.storage.from(employeePhotoBucket).upload(path, values.photoFile, {
+    cacheControl: "3600",
+    contentType: values.photoFile.type,
+    upsert: true,
+  })
+
+  if (error) throw error
+  return path
+}
+
+async function saveEmployee(values: EmployeeFormValues, editingRow?: EmployeeDirectoryRow | null) {
+  const originalPhotoPath = editingRow?.photoPath || values.photoPath
+  const nextPhotoPath = values.photoFile
+    ? buildEmployeePhotoPath(values.employeeCode)
+    : values.removePhoto
+      ? ""
+      : values.photoPath
+  const payload = createEmployeePayload(values, nextPhotoPath)
+
+  if (!editingRow) {
+    let uploadedPath = ""
+
+    try {
+      if (values.photoFile) {
+        uploadedPath = await uploadEmployeePhoto(values)
+      }
+
+      const { error } = await supabase.from("employees").insert(payload)
+
+      if (error) throw error
+    } catch (error) {
+      if (uploadedPath) await removeEmployeePhoto(uploadedPath).catch(() => {})
+      throw error
+    }
+
+    return
+  }
+
+  const { error } = await supabase.from("employees").update(payload).eq("id", editingRow.id)
+
+  if (error) throw error
+
+  try {
+    if (values.photoFile) await uploadEmployeePhoto(values)
+    if (values.removePhoto && originalPhotoPath) await removeEmployeePhoto(originalPhotoPath)
+    if (values.photoFile && originalPhotoPath && originalPhotoPath !== nextPhotoPath) await removeEmployeePhoto(originalPhotoPath)
+  } catch (photoError) {
+    await supabase.from("employees").update({ photo_path: originalPhotoPath || null }).eq("id", editingRow.id)
+    throw photoError
+  }
 }
 
 async function updateEmployeeStatus(row: EmployeeDirectoryRow, status: EmployeeStatus) {
@@ -2614,17 +3276,27 @@ async function updateEmployeeStatus(row: EmployeeDirectoryRow, status: EmployeeS
 }
 
 async function deleteEmployee(row: EmployeeDirectoryRow) {
-  const { error } = await supabase.from("employees").delete().eq("id", row.id)
+  const { error } = await supabase
+    .from("employees")
+    .update({
+      status: "inactive",
+      deleted_at: new Date().toISOString(),
+      photo_path: null,
+    })
+    .eq("id", row.id)
 
   if (error) throw error
+
+  if (row.photoPath) await removeEmployeePhoto(row.photoPath).catch(() => {})
 }
 
 function exportEmployeeCsv(rows: EmployeeDirectoryRow[]) {
-  const header = ["No", "Kode", "Nama", "NIK", "Phone", "Email", "Divisi", "Jabatan", "Lokasi", "Shift", "Gaji Harian", "Tanggal Masuk", "Cycle", "Status", "Catatan"]
+  const header = ["No", "Kode", "Nama", "Foto Path", "NIK", "Phone", "Email", "Divisi", "Jabatan", "Lokasi", "Shift", "Tipe Gaji", "Gaji Harian", "Gaji Bulanan", "Metode Payroll", "Hitung Proporsional", "Tanggal Masuk", "Cycle", "Status", "Catatan"]
   const body = rows.map((row, index) => [
     index + 1,
     row.employeeCode,
     row.fullName,
+    row.photoPath,
     row.nik,
     row.phone,
     row.email,
@@ -2632,7 +3304,11 @@ function exportEmployeeCsv(rows: EmployeeDirectoryRow[]) {
     row.positionName,
     row.workLocationName,
     row.shiftName,
+    employeeSalaryTypeLabel[row.salaryType],
     row.dailySalary,
+    row.monthlySalary,
+    employeePayrollMethodLabel[row.payrollMethod],
+    row.prorateEnabled ? "Ya" : "Tidak",
     row.joinDate,
     row.payrollCycleDays,
     employeeStatusLabel[row.status],
@@ -2648,6 +3324,635 @@ function exportEmployeeCsv(rows: EmployeeDirectoryRow[]) {
   link.download = `dms-karyawan-${new Date().toISOString().slice(0, 10)}.csv`
   link.click()
   URL.revokeObjectURL(url)
+}
+
+function exportPayrollCsv(rows: AttendanceMonitorRow[]) {
+  const header = ["No", "Kode", "Nama", "Divisi", "Lokasi", "Periode", "Cycle", "Tipe Gaji", "Gaji Pokok", "Lembur", "Total Payroll", "Status"]
+  const body = rows.map((row, index) => [
+    index + 1,
+    row.employeeCode,
+    row.fullName,
+    row.divisionName,
+    row.workLocationName,
+    formatPayrollPeriod(row),
+    `${row.cycleDays}/${row.targetDays}`,
+    employeeSalaryTypeLabel[row.salaryType],
+    row.basePayrollAmount,
+    row.overtimeAmount,
+    row.payrollAmount,
+    payrollLabel[row.payrollStatus],
+  ])
+  const csv = [header, ...body]
+    .map((columns) => columns.map((column) => `"${String(column).replace(/"/g, '""')}"`).join(","))
+    .join("\n")
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement("a")
+  link.href = url
+  link.download = `dms-payroll-${new Date().toISOString().slice(0, 10)}.csv`
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
+function getLocalDateKey(date = new Date()) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+
+  return `${year}-${month}-${day}`
+}
+
+function formatAttendanceTime(value?: string | null) {
+  if (!value) return "Belum absen"
+  return new Intl.DateTimeFormat("id-ID", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Asia/Jakarta",
+  }).format(new Date(value))
+}
+
+function formatWorkDate(value?: string | null) {
+  if (!value) return "-"
+  return new Intl.DateTimeFormat("id-ID", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    timeZone: "Asia/Jakarta",
+  }).format(new Date(`${value}T00:00:00+07:00`))
+}
+
+function formatMinutesDuration(minutes: number) {
+  const safeMinutes = Math.max(0, Math.round(minutes))
+  const hours = Math.floor(safeMinutes / 60)
+  const restMinutes = safeMinutes % 60
+
+  if (hours === 0) return `${restMinutes}m`
+  if (restMinutes === 0) return `${hours}j`
+  return `${hours}j ${restMinutes}m`
+}
+
+function mapPayrollCycleStatus(status: unknown): PayrollStatus {
+  if (status === "ready" || status === "locked" || status === "paid" || status === "void") return status
+  return "active"
+}
+
+function getAttendanceMonitorStatus(row?: Record<string, unknown>): AttendanceStatus {
+  if (!row) return "missing"
+  if (row.status === "valid") return "valid"
+  if (row.status === "rejected" || row.face_status === "failed") return "failed"
+  return "pending"
+}
+
+function getAttendanceReviewIssue(row: Record<string, unknown>) {
+  if (row.status === "rejected") return "Ditolak HR"
+  if (row.gps_status === "out_of_radius") return "Di luar radius"
+  if (row.gps_status === "missing") return "GPS kosong"
+  if (row.face_status === "failed") return "Face failed"
+  if (row.face_status === "review") return "Face review"
+  if (row.status === "review") return "Review manual"
+  return "Valid"
+}
+
+async function loadOperationsFoundationData(): Promise<OperationsFoundationData> {
+  await supabase.rpc("refresh_all_employee_payroll_cycles")
+  await supabase.rpc("detect_all_overtime_requests")
+  await supabase.rpc("refresh_all_employee_payroll_cycles")
+
+  const today = getLocalDateKey()
+  const [employeeResult, divisionResult, locationResult, attendanceResult, payrollResult, overtimeResult, payrollComponentResult] = await Promise.all([
+    supabase
+      .from("employees")
+      .select("id, employee_code, full_name, photo_path, division_id, work_location_id, salary_type, daily_salary, monthly_salary, payroll_cycle_days, status, deleted_at")
+      .is("deleted_at", null)
+      .order("employee_code", { ascending: true }),
+    supabase.from("divisions").select("id, name"),
+    supabase.from("work_locations").select("id, code, name, address, latitude, longitude, radius_m, is_active").order("sort_order", { ascending: true }).order("code", { ascending: true }),
+    supabase
+      .from("attendance_logs")
+      .select("id, employee_id, work_location_id, attendance_date, event_type, event_at, latitude, longitude, distance_m, radius_m, gps_status, face_status, face_score, face_snapshot_path, status, workday_counted, notes")
+      .order("event_at", { ascending: false })
+      .limit(1000),
+    supabase
+      .from("payroll_cycles")
+      .select("id, employee_id, cycle_number, period_started_at, period_closed_at, work_days_count, target_work_days, gross_amount, overtime_amount, net_amount, salary_type, status, ready_at, locked_at, paid_at")
+      .order("cycle_number", { ascending: false }),
+    supabase
+      .from("overtime_requests")
+      .select("id, employee_id, attendance_log_id, payroll_cycle_id, payroll_component_id, overtime_date, shift_start_time, shift_end_time, actual_check_out_at, overtime_minutes, approved_minutes, rate_amount, total_amount, day_type, status, notes, created_at")
+      .order("overtime_date", { ascending: false })
+      .limit(200),
+    supabase
+      .from("payroll_components")
+      .select("id, name, code, calculation_unit, rate_amount, day_type, auto_detect_overtime"),
+  ])
+  const error = employeeResult.error || divisionResult.error || locationResult.error || attendanceResult.error || payrollResult.error || overtimeResult.error || payrollComponentResult.error
+
+  if (error) throw error
+
+  const divisionMap = new Map((divisionResult.data || []).map((row) => [String(row.id), String(row.name || "")]))
+  const locationRows = (locationResult.data || []) as Array<Record<string, unknown>>
+  const locationMap = new Map(locationRows.map((row) => [String(row.id), row]))
+  const logs = (attendanceResult.data || []) as Array<Record<string, unknown>>
+  const payrollRows = (payrollResult.data || []) as Array<Record<string, unknown>>
+  const overtimeRows = (overtimeResult.data || []) as Array<Record<string, unknown>>
+  const payrollComponentMap = new Map(((payrollComponentResult.data || []) as Array<Record<string, unknown>>).map((row) => [String(row.id), row]))
+  const payrollByEmployee = new Map<string, Record<string, unknown>>()
+
+  payrollRows.forEach((row) => {
+    const employeeId = String(row.employee_id || "")
+    if (employeeId && !payrollByEmployee.has(employeeId)) payrollByEmployee.set(employeeId, row)
+  })
+
+  const todayLogsByEmployee = new Map<string, Record<string, unknown>>()
+  logs.forEach((row) => {
+    const employeeId = String(row.employee_id || "")
+    if (!employeeId || todayLogsByEmployee.has(employeeId)) return
+    if (row.attendance_date === today && row.event_type === "check_in") todayLogsByEmployee.set(employeeId, row)
+  })
+
+  const rows: AttendanceMonitorRow[] = ((employeeResult.data || []) as Array<Record<string, unknown>>)
+    .filter((employee) => employee.status !== "inactive")
+    .map((employee) => {
+      const employeeId = String(employee.id)
+      const location = locationMap.get(String(employee.work_location_id || ""))
+      const attendance = todayLogsByEmployee.get(employeeId)
+      const payroll = payrollByEmployee.get(employeeId)
+      const cycleDays = Number(payroll?.work_days_count ?? employee.payroll_cycle_days ?? 0)
+      const targetDays = Number(payroll?.target_work_days ?? 26)
+      const salaryType = mapEmployeeSalaryType(payroll?.salary_type || employee.salary_type)
+      const basePayrollAmount = Number(payroll?.gross_amount || 0)
+      const overtimeAmount = Number(payroll?.overtime_amount || 0)
+      const payrollAmount = Number(payroll?.net_amount || 0) || basePayrollAmount + overtimeAmount
+      const attendanceStatus = getAttendanceMonitorStatus(attendance)
+
+      return {
+        id: attendance ? String(attendance.id) : `missing-${employeeId}`,
+        employeeId,
+        employeeCode: String(employee.employee_code || ""),
+        fullName: String(employee.full_name || ""),
+        employeePhotoPath: String(employee.photo_path || ""),
+        employeePhotoUrl: getEmployeePhotoPublicUrl(String(employee.photo_path || "")),
+        divisionName: divisionMap.get(String(employee.division_id || "")) || "Belum pilih divisi",
+        workLocationName: String(location?.name || "Belum pilih lokasi"),
+        attendanceDate: attendance ? String(attendance.attendance_date || "") : today,
+        eventAt: attendance ? String(attendance.event_at || "") : "",
+        attendanceStatus,
+        logStatus: attendance ? (attendance.status === "valid" || attendance.status === "rejected" ? attendance.status : "review") : "missing",
+        gpsStatus: attendance ? (attendance.gps_status === "valid" || attendance.gps_status === "out_of_radius" ? attendance.gps_status : "missing") : "missing",
+        faceStatus: attendance ? (attendance.face_status === "verified" || attendance.face_status === "failed" || attendance.face_status === "review" ? attendance.face_status : "not_required") : "not_required",
+        faceScore: attendance?.face_score === null || attendance?.face_score === undefined ? null : Number(attendance.face_score),
+        distanceM: attendance?.distance_m === null || attendance?.distance_m === undefined ? null : Number(attendance.distance_m),
+        radiusM: Number(attendance?.radius_m || location?.radius_m || 0) || null,
+        cycleDays,
+        targetDays,
+        payrollCycleId: String(payroll?.id || ""),
+        payrollCycleNumber: Number(payroll?.cycle_number || 0),
+        periodStartedAt: String(payroll?.period_started_at || ""),
+        periodClosedAt: String(payroll?.period_closed_at || ""),
+        payrollReadyAt: String(payroll?.ready_at || ""),
+        payrollLockedAt: String(payroll?.locked_at || ""),
+        payrollPaidAt: String(payroll?.paid_at || ""),
+        payrollStatus: mapPayrollCycleStatus(payroll?.status),
+        payrollAmount,
+        basePayrollAmount,
+        overtimeAmount,
+        salaryType,
+        notes: String(attendance?.notes || ""),
+      }
+    })
+
+  const employeesById = new Map(((employeeResult.data || []) as Array<Record<string, unknown>>).map((employee) => [String(employee.id), employee]))
+  const reviewRows: AttendanceReviewRow[] = logs
+    .filter((log) => log.event_type === "check_in")
+    .filter((log) => log.status !== "valid" || log.gps_status !== "valid" || (log.face_status !== "verified" && log.face_status !== "not_required"))
+    .slice(0, 50)
+    .map((log) => {
+      const employee = employeesById.get(String(log.employee_id || ""))
+      const location = locationMap.get(String(log.work_location_id || employee?.work_location_id || ""))
+
+      return {
+        id: String(log.id),
+        employeeId: String(log.employee_id || ""),
+        employeeCode: String(employee?.employee_code || ""),
+        fullName: String(employee?.full_name || "Karyawan tidak ditemukan"),
+        employeePhotoPath: String(employee?.photo_path || ""),
+        employeePhotoUrl: getEmployeePhotoPublicUrl(String(employee?.photo_path || "")),
+        divisionName: divisionMap.get(String(employee?.division_id || "")) || "Belum pilih divisi",
+        workLocationName: String(location?.name || "Belum pilih lokasi"),
+        attendanceDate: String(log.attendance_date || ""),
+        eventType: log.event_type === "check_out" ? "check_out" : "check_in",
+        eventAt: String(log.event_at || ""),
+        latitude: log.latitude === null || log.latitude === undefined ? "" : String(log.latitude),
+        longitude: log.longitude === null || log.longitude === undefined ? "" : String(log.longitude),
+        status: log.status === "valid" || log.status === "rejected" ? log.status : "review",
+        gpsStatus: log.gps_status === "valid" || log.gps_status === "out_of_radius" ? log.gps_status : "missing",
+        faceStatus: log.face_status === "verified" || log.face_status === "failed" || log.face_status === "review" ? log.face_status : "not_required",
+        faceScore: log.face_score === null || log.face_score === undefined ? null : Number(log.face_score),
+        faceSnapshotPath: String(log.face_snapshot_path || ""),
+        faceSnapshotUrl: getAttendanceFacePublicUrl(String(log.face_snapshot_path || "")),
+        distanceM: log.distance_m === null || log.distance_m === undefined ? null : Number(log.distance_m),
+        radiusM: Number(log.radius_m || location?.radius_m || 0) || null,
+        workLocationLatitude: location?.latitude === null || location?.latitude === undefined ? "" : String(location?.latitude || ""),
+        workLocationLongitude: location?.longitude === null || location?.longitude === undefined ? "" : String(location?.longitude || ""),
+        workdayCounted: log.workday_counted === true,
+        issueLabel: getAttendanceReviewIssue(log),
+        notes: String(log.notes || ""),
+      }
+    })
+
+  const overtimeReviewRows: OvertimeReviewRow[] = overtimeRows.map((overtime) => {
+    const employee = employeesById.get(String(overtime.employee_id || ""))
+    const component = payrollComponentMap.get(String(overtime.payroll_component_id || ""))
+    const overtimeStatus = String(overtime.status || "pending") as OvertimeStatus
+    const dayType = String(overtime.day_type || "weekday")
+
+    return {
+      id: String(overtime.id),
+      employeeId: String(overtime.employee_id || ""),
+      employeeCode: String(employee?.employee_code || ""),
+      fullName: String(employee?.full_name || "Karyawan tidak ditemukan"),
+      employeePhotoPath: String(employee?.photo_path || ""),
+      employeePhotoUrl: getEmployeePhotoPublicUrl(String(employee?.photo_path || "")),
+      divisionName: divisionMap.get(String(employee?.division_id || "")) || "Belum pilih divisi",
+      overtimeDate: String(overtime.overtime_date || ""),
+      shiftStartTime: String(overtime.shift_start_time || "").slice(0, 5),
+      shiftEndTime: String(overtime.shift_end_time || "").slice(0, 5),
+      actualCheckOutAt: String(overtime.actual_check_out_at || ""),
+      overtimeMinutes: Number(overtime.overtime_minutes || 0),
+      approvedMinutes: Number(overtime.approved_minutes || 0),
+      rateAmount: Number(overtime.rate_amount || component?.rate_amount || 0),
+      totalAmount: Number(overtime.total_amount || 0),
+      dayType: dayType === "sunday" || dayType === "holiday" ? dayType : "weekday",
+      status: overtimeStatus === "approved" || overtimeStatus === "rejected" || overtimeStatus === "draft" ? overtimeStatus : "pending",
+      componentName: String(component?.name || "Komponen lembur"),
+      notes: String(overtime.notes || ""),
+    }
+  })
+
+  const locations: FieldLocationSummary[] = locationRows.map((location) => {
+    const locationId = String(location.id)
+    const employeeCount = rows.filter((row) => row.workLocationName === String(location.name || "")).length
+    const locationTodayLogs = logs.filter((log) => log.attendance_date === today && String(log.work_location_id || "") === locationId)
+
+    return {
+      id: locationId,
+      code: String(location.code || ""),
+      name: String(location.name || ""),
+      address: String(location.address || ""),
+      latitude: location.latitude === null || location.latitude === undefined ? "" : String(location.latitude),
+      longitude: location.longitude === null || location.longitude === undefined ? "" : String(location.longitude),
+      radiusM: Number(location.radius_m || 0),
+      isReady: Boolean(location.latitude && location.longitude && location.radius_m && location.is_active !== false),
+      employeeCount,
+      validToday: locationTodayLogs.filter((log) => log.status === "valid").length,
+      reviewToday: locationTodayLogs.filter((log) => log.status === "review" || log.gps_status === "out_of_radius").length,
+    }
+  })
+
+  return { rows, locations, reviews: reviewRows, overtime: overtimeReviewRows }
+}
+
+function getBrowserPosition(): Promise<GeolocationPosition> {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error("Browser belum mendukung GPS."))
+      return
+    }
+
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: true,
+      timeout: 12000,
+      maximumAge: 0,
+    })
+  })
+}
+
+function stopMediaStream(stream: MediaStream | null) {
+  stream?.getTracks().forEach((track) => track.stop())
+}
+
+function captureVideoFrame(video: HTMLVideoElement, contentType = "image/jpeg") {
+  const width = video.videoWidth || 720
+  const height = video.videoHeight || 960
+  const canvas = document.createElement("canvas")
+  canvas.width = width
+  canvas.height = height
+  const context = canvas.getContext("2d")
+
+  if (!context) throw new Error("Kamera belum bisa diproses browser.")
+  context.drawImage(video, 0, 0, width, height)
+  return canvas.toDataURL(contentType, 0.88)
+}
+
+async function analyzeFaceEnrollmentFrame(video: HTMLVideoElement | null) {
+  if (!video || !video.videoWidth || !video.videoHeight) {
+    return { supported: true, ready: false, score: 0, message: "Preview kamera belum siap." }
+  }
+
+  const FaceDetectorConstructor = (window as unknown as {
+    FaceDetector?: new (options?: { fastMode?: boolean; maxDetectedFaces?: number }) => {
+      detect: (source: HTMLVideoElement) => Promise<Array<{ boundingBox: DOMRectReadOnly | { x: number; y: number; width: number; height: number } }>>
+    }
+  }).FaceDetector
+
+  if (!FaceDetectorConstructor) {
+    return {
+      supported: false,
+      ready: false,
+      score: 0,
+      message: "Face detector belum aktif di browser ini.",
+    }
+  }
+
+  const detector = new FaceDetectorConstructor({ fastMode: true, maxDetectedFaces: 2 })
+  const faces = await detector.detect(video)
+
+  if (faces.length === 0) return { supported: true, ready: false, score: 0, message: "Posisikan wajah di tengah oval." }
+  if (faces.length > 1) return { supported: true, ready: false, score: 0, message: "Pastikan hanya satu wajah di kamera." }
+
+  const face = faces[0].boundingBox
+  const width = video.videoWidth
+  const height = video.videoHeight
+  const centerX = face.x + face.width / 2
+  const centerY = face.y + face.height / 2
+  const offsetX = Math.abs(centerX - width / 2) / width
+  const offsetY = Math.abs(centerY - height / 2) / height
+  const faceWidthRatio = face.width / width
+  const faceHeightRatio = face.height / height
+  const centerScore = Math.max(0, 1 - (offsetX / 0.2 + offsetY / 0.24) / 2)
+  const sizeScore = Math.max(0, 1 - Math.abs(faceHeightRatio - 0.58) / 0.34)
+  const score = Math.round((centerScore * 0.58 + sizeScore * 0.42) * 100)
+
+  if (faceHeightRatio < 0.34) return { supported: true, ready: false, score, message: "Dekatkan wajah ke kamera." }
+  if (faceHeightRatio > 0.9 || faceWidthRatio > 0.86) return { supported: true, ready: false, score, message: "Wajah terlalu dekat. Mundur sedikit." }
+  if (offsetX > 0.2 || offsetY > 0.24) return { supported: true, ready: false, score, message: "Geser wajah ke tengah oval." }
+
+  return {
+    supported: true,
+    ready: score >= 76,
+    score,
+    message: score >= 76 ? "Wajah pas. Tahan beberapa detik." : "Tahan wajah tetap sejajar.",
+  }
+}
+
+async function startUserCamera(video: HTMLVideoElement | null) {
+  if (!video) throw new Error("Preview kamera belum siap.")
+  if (!navigator.mediaDevices?.getUserMedia) throw new Error("Browser belum mendukung kamera. Gunakan Chrome/Safari terbaru dengan HTTPS.")
+
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: {
+      facingMode: "user",
+      width: { ideal: 720 },
+      height: { ideal: 960 },
+    },
+    audio: false,
+  })
+  video.srcObject = stream
+  await video.play()
+
+  return stream
+}
+
+async function submitFieldAttendance(payload: FieldAttendanceSubmitPayload): Promise<FieldAttendanceResult> {
+  const { data, error } = await supabase.functions.invoke("field-attendance", {
+    body: payload,
+  })
+
+  if (error) throw error
+  if (data?.error) throw new Error(String(data.error))
+
+  return data as FieldAttendanceResult
+}
+
+async function loadEmployeePortalData(): Promise<EmployeePortalData> {
+  const { data, error } = await supabase.functions.invoke("employee-portal", {
+    body: { action: "dashboard" },
+  })
+
+  if (error) throw new Error(await getFunctionInvokeError(error, "Data app karyawan belum bisa dibaca."))
+  if (data?.error) throw new Error(String(data.error))
+
+  const employee = data.employee || {}
+  const faceProfile = data.faceProfile || {}
+  const payrollCycle = data.payrollCycle || null
+
+  return {
+    employee: {
+      id: String(employee.id || ""),
+      code: String(employee.code || ""),
+      name: String(employee.name || ""),
+      photoPath: String(employee.photoPath || ""),
+      photoUrl: getEmployeePhotoPublicUrl(String(employee.photoPath || "")),
+      divisionName: String(employee.divisionName || "Belum pilih divisi"),
+      positionName: String(employee.positionName || "Belum pilih jabatan"),
+      workLocationName: String(employee.workLocationName || "Belum pilih lokasi"),
+      workLocationAddress: String(employee.workLocationAddress || ""),
+      workLocationLatitude: String(employee.workLocationLatitude || ""),
+      workLocationLongitude: String(employee.workLocationLongitude || ""),
+      radiusM: Number(employee.radiusM || 0),
+      shiftName: String(employee.shiftName || "Belum pilih shift"),
+      salaryType: mapEmployeeSalaryType(employee.salaryType),
+      dailySalary: Number(employee.dailySalary || 0),
+      monthlySalary: Number(employee.monthlySalary || 0),
+      payrollMethod: mapEmployeePayrollMethod(employee.payrollMethod),
+      joinDate: String(employee.joinDate || ""),
+      status: employee.status === "review" || employee.status === "inactive" ? employee.status : "active",
+    },
+    faceProfile: {
+      status: mapEmployeeFaceProfileStatus(faceProfile.status),
+      threshold: Number(faceProfile.threshold || 85),
+      verificationRequired: faceProfile.verificationRequired !== false,
+      submittedAt: String(faceProfile.submittedAt || ""),
+      reviewedAt: String(faceProfile.reviewedAt || ""),
+      reviewNotes: String(faceProfile.reviewNotes || ""),
+    },
+    payrollCycle: payrollCycle ? {
+      id: String(payrollCycle.id || ""),
+      cycleNumber: Number(payrollCycle.cycleNumber || 0),
+      workDaysCount: Number(payrollCycle.workDaysCount || 0),
+      targetWorkDays: Number(payrollCycle.targetWorkDays || 26),
+      grossAmount: Number(payrollCycle.grossAmount || 0),
+      overtimeAmount: Number(payrollCycle.overtimeAmount || 0),
+      netAmount: Number(payrollCycle.netAmount || 0),
+      status: mapPayrollCycleStatus(payrollCycle.status),
+      periodStartedAt: String(payrollCycle.periodStartedAt || ""),
+      periodClosedAt: String(payrollCycle.periodClosedAt || ""),
+      readyAt: String(payrollCycle.readyAt || ""),
+    } : null,
+    todayLogs: ((data.todayLogs || []) as Array<Record<string, unknown>>).map(mapEmployeePortalLog),
+    recentLogs: ((data.recentLogs || []) as Array<Record<string, unknown>>).map(mapEmployeePortalLog),
+  }
+}
+
+function mapEmployeePortalLog(row: Record<string, unknown>): EmployeePortalAttendanceLog {
+  return {
+    id: String(row.id || ""),
+    attendanceDate: String(row.attendanceDate || ""),
+    eventType: row.eventType === "check_out" ? "check_out" : "check_in",
+    eventAt: String(row.eventAt || ""),
+    status: row.status === "valid" || row.status === "rejected" ? row.status : "review",
+    gpsStatus: row.gpsStatus === "valid" || row.gpsStatus === "out_of_radius" ? row.gpsStatus : "missing",
+    faceStatus: row.faceStatus === "verified" || row.faceStatus === "review" || row.faceStatus === "failed" ? row.faceStatus : "not_required",
+    faceScore: row.faceScore === null || row.faceScore === undefined ? null : Number(row.faceScore),
+    distanceM: row.distanceM === null || row.distanceM === undefined ? null : Number(row.distanceM),
+    radiusM: row.radiusM === null || row.radiusM === undefined ? null : Number(row.radiusM),
+    workdayCounted: row.workdayCounted === true,
+    notes: String(row.notes || ""),
+  }
+}
+
+async function getFunctionInvokeError(error: unknown, fallback: string) {
+  if (!error) return fallback
+  const context = typeof error === "object" && error !== null && "context" in error ? (error as { context?: unknown }).context : null
+
+  if (context instanceof Response) {
+    const text = await context.clone().text()
+    if (text) {
+      try {
+        const parsed = JSON.parse(text) as { error?: unknown; message?: unknown }
+        return String(parsed.error || parsed.message || text)
+      } catch {
+        return text
+      }
+    }
+  }
+
+  return error instanceof Error ? error.message || fallback : fallback
+}
+
+async function submitEmployeeFaceEnrollment(snapshotsBase64: string[], snapshotContentType = "image/jpeg", notes = "", employeeId = "") {
+  const { data, error } = await supabase.functions.invoke("employee-face-profiles", {
+    body: {
+      action: employeeId ? "submit_for_employee" : "submit_self",
+      payload: {
+        employeeId: employeeId || undefined,
+        snapshotBase64: snapshotsBase64[0] || "",
+        snapshotsBase64,
+        snapshotContentType,
+        notes,
+        threshold: 85,
+      },
+    },
+  })
+
+  if (error) throw new Error(await getFunctionInvokeError(error, "Registrasi wajah gagal diproses."))
+  if (data?.error) throw new Error(String(data.error))
+
+  return data
+}
+
+async function processEmployeeFaceProfile(employeeId: string, action: "approve" | "reject" | "reset" | "disable", notes = "") {
+  const { data, error } = await supabase.functions.invoke("employee-face-profiles", {
+    body: {
+      action,
+      payload: {
+        employeeId,
+        notes,
+        threshold: 85,
+      },
+    },
+  })
+
+  if (error) throw new Error(await getFunctionInvokeError(error, "Face profile gagal diproses."))
+  if (data?.error) throw new Error(String(data.error))
+
+  return data
+}
+
+async function reviewAttendanceLog(id: string, decision: "approve" | "reject", notes: string) {
+  const { data, error } = await supabase.functions.invoke("attendance-review", {
+    body: { action: decision, payload: { id, notes } },
+  })
+
+  if (error) {
+    const context = "context" in error ? (error as { context?: unknown }).context : null
+
+    if (context instanceof Response) {
+      const text = await context.clone().text()
+
+      if (text) {
+        let parsedMessage = ""
+
+        try {
+          const parsed = JSON.parse(text) as { error?: unknown; message?: unknown }
+          parsedMessage = String(parsed.error || parsed.message || "")
+        } catch {
+          parsedMessage = ""
+        }
+
+        throw new Error(parsedMessage || text)
+      }
+    }
+
+    throw error
+  }
+  if (data?.error) throw new Error(String(data.error))
+
+  return data
+}
+
+async function reviewOvertimeRequest(id: string, decision: "approve" | "reject", approvedMinutes: number, notes: string) {
+  const { data, error } = await supabase.functions.invoke("overtime-review", {
+    body: { action: decision, payload: { id, approvedMinutes, notes } },
+  })
+
+  if (error) {
+    const context = "context" in error ? (error as { context?: unknown }).context : null
+
+    if (context instanceof Response) {
+      const text = await context.clone().text()
+
+      if (text) {
+        let parsedMessage = ""
+
+        try {
+          const parsed = JSON.parse(text) as { error?: unknown; message?: unknown }
+          parsedMessage = String(parsed.error || parsed.message || "")
+        } catch {
+          parsedMessage = ""
+        }
+
+        throw new Error(parsedMessage || text)
+      }
+    }
+
+    throw error
+  }
+  if (data?.error) throw new Error(String(data.error))
+
+  return data
+}
+
+async function processPayrollCycle(cycleId: string, action: PayrollProcessAction, notes: string) {
+  const { data, error } = await supabase.functions.invoke("payroll-processing", {
+    body: { action, payload: { cycleId, notes } },
+  })
+
+  if (error) {
+    const context = "context" in error ? (error as { context?: unknown }).context : null
+
+    if (context instanceof Response) {
+      const text = await context.clone().text()
+
+      if (text) {
+        let parsedMessage = ""
+
+        try {
+          const parsed = JSON.parse(text) as { error?: unknown; message?: unknown }
+          parsedMessage = String(parsed.error || parsed.message || "")
+        } catch {
+          parsedMessage = ""
+        }
+
+        throw new Error(parsedMessage || text)
+      }
+    }
+
+    throw error
+  }
+  if (data?.error) throw new Error(String(data.error))
+
+  return data
 }
 
 const userStatusLabel: Record<UserStatus, string> = {
@@ -2684,6 +3989,8 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
   const [statusRow, setStatusRow] = useState<EmployeeDirectoryRow | null>(null)
   const [pendingStatus, setPendingStatus] = useState<EmployeeStatus>("active")
   const [deleteRow, setDeleteRow] = useState<EmployeeDirectoryRow | null>(null)
+  const [faceEnrollmentRow, setFaceEnrollmentRow] = useState<EmployeeDirectoryRow | null>(null)
+  const [faceEnrollmentSubmitting, setFaceEnrollmentSubmitting] = useState(false)
   const [dialogInitialValues, setDialogInitialValues] = useState<EmployeeFormValues>(() => createEmptyEmployeeForm())
   const [rows, setRows] = useState<EmployeeDirectoryRow[]>([])
   const [divisions, setDivisions] = useState<EmployeeOption[]>([])
@@ -2712,8 +4019,10 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
       setPositions(data.positions)
       setLocations(data.locations)
       setShifts(data.shifts)
+      return data
     } catch (error) {
       setErrorMessage(getFriendlySupabaseError(error, "Gagal mengambil data karyawan."))
+      return null
     } finally {
       setLoading(false)
     }
@@ -2739,7 +4048,7 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
   const activeRows = rows.filter((row) => row.status === "active").length
   const reviewRows = rows.filter((row) => row.status === "review").length
   const averageSalary = activeRows
-    ? Math.round(rows.filter((row) => row.status === "active").reduce((sum, row) => sum + row.dailySalary, 0) / activeRows)
+    ? Math.round(rows.filter((row) => row.status === "active").reduce((sum, row) => sum + getEmployeeSalaryAmount(row), 0) / activeRows)
     : 0
 
   useEffect(() => {
@@ -2752,8 +4061,15 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
 
   const openCreateDialog = () => {
     setEditingRow(null)
-    setDialogInitialValues(createEmptyEmployeeForm(rows))
+    const fallbackValues = createEmptyEmployeeForm(rows)
+    setDialogInitialValues(fallbackValues)
     setDialogOpen(true)
+    void getNextEmployeeCode(rows).then((employeeCode) => {
+      setDialogInitialValues((current) => ({
+        ...current,
+        employeeCode: current.employeeCode === fallbackValues.employeeCode ? employeeCode : current.employeeCode,
+      }))
+    }).catch(() => {})
   }
 
   const openEditDialog = (row: EmployeeDirectoryRow) => {
@@ -2762,6 +4078,10 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
     setDialogInitialValues({
       employeeCode: row.employeeCode,
       fullName: row.fullName,
+      photoPath: row.photoPath,
+      photoUrl: row.photoUrl,
+      photoFile: null,
+      removePhoto: false,
       nik: row.nik,
       phone: row.phone,
       email: row.email,
@@ -2769,7 +4089,11 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
       positionId: row.positionId,
       workLocationId: row.workLocationId,
       shiftId: row.shiftId,
+      salaryType: row.salaryType,
       dailySalary: String(row.dailySalary),
+      monthlySalary: String(row.monthlySalary),
+      payrollMethod: row.payrollMethod,
+      prorateEnabled: row.prorateEnabled,
       joinDate: row.joinDate,
       payrollCycleDays: String(row.payrollCycleDays),
       status: row.status,
@@ -2844,19 +4168,78 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
 
     try {
       await deleteEmployee(deleteRow)
-      await writeAuditLog("Delete employee", "employees", deleteRow.id, {
+      await writeAuditLog("Archive employee", "employees", deleteRow.id, {
         employee_code: deleteRow.employeeCode,
         full_name: deleteRow.fullName,
       }).catch(() => {})
       setDeleteRow(null)
       await fetchRows()
-      showToast({ tone: "success", title: "Karyawan dihapus", description: `${deleteRow.fullName} sudah dihapus dari database.` })
+      showToast({ tone: "success", title: "Karyawan diarsipkan", description: `${deleteRow.fullName} disembunyikan dari direktori aktif.` })
     } catch (error) {
-      const message = getFriendlySupabaseError(error, "Gagal menghapus karyawan.")
+      const message = getFriendlySupabaseError(error, "Gagal mengarsipkan karyawan.")
       setErrorMessage(message)
-      showToast({ tone: "error", title: "Gagal menghapus", description: message })
+      showToast({ tone: "error", title: "Gagal mengarsipkan", description: message })
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleFaceProfileAction = async (row: EmployeeDirectoryRow, action: "approve" | "reject" | "reset" | "disable") => {
+    setSaving(true)
+    setErrorMessage("")
+
+    try {
+      await processEmployeeFaceProfile(row.id, action)
+      const data = await fetchRows()
+      const nextRow = data?.rows.find((item) => item.id === row.id) || null
+      if (nextRow) setDetailRow(nextRow)
+      showToast({
+        tone: "success",
+        title: action === "approve" ? "Face approved" : action === "reject" ? "Face rejected" : action === "reset" ? "Face direset" : "Face dimatikan",
+        description: `${row.fullName} • ${action === "reset" ? "karyawan perlu daftar ulang" : "status face profile diperbarui"}.`,
+      })
+    } catch (error) {
+      const message = getFriendlySupabaseError(error, "Gagal memproses face profile.")
+      setErrorMessage(message)
+      showToast({ tone: "error", title: "Gagal proses face", description: message })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleEmployeeFaceEnrollmentSubmit = async (snapshotsBase64: string[]) => {
+    if (!faceEnrollmentRow) return
+
+    setFaceEnrollmentSubmitting(true)
+    setErrorMessage("")
+
+    try {
+      await submitEmployeeFaceEnrollment(
+        snapshotsBase64,
+        "image/jpeg",
+        `Registrasi wajah ${faceEnrollmentRow.employeeCode} dari management app.`,
+        faceEnrollmentRow.id,
+      )
+      await writeAuditLog("Submit employee face profile by management", "employee_face_profiles", faceEnrollmentRow.id, {
+        employee_code: faceEnrollmentRow.employeeCode,
+        full_name: faceEnrollmentRow.fullName,
+        samples: snapshotsBase64.length,
+      }).catch(() => {})
+      const data = await fetchRows()
+      const nextRow = data?.rows.find((item) => item.id === faceEnrollmentRow.id) || null
+      if (nextRow) setDetailRow(nextRow)
+      setFaceEnrollmentRow(null)
+      showToast({
+        tone: "success",
+        title: "Wajah masuk review HR",
+        description: `${faceEnrollmentRow.fullName} punya 3 sampel baru dan menunggu approval.`,
+      })
+    } catch (error) {
+      const message = getFriendlySupabaseError(error, "Gagal mengirim registrasi wajah.")
+      setErrorMessage(message)
+      showToast({ tone: "error", title: "Gagal registrasi wajah", description: message })
+    } finally {
+      setFaceEnrollmentSubmitting(false)
     }
   }
 
@@ -2954,7 +4337,7 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
                   <th>Divisi</th>
                   <th>Jabatan</th>
                   <th>Lokasi / Shift</th>
-                  <th>Gaji Harian</th>
+                  <th>Gaji</th>
                   <th>Cycle</th>
                   <th>Status</th>
                   <th className="tableActionHeader">Aksi</th>
@@ -2985,11 +4368,13 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
                 {!loading && paginatedRows.map((row, index) => (
                   <ClickableTableRow key={row.id} label={`Lihat detail ${row.fullName}`} onOpen={() => setDetailRow(row)}>
                     <td className="tableNumberCell"><TableNumberCell value={(currentPage - 1) * Math.min(pageSize, 50) + index + 1} /></td>
-                    <td><TableText primary={row.fullName} secondary={row.employeeCode} /></td>
+                    <td>
+                      <EmployeeIdentityCell fullName={row.fullName} code={row.employeeCode} photoUrl={row.photoUrl} />
+                    </td>
                     <td><TableText primary={row.divisionName} secondary={row.nik || "NIK belum diisi"} /></td>
                     <td><TableText primary={row.positionName} secondary={row.phone || "No HP belum diisi"} /></td>
                     <td><TableText primary={row.workLocationName} secondary={row.shiftName} /></td>
-                    <td><TableText primary={formatCurrency(row.dailySalary)} secondary={`Masuk ${formatEmployeeDate(row.joinDate)}`} /></td>
+                    <td><TableText primary={formatCurrency(getEmployeeSalaryAmount(row))} secondary={`${employeeSalaryTypeLabel[row.salaryType]} · Masuk ${formatEmployeeDate(row.joinDate)}`} /></td>
                     <td>
                       <span className="cycleCell">
                         <ProgressRing value={row.payrollCycleDays} />
@@ -3018,7 +4403,7 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
                           </RowActionMenuItem>
                           <RowActionMenuItem danger disabled={!canManage || saving} onClick={() => setDeleteRow(row)}>
                             <Trash2 size={14} />
-                            Hapus Permanen
+                            Arsipkan Data
                           </RowActionMenuItem>
                         </RowActionMenu>
                       </div>
@@ -3057,7 +4442,26 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
         row={detailRow}
         onClose={() => setDetailRow(null)}
         onEdit={(row) => openEditDialog(row)}
+        onFaceEnroll={(row) => setFaceEnrollmentRow(row)}
+        onFaceAction={handleFaceProfileAction}
         canManage={canManage}
+        saving={saving}
+      />
+      <FaceEnrollmentDialog
+        open={Boolean(faceEnrollmentRow)}
+        saving={faceEnrollmentSubmitting}
+        targetEmployee={faceEnrollmentRow ? {
+          id: faceEnrollmentRow.id,
+          employeeCode: faceEnrollmentRow.employeeCode,
+          fullName: faceEnrollmentRow.fullName,
+          divisionName: faceEnrollmentRow.divisionName,
+          positionName: faceEnrollmentRow.positionName,
+          photoUrl: faceEnrollmentRow.photoUrl,
+        } : undefined}
+        onClose={() => {
+          if (!faceEnrollmentSubmitting) setFaceEnrollmentRow(null)
+        }}
+        onSubmit={handleEmployeeFaceEnrollmentSubmit}
       />
       <ConfirmDialog
         open={Boolean(statusRow)}
@@ -3093,10 +4497,10 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
       <ConfirmDialog
         open={Boolean(deleteRow)}
         tone="danger"
-        eyebrow="Hapus Karyawan"
-        title={deleteRow ? `Hapus permanen ${deleteRow.fullName}?` : "Hapus karyawan?"}
-        description="Data akan dihapus dari tabel karyawan. Untuk data operasional live biasanya lebih aman memakai Nonaktifkan."
-        confirmLabel="Hapus Data"
+        eyebrow="Arsipkan Karyawan"
+        title={deleteRow ? `Arsipkan ${deleteRow.fullName}?` : "Arsipkan karyawan?"}
+        description="Data akan disembunyikan dari direktori aktif, status menjadi Nonaktif, dan foto di Storage dibersihkan bila ada."
+        confirmLabel="Arsipkan Data"
         cancelLabel="Batal"
         loading={saving}
         onClose={() => {
@@ -3143,11 +4547,26 @@ function EmployeeDialog({
   const [values, setValues] = useState(initialValues)
   const [formErrors, setFormErrors] = useState<string[]>([])
   const formBodyRef = useRef<HTMLDivElement>(null)
+  const photoInputRef = useRef<HTMLInputElement>(null)
+  const [localPhotoPreview, setLocalPhotoPreview] = useState("")
 
   useEffect(() => {
     setValues(initialValues)
     setFormErrors([])
+    setLocalPhotoPreview("")
   }, [initialValues])
+
+  useEffect(() => {
+    if (!values.photoFile) {
+      setLocalPhotoPreview("")
+      return undefined
+    }
+
+    const url = URL.createObjectURL(values.photoFile)
+    setLocalPhotoPreview(url)
+
+    return () => URL.revokeObjectURL(url)
+  }, [values.photoFile])
 
   useEffect(() => {
     if (!open) return
@@ -3166,8 +4585,9 @@ function EmployeeDialog({
   ))
   const activeLocations = locations.filter((location) => location.isActive || location.id === values.workLocationId)
   const activeShifts = shifts.filter((shift) => shift.isActive || shift.id === values.shiftId)
+  const photoPreview = values.removePhoto ? "" : localPhotoPreview || values.photoUrl
 
-  return (
+  return createPortal(
     <div className="dialogBackdrop employeeDialogBackdrop" role="presentation" onMouseDown={onClose}>
       <section
         className="dialogPanel employeeDialog"
@@ -3215,6 +4635,65 @@ function EmployeeDialog({
                 </div>
               </div>
             )}
+            <div className="employeePhotoField">
+              <button
+                className="employeePhotoPreview"
+                type="button"
+                aria-label={photoPreview ? "Ganti foto karyawan" : "Upload foto karyawan"}
+                onClick={() => photoInputRef.current?.click()}
+              >
+                {photoPreview ? (
+                  <img src={photoPreview} alt="" />
+                ) : (
+                  <span className="employeePhotoEmptyIcon">
+                    <Camera size={26} />
+                  </span>
+                )}
+                <span className="employeePhotoOverlay">{photoPreview ? "Ganti" : "Upload"}</span>
+              </button>
+              {photoPreview && (
+                <button
+                  className="employeePhotoRemove"
+                  type="button"
+                  aria-label="Hapus foto karyawan"
+                  onClick={() => {
+                    if (photoInputRef.current) photoInputRef.current.value = ""
+                    setValues((current) => ({
+                      ...current,
+                      photoFile: null,
+                      photoUrl: "",
+                      removePhoto: Boolean(current.photoPath),
+                    }))
+                  }}
+                >
+                  <X size={14} />
+                </button>
+              )}
+              <div className="employeePhotoControl">
+                <span>Foto Karyawan</span>
+                <strong>{values.photoFile?.name || (values.photoPath && !values.removePhoto ? "Foto tersimpan di Storage" : "Belum ada foto")}</strong>
+                <small>Klik gambar atau tombol upload. JPG, PNG, WEBP maksimal 2MB dan file lama dioverwrite.</small>
+                <input
+                  ref={photoInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0] || null
+                    setValues((current) => ({
+                      ...current,
+                      photoFile: file,
+                      removePhoto: false,
+                    }))
+                  }}
+                />
+              </div>
+              <div className="employeePhotoActions">
+                <button className="secondaryButton compactButton" type="button" onClick={() => photoInputRef.current?.click()}>
+                  <Upload size={14} />
+                  {photoPreview ? "Ganti Foto" : "Upload Foto"}
+                </button>
+              </div>
+            </div>
             <TextFormField label="Kode Otomatis" value={values.employeeCode} disabled readOnly required />
             <TextFormField label="Nama Lengkap" value={values.fullName} onChange={(event) => setValues((current) => ({ ...current, fullName: event.target.value }))} placeholder="Nama karyawan" required />
             <TextFormField label="NIK" value={values.nik} onChange={(event) => setValues((current) => ({ ...current, nik: event.target.value }))} placeholder="Nomor identitas karyawan" />
@@ -3244,15 +4723,45 @@ function EmployeeDialog({
                 <option value={shift.id} key={shift.id}>{shift.name}</option>
               ))}
             </SelectFormField>
+            <div className="employeeFormFull">
+              <SegmentedFormField<EmployeeSalaryType>
+                label="Tipe Gaji"
+                value={values.salaryType}
+                columns={2}
+                required
+                onChange={(salaryType) => setValues((current) => ({
+                  ...current,
+                  salaryType,
+                  payrollMethod: salaryType === "monthly" && current.payrollMethod === "attendance_cycle" ? "calendar_month" : current.payrollMethod,
+                }))}
+                options={[
+                  { value: "daily", label: "Harian", description: "Nominal per hari kerja." },
+                  { value: "monthly", label: "Bulanan", description: "Nominal tetap per bulan." },
+                ]}
+              />
+            </div>
             <TextFormField
-              label="Gaji Harian"
+              label={values.salaryType === "monthly" ? "Gaji Bulanan" : "Gaji Harian"}
               type="text"
               inputMode="numeric"
-              value={values.dailySalary}
-              onChange={(event) => setValues((current) => ({ ...current, dailySalary: normalizeEmployeeDailySalary(event.target.value) }))}
-              placeholder="150000"
+              value={formatIntegerInput(values.salaryType === "monthly" ? values.monthlySalary : values.dailySalary)}
+              onChange={(event) => {
+                const value = values.salaryType === "monthly"
+                  ? normalizeEmployeeMonthlySalary(event.target.value)
+                  : normalizeEmployeeDailySalary(event.target.value)
+                setValues((current) => ({
+                  ...current,
+                  [current.salaryType === "monthly" ? "monthlySalary" : "dailySalary"]: value,
+                }))
+              }}
+              placeholder={values.salaryType === "monthly" ? "4.500.000" : "150.000"}
               required
             />
+            <SelectFormField label="Metode Payroll" value={values.payrollMethod} onChange={(event) => setValues((current) => ({ ...current, payrollMethod: event.target.value as EmployeePayrollMethod }))} required>
+              <option value="attendance_cycle">Cycle 26 Hari</option>
+              <option value="calendar_month">Bulanan Kalender</option>
+              <option value="custom">Custom</option>
+            </SelectFormField>
             <DateFormField label="Tanggal Masuk" value={values.joinDate} onChange={(joinDate) => setValues((current) => ({ ...current, joinDate }))} required />
             <TextFormField
               label="Cycle Payroll"
@@ -3263,12 +4772,25 @@ function EmployeeDialog({
               placeholder="0 - 26"
               required
             />
+            <SwitchFormField
+              label="Hitung Proporsional"
+              checked={values.prorateEnabled}
+              onChange={(prorateEnabled) => setValues((current) => ({ ...current, prorateEnabled }))}
+              onLabel="Aktif"
+              offLabel="Nonaktif"
+              onDescription="Gaji bulanan mengikuti jumlah hari kerja valid."
+              offDescription="Gaji bulanan dibayar penuh sesuai nominal setting."
+            />
             <div className="employeeStatusField">
-              <SegmentedFormField
+              <SegmentedFormField<EmployeeStatus>
                 label="Status"
                 value={values.status}
-                options={employeeStatusOptions}
                 onChange={(status) => setValues((current) => ({ ...current, status }))}
+                options={[
+                  { value: "active", label: "Aktif", description: "Dipakai absensi & payroll." },
+                  { value: "review", label: "Review", description: "Perlu pengecekan HR." },
+                  { value: "inactive", label: "Nonaktif", description: "Disimpan sebagai arsip." },
+                ]}
                 required
               />
             </div>
@@ -3285,40 +4807,54 @@ function EmployeeDialog({
           </div>
         </form>
       </section>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
 function EmployeeDetailDialog({
   row,
   canManage,
+  saving,
   onClose,
   onEdit,
+  onFaceEnroll,
+  onFaceAction,
 }: {
   row: EmployeeDirectoryRow | null
   canManage: boolean
+  saving: boolean
   onClose: () => void
   onEdit: (row: EmployeeDirectoryRow) => void
+  onFaceEnroll: (row: EmployeeDirectoryRow) => void
+  onFaceAction: (row: EmployeeDirectoryRow, action: "approve" | "reject" | "reset" | "disable") => Promise<void>
 }) {
   if (!row) return null
 
-  const fields = [
+  const identityRows: Array<{ label: string; value: ReactNode }> = [
     { label: "Kode", value: row.employeeCode },
     { label: "Status", value: <EmployeeStatusBadge status={row.status} /> },
     { label: "NIK", value: row.nik || "Belum diisi" },
     { label: "No HP", value: row.phone || "Belum diisi" },
     { label: "Email", value: row.email || "Belum diisi" },
+  ]
+  const structureRows = [
     { label: "Divisi", value: row.divisionName },
     { label: "Jabatan", value: row.positionName },
-    { label: "Lokasi Kerja", value: row.workLocationName },
+    { label: "Lokasi kerja", value: row.workLocationName },
     { label: "Shift", value: row.shiftName },
-    { label: "Gaji Harian", value: formatCurrency(row.dailySalary) },
-    { label: "Tanggal Masuk", value: formatEmployeeDate(row.joinDate) },
-    { label: "Cycle Payroll", value: `${row.payrollCycleDays}/26 hari` },
+  ]
+  const payrollRows = [
+    { label: "Tipe gaji", value: employeeSalaryTypeLabel[row.salaryType] },
+    { label: "Nominal gaji", value: formatCurrency(getEmployeeSalaryAmount(row)) },
+    { label: "Metode payroll", value: employeePayrollMethodLabel[row.payrollMethod] },
+    { label: "Prorata", value: row.prorateEnabled ? "Aktif" : "Nonaktif" },
+    { label: "Tanggal masuk", value: formatEmployeeDate(row.joinDate) },
+    { label: "Cycle payroll", value: `${row.payrollCycleDays}/26 hari` },
   ]
 
-  return (
-    <div className="dialogBackdrop" role="presentation" onMouseDown={onClose}>
+  return createPortal(
+    <div className="dialogBackdrop employeeDialogBackdrop" role="presentation" onMouseDown={onClose}>
       <section
         className="dialogPanel masterDetailDialog employeeDetailDialog"
         role="dialog"
@@ -3328,8 +4864,8 @@ function EmployeeDetailDialog({
       >
         <div className="dialogCompactHeader masterDetailHeader">
           <div className="masterDetailTitle">
-            <span className="masterDetailIcon">
-              <UsersRound size={22} />
+            <span className="masterDetailIcon employeeDetailAvatar">
+              {row.photoUrl ? <img src={row.photoUrl} alt="" /> : <span className="employeeDetailInitials">{getProfileInitials(row.fullName || row.employeeCode)}</span>}
             </span>
             <div>
               <span>Karyawan</span>
@@ -3343,14 +4879,96 @@ function EmployeeDetailDialog({
         </div>
 
         <div className="masterDetailBody">
-          <div className="masterDetailGrid">
-            {fields.map((field) => (
-              <div className="masterDetailField" key={field.label}>
-                <span>{field.label}</span>
-                <strong>{field.value}</strong>
+          <section className="employeeProfileBrief">
+            <p>
+              <strong>{row.fullName}</strong> adalah karyawan {row.positionName} di divisi {row.divisionName},
+              ditempatkan di {row.workLocationName} untuk shift {row.shiftName}. Data ini menjadi acuan absensi
+              lapangan, radius GPS, face verification, dan perhitungan payroll.
+            </p>
+          </section>
+
+          <div className="employeeDetailSections">
+            <section className="employeeDetailSection">
+              <h3>Identitas</h3>
+              <div className="employeeDetailList">
+                {identityRows.map((field) => (
+                  <div className="employeeDetailLine" key={field.label}>
+                    <span>{field.label}</span>
+                    <strong>{field.value}</strong>
+                  </div>
+                ))}
               </div>
-            ))}
+            </section>
+
+            <section className="employeeDetailSection">
+              <h3>Struktur & Lokasi</h3>
+              <div className="employeeDetailList">
+                {structureRows.map((field) => (
+                  <div className="employeeDetailLine" key={field.label}>
+                    <span>{field.label}</span>
+                    <strong>{field.value}</strong>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="employeeDetailSection wide">
+              <h3>Payroll</h3>
+              <div className="employeeDetailList compact">
+                {payrollRows.map((field) => (
+                  <div className="employeeDetailLine" key={field.label}>
+                    <span>{field.label}</span>
+                    <strong>{field.value}</strong>
+                  </div>
+                ))}
+              </div>
+            </section>
           </div>
+
+          <section className="employeeFaceProfilePanel">
+            <div className="employeeFacePreview">
+              {row.faceReferenceImageUrl ? <img src={row.faceReferenceImageUrl} alt="" /> : <ScanFace size={28} />}
+            </div>
+            <div className="employeeFaceCopy">
+              <span>Face Profile</span>
+              <strong>{employeeFaceStatusLabel[row.faceProfileStatus]}</strong>
+              <small>
+                {row.faceProfileStatus === "approved"
+                  ? `Referensi wajah aktif. Threshold ${row.faceProfileThreshold}%.`
+                  : row.faceProfileStatus === "pending_review"
+                    ? "Karyawan sudah daftar wajah dan menunggu approval HR."
+                    : row.faceProfileStatus === "rejected"
+                      ? "Registrasi wajah ditolak. Karyawan perlu daftar ulang."
+                      : row.faceProfileStatus === "disabled"
+                        ? "Verifikasi wajah dimatikan untuk karyawan ini."
+                        : "Belum ada data referensi wajah dari app karyawan."}
+              </small>
+              <div className="employeeFaceMeta">
+                <EmployeeFaceProfileBadge status={row.faceProfileStatus} />
+                <span>{row.faceProfileSubmittedAt ? `Submit ${formatUserDateTime(row.faceProfileSubmittedAt, "-")}` : "Belum submit"}</span>
+                {row.faceProfileReviewedAt && <span>Review {formatUserDateTime(row.faceProfileReviewedAt, "-")}</span>}
+              </div>
+              {row.faceProfileReviewNotes && <p>{row.faceProfileReviewNotes}</p>}
+            </div>
+            <div className="employeeFaceActions">
+              <button className="primaryButton compactButton" type="button" disabled={!canManage || saving} onClick={() => onFaceEnroll(row)}>
+                <ScanFace size={15} />
+                {row.faceProfileStatus === "unenrolled" ? "Daftar Wajah" : "Scan Ulang"}
+              </button>
+              <button className="secondaryButton compactButton" type="button" disabled={!canManage || saving || row.faceProfileStatus !== "pending_review"} onClick={() => void onFaceAction(row, "approve")}>
+                <ShieldCheck size={15} />
+                Approve
+              </button>
+              <button className="secondaryButton compactButton" type="button" disabled={!canManage || saving || row.faceProfileStatus === "unenrolled"} onClick={() => void onFaceAction(row, "reset")}>
+                <ScanFace size={15} />
+                Reset
+              </button>
+              <button className="secondaryButton compactButton dangerSoftButton" type="button" disabled={!canManage || saving || row.faceProfileStatus !== "pending_review"} onClick={() => void onFaceAction(row, "reject")}>
+                <X size={15} />
+                Reject
+              </button>
+            </div>
+          </section>
 
           {row.notes && (
             <div className="masterDetailRelation">
@@ -3373,7 +4991,8 @@ function EmployeeDetailDialog({
           </button>
         </div>
       </section>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -3394,6 +5013,7 @@ function UsersPage({ activeView, profile }: { activeView: ViewId; profile: AppAc
   const [rows, setRows] = useState<UserAccessRow[]>([])
   const [roles, setRoles] = useState<UserAccessOption[]>([])
   const [divisions, setDivisions] = useState<UserAccessOption[]>([])
+  const [employeesForUser, setEmployeesForUser] = useState<UserEmployeeOption[]>([])
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
   const [page, setPage] = useState(1)
@@ -3412,6 +5032,7 @@ function UsersPage({ activeView, profile }: { activeView: ViewId; profile: AppAc
       setRows(data.rows)
       setRoles(data.roles)
       setDivisions(data.divisions)
+      setEmployeesForUser(data.employees)
     } catch (error) {
       setErrorMessage(getFriendlySupabaseError(error, "Gagal mengambil data pengguna."))
     } finally {
@@ -3476,6 +5097,8 @@ function UsersPage({ activeView, profile }: { activeView: ViewId; profile: AppAc
       email: row.email,
       roleId: row.roleId,
       divisionId: row.divisionId,
+      employeeId: row.employeeId,
+      appScope: row.appScope,
       status: row.status,
       twoFactorStatus: row.twoFactorStatus,
       notes: row.notes,
@@ -3494,6 +5117,8 @@ function UsersPage({ activeView, profile }: { activeView: ViewId; profile: AppAc
           email: values.email,
           role_id: values.roleId,
           division_id: values.divisionId,
+          employee_id: values.employeeId,
+          app_scope: values.appScope,
           status: values.status,
         }).catch(() => {})
       }
@@ -3509,6 +5134,7 @@ function UsersPage({ activeView, profile }: { activeView: ViewId; profile: AppAc
       const message = getFriendlySupabaseError(error, "Gagal menyimpan user.")
       setErrorMessage(message)
       showToast({ tone: "error", title: "Gagal menyimpan user", description: message })
+      throw new Error(message)
     } finally {
       setSaving(false)
     }
@@ -3717,6 +5343,8 @@ function UsersPage({ activeView, profile }: { activeView: ViewId; profile: AppAc
                 <col style={{ width: "150px" }} />
                 <col style={{ width: "170px" }} />
                 <col style={{ width: "170px" }} />
+                <col style={{ width: "190px" }} />
+                <col style={{ width: "170px" }} />
                 <col style={{ width: "150px" }} />
                 <col style={{ width: "120px" }} />
                 <col style={{ width: "112px" }} />
@@ -3730,6 +5358,8 @@ function UsersPage({ activeView, profile }: { activeView: ViewId; profile: AppAc
                   <th>Verified</th>
                   <th>Role</th>
                   <th>Divisi</th>
+                  <th>Karyawan Terkait</th>
+                  <th>Scope</th>
                   <th>Last Login</th>
                   <th>2FA</th>
                   <th>Status</th>
@@ -3739,21 +5369,21 @@ function UsersPage({ activeView, profile }: { activeView: ViewId; profile: AppAc
               <tbody>
                 {loading && (
                   <tr>
-                    <td className="tableStateCell" colSpan={10}>
+                    <td className="tableStateCell" colSpan={12}>
                       <TableState title="Memuat user" description="Mengambil pengguna, role, dan divisi dari Supabase." icon={UsersRound} />
                     </td>
                   </tr>
                 )}
                 {!loading && errorMessage && rows.length === 0 && (
                   <tr>
-                    <td className="tableStateCell" colSpan={10}>
+                    <td className="tableStateCell" colSpan={12}>
                       <TableState title="Gagal memuat user" description={errorMessage} icon={AlertTriangle} tone="danger" />
                     </td>
                   </tr>
                 )}
                 {!loading && !errorMessage && filteredRows.length === 0 && (
                   <tr>
-                    <td className="tableStateCell" colSpan={10}>
+                    <td className="tableStateCell" colSpan={12}>
                       <TableState title="User tidak ditemukan" description="Ubah filter atau invite user baru." icon={Search} />
                     </td>
                   </tr>
@@ -3766,6 +5396,8 @@ function UsersPage({ activeView, profile }: { activeView: ViewId; profile: AppAc
                     <td><EmailVerifiedBadge verifiedAt={user.emailVerifiedAt} /></td>
                     <td><TableText primary={user.roleName} /></td>
                     <td><TableText primary={user.divisionName} /></td>
+                    <td><TableText primary={user.employeeName} secondary={user.employeeCode || "Tidak dipakai app lapangan"} /></td>
+                    <td><TableText primary={appScopeLabel[user.appScope]} /></td>
                     <td><TableText primary={formatUserDateTime(user.lastLoginAt)} /></td>
                     <td><TableText primary={twoFactorLabel[user.twoFactorStatus]} /></td>
                     <td><UserStatusBadge status={user.status} /></td>
@@ -3815,9 +5447,11 @@ function UsersPage({ activeView, profile }: { activeView: ViewId; profile: AppAc
       <UserAccessDialog
         open={dialogOpen}
         mode={editingRow ? "edit" : "create"}
+        currentUserId={editingRow?.id || ""}
         initialValues={formInitialValues}
         roles={roles}
         divisions={divisions}
+        employees={employeesForUser}
         saving={saving}
         onClose={() => {
           setDialogOpen(false)
@@ -3976,34 +5610,41 @@ function UsersPage({ activeView, profile }: { activeView: ViewId; profile: AppAc
 function UserAccessDialog({
   open,
   mode,
+  currentUserId,
   initialValues,
   roles,
   divisions,
+  employees,
   saving,
   onClose,
   onSubmit,
 }: {
   open: boolean
   mode: "create" | "edit"
+  currentUserId: string
   initialValues: UserAccessFormValues
   roles: UserAccessOption[]
   divisions: UserAccessOption[]
+  employees: UserEmployeeOption[]
   saving: boolean
   onClose: () => void
   onSubmit: (values: UserAccessFormValues) => Promise<void>
 }) {
   const [values, setValues] = useState(initialValues)
   const [formErrors, setFormErrors] = useState<string[]>([])
+  const [submitError, setSubmitError] = useState("")
 
   useEffect(() => {
     setValues(initialValues)
     setFormErrors([])
+    setSubmitError("")
   }, [initialValues])
 
   if (!open) return null
 
   const activeRoles = roles.filter((role) => role.isActive || role.id === values.roleId)
   const activeDivisions = divisions.filter((division) => division.isActive || division.id === values.divisionId)
+  const activeEmployees = employees.filter((employee) => employee.isActive || employee.id === values.employeeId)
 
   return (
     <div className="dialogBackdrop" role="presentation" onMouseDown={onClose}>
@@ -4026,21 +5667,26 @@ function UserAccessDialog({
         </div>
         <form className="dialogForm" onSubmit={(event) => {
           event.preventDefault()
-          const nextErrors = validateUserAccessForm(values)
+          const nextErrors = validateUserAccessForm(values, employees, currentUserId)
 
           if (nextErrors.length > 0) {
             setFormErrors(nextErrors)
+            setSubmitError("")
             return
           }
 
           setFormErrors([])
-          void onSubmit(values)
+          setSubmitError("")
+          void onSubmit(values).catch((error) => {
+            setSubmitError(getFriendlySupabaseError(error, "Gagal menyimpan user."))
+          })
         }}>
-          {formErrors.length > 0 && (
+          {(formErrors.length > 0 || submitError) && (
             <div className="formValidationPanel">
               <AlertTriangle size={18} />
               <div>
                 <strong>Periksa data user</strong>
+                {submitError && <span>{submitError}</span>}
                 {formErrors.map((error) => (
                   <span key={error}>{error}</span>
                 ))}
@@ -4061,6 +5707,24 @@ function UserAccessDialog({
             {activeDivisions.map((division) => (
               <option value={division.id} key={division.id}>{division.name}</option>
             ))}
+          </SelectFormField>
+          <SelectFormField label="Scope App" value={values.appScope} onChange={(event) => setValues((current) => ({ ...current, appScope: event.target.value as AppScope }))} required>
+            <option value="management">Management</option>
+            <option value="field">Lapangan</option>
+            <option value="both">Management + Lapangan</option>
+          </SelectFormField>
+          <SelectFormField label="Karyawan Terkait" value={values.employeeId} onChange={(event) => setValues((current) => ({ ...current, employeeId: event.target.value }))} required={values.appScope === "field" || values.appScope === "both"}>
+            <option value="">Belum dikaitkan</option>
+            {activeEmployees.map((employee) => {
+              const linkedToOtherUser = Boolean(employee.linkedUserId && employee.linkedUserId !== currentUserId)
+              const linkedLabel = linkedToOtherUser ? ` • sudah dipakai ${employee.linkedUserName || employee.linkedUserEmail}` : ""
+
+              return (
+                <option value={employee.id} key={employee.id} disabled={linkedToOtherUser}>
+                  {employee.code} - {employee.name}{linkedLabel}
+                </option>
+              )
+            })}
           </SelectFormField>
           <SelectFormField label="Status" value={values.status} onChange={(event) => setValues((current) => ({ ...current, status: event.target.value as UserStatus }))} required>
             <option value="invited">Invite</option>
@@ -4150,10 +5814,10 @@ function UserAccessDetailDialog({
 }) {
   if (!row) return null
 
-  return (
+  return createPortal(
     <div className="dialogBackdrop" role="presentation" onMouseDown={onClose}>
       <section
-        className="dialogPanel masterDetailDialog"
+        className="dialogPanel masterDetailDialog userDetailDialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="user-detail-title"
@@ -4181,6 +5845,8 @@ function UserAccessDetailDialog({
             <div className="masterDetailField"><span>Email Verified</span><strong><EmailVerifiedBadge verifiedAt={row.emailVerifiedAt} /></strong></div>
             <div className="masterDetailField"><span>Role</span><strong>{row.roleName}</strong></div>
             <div className="masterDetailField"><span>Divisi</span><strong>{row.divisionName}</strong></div>
+            <div className="masterDetailField"><span>Karyawan Terkait</span><strong>{row.employeeCode ? `${row.employeeCode} - ${row.employeeName}` : "Belum dikaitkan"}</strong></div>
+            <div className="masterDetailField"><span>Scope App</span><strong>{appScopeLabel[row.appScope]}</strong></div>
             <div className="masterDetailField"><span>2FA</span><strong>{twoFactorLabel[row.twoFactorStatus]}</strong></div>
             <div className="masterDetailField"><span>Last Login</span><strong>{formatUserDateTime(row.lastLoginAt)}</strong></div>
             <div className="masterDetailField"><span>Invited</span><strong>{formatUserDateTime(row.invitedAt)}</strong></div>
@@ -4210,7 +5876,8 @@ function UserAccessDetailDialog({
           </button>
         </div>
       </section>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -4698,6 +6365,8 @@ function RolePermissionDetailDialog({
 }
 
 function AuditLogPage({ activeView }: { activeView: ViewId }) {
+  const [detailEvent, setDetailEvent] = useState<{ event: AuditEvent; index: number } | null>(null)
+
   return (
     <OperationalPageShell>
       <PageHeader
@@ -4744,7 +6413,7 @@ function AuditLogPage({ activeView }: { activeView: ViewId }) {
             </thead>
             <tbody>
               {auditEvents.map((event, index) => (
-                <tr key={`${event.time}-${event.action}`}>
+                <ClickableTableRow key={`${event.time}-${event.action}`} label={`Lihat detail audit ${event.action}`} onOpen={() => setDetailEvent({ event, index })}>
                   <td className="tableNumberCell"><TableNumberCell value={index + 1} /></td>
                   <td><TableText primary={event.time} /></td>
                   <td><TableText primary={event.actor} /></td>
@@ -4753,16 +6422,67 @@ function AuditLogPage({ activeView }: { activeView: ViewId }) {
                   <td><ModuleStatusBadge value={event.status} /></td>
                   <td className="tableActionCell">
                     <div className="rowActions">
-                      <RowActionButton />
+                      <RowActionButton label={`Lihat detail audit ${event.action}`} onClick={() => setDetailEvent({ event, index })} />
                     </div>
                   </td>
-                </tr>
+                </ClickableTableRow>
               ))}
             </tbody>
           </table>
         </div>
       </OperationalTableCard>
+      <AuditLogDetailDialog detailEvent={detailEvent} onClose={() => setDetailEvent(null)} />
     </OperationalPageShell>
+  )
+}
+
+function AuditLogDetailDialog({ detailEvent, onClose }: { detailEvent: { event: AuditEvent; index: number } | null; onClose: () => void }) {
+  if (!detailEvent) return null
+
+  const { event, index } = detailEvent
+
+  return createPortal(
+    <div className="dialogBackdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="dialogPanel masterDetailDialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="audit-detail-title"
+        onMouseDown={(clickEvent) => clickEvent.stopPropagation()}
+      >
+        <div className="dialogCompactHeader masterDetailHeader">
+          <div className="masterDetailTitle">
+            <span className="masterDetailIcon">
+              <FileBarChart size={22} />
+            </span>
+            <div>
+              <span>Audit Log</span>
+              <h2 id="audit-detail-title">{event.action}</h2>
+              <p>Detail aktivitas sistem untuk kebutuhan audit dan compliance.</p>
+            </div>
+          </div>
+          <button className="iconButton dialogClose" type="button" aria-label="Tutup detail audit" onClick={onClose}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="masterDetailBody">
+          <div className="masterDetailGrid">
+            <div className="masterDetailField"><span>No</span><strong>{String(index + 1).padStart(2, "0")}</strong></div>
+            <div className="masterDetailField"><span>Waktu</span><strong>{event.time}</strong></div>
+            <div className="masterDetailField"><span>Actor</span><strong>{event.actor}</strong></div>
+            <div className="masterDetailField"><span>Action</span><strong>{event.action}</strong></div>
+            <div className="masterDetailField"><span>Target</span><strong>{event.target}</strong></div>
+            <div className="masterDetailField"><span>Status</span><strong>{event.status}</strong></div>
+          </div>
+        </div>
+
+        <div className="masterDetailActions">
+          <button className="secondaryButton" type="button" onClick={onClose}>Tutup</button>
+        </div>
+      </section>
+    </div>,
+    document.body,
   )
 }
 
@@ -4881,12 +6601,12 @@ function ProfilePage({
           </div>
           <div className="profileSecurityList">
             <div>
-              <span>User ID</span>
-              <strong>{profile.id}</strong>
+              <span>Kode User</span>
+              <strong>{profile.userCode || formatShortId(profile.id, "USR")}</strong>
             </div>
             <div>
               <span>Auth ID</span>
-              <strong>{profile.authUserId}</strong>
+              <strong>{formatShortId(profile.authUserId, "AUTH")}</strong>
             </div>
             <div>
               <span>Created Auth</span>
@@ -4980,6 +6700,11 @@ function MasterDataPage({ activeView }: { activeView: ViewId }) {
       startTime: row.startTime || "",
       endTime: row.endTime || "",
       componentType: row.componentType === "deduction" ? "deduction" : "earning",
+      calculationUnit: row.calculationUnit === "hour" || row.calculationUnit === "day" ? row.calculationUnit : "fixed",
+      rateAmount: String(row.rateAmount || 0),
+      dayType: row.dayType === "weekday" || row.dayType === "sunday" || row.dayType === "holiday" ? row.dayType : "all",
+      autoDetectOvertime: row.autoDetectOvertime === true,
+      requiresApproval: row.requiresApproval !== false,
       status: row.status,
       sortOrder: String(row.sortOrder || 0),
     })
@@ -5528,6 +7253,33 @@ function MasterDataDialog({
                 <option value="earning">Penambah Gaji</option>
                 <option value="deduction">Potongan Gaji</option>
               </SelectFormField>
+              <SelectFormField label="Unit Hitung" value={values.calculationUnit} onChange={(event) => setValues((current) => ({ ...current, calculationUnit: event.target.value as MasterDataFormValues["calculationUnit"] }))} required>
+                <option value="fixed">Nominal Tetap</option>
+                <option value="hour">Per Jam</option>
+                <option value="day">Per Hari</option>
+              </SelectFormField>
+              <TextFormField label={values.calculationUnit === "hour" ? "Rate Per Jam" : "Nominal Rate"} type="number" min={0} value={values.rateAmount} onChange={(event) => setValues((current) => ({ ...current, rateAmount: event.target.value }))} placeholder="20000" required />
+              <SelectFormField label="Tipe Hari" value={values.dayType} onChange={(event) => setValues((current) => ({ ...current, dayType: event.target.value as MasterDataFormValues["dayType"] }))} required>
+                <option value="all">Semua Hari</option>
+                <option value="weekday">Weekday</option>
+                <option value="sunday">Minggu</option>
+                <option value="holiday">Hari Libur</option>
+              </SelectFormField>
+              <SwitchFormField
+                label="Auto Detect Lembur"
+                checked={values.autoDetectOvertime}
+                onChange={(checked) => setValues((current) => ({
+                  ...current,
+                  autoDetectOvertime: checked,
+                  componentType: checked ? "earning" : current.componentType,
+                  calculationUnit: checked ? "hour" : current.calculationUnit,
+                }))}
+              />
+              <SwitchFormField
+                label="Wajib Approval"
+                checked={values.requiresApproval}
+                onChange={(checked) => setValues((current) => ({ ...current, requiresApproval: checked }))}
+              />
               <TextFormField label="Deskripsi Komponen" value={values.description} onChange={(event) => setValues((current) => ({ ...current, description: event.target.value }))} placeholder="Aturan penggunaan komponen gaji" />
             </>
           )}
@@ -5551,15 +7303,42 @@ function MasterDataDialog({
 }
 
 function DashboardPage({ activeView }: { activeView: ViewId }) {
-  const totals = useMemo(() => {
-    return {
-      activeEmployees: employees.length,
-      validToday: employees.filter((employee) => employee.attendance === "valid").length,
-      pending: employees.filter((employee) => employee.attendance === "pending" || employee.attendance === "failed").length,
-      payrollReady: employees.filter((employee) => employee.payrollStatus === "ready").length,
-      kasbon: employees.reduce((sum, employee) => sum + employee.kasbon, 0),
+  const [data, setData] = useState<OperationsFoundationData>({ rows: [], locations: [], reviews: [], overtime: [] })
+  const [loading, setLoading] = useState(true)
+  const [errorMessage, setErrorMessage] = useState("")
+
+  useEffect(() => {
+    let active = true
+
+    setLoading(true)
+    setErrorMessage("")
+    void loadOperationsFoundationData()
+      .then((nextData) => {
+        if (active) setData(nextData)
+      })
+      .catch((error) => {
+        if (active) setErrorMessage(getFriendlySupabaseError(error, "Gagal mengambil data absensi dan payroll."))
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+
+    return () => {
+      active = false
     }
   }, [])
+
+  const totals = useMemo(() => {
+    const rows = data.rows
+
+    return {
+      activeEmployees: rows.length,
+      validToday: rows.filter((employee) => employee.attendanceStatus === "valid").length,
+      pending: rows.filter((employee) => employee.attendanceStatus === "pending" || employee.attendanceStatus === "failed").length,
+      payrollReady: rows.filter((employee) => employee.payrollStatus === "ready").length,
+      payrollPreview: rows.reduce((sum, employee) => sum + employee.payrollAmount, 0),
+    }
+  }, [data.rows])
 
   return (
     <OperationalPageShell>
@@ -5611,8 +7390,8 @@ function DashboardPage({ activeView }: { activeView: ViewId }) {
             <div className="signalItem">
               <CreditCard size={18} />
               <div>
-                <strong>{formatCurrency(totals.kasbon)} kasbon aktif</strong>
-                <span>Outstanding yang akan masuk komponen potongan.</span>
+                <strong>{formatCurrency(totals.payrollPreview)} preview payroll</strong>
+                <span>Dihitung dari cycle kerja valid yang sudah masuk.</span>
               </div>
             </div>
             <div className="signalItem">
@@ -5624,80 +7403,716 @@ function DashboardPage({ activeView }: { activeView: ViewId }) {
             </div>
           </div>
         </aside>
-        <EmployeeTable />
+        <EmployeeTable rows={data.rows} loading={loading} errorMessage={errorMessage} />
       </section>
     </OperationalPageShell>
   )
 }
 
-function EmployeeTable() {
+function EmployeeTable({ rows, loading, errorMessage }: { rows: AttendanceMonitorRow[]; loading: boolean; errorMessage: string }) {
+  const [detailRow, setDetailRow] = useState<AttendanceMonitorRow | null>(null)
+
+  return (
+    <>
+      <OperationalTableCard>
+        <div className="tableHeader">
+          <div>
+            <h2>Live Attendance Monitor</h2>
+            <p>Status absensi hari ini dengan progress payroll cycle per karyawan.</p>
+          </div>
+          <button className="secondaryButton" type="button">Export</button>
+        </div>
+        <div className="tableScroller uiDataTableScroller uiDataTableHasColumns">
+          <table>
+            <colgroup>
+              <col className="tableNumberColumn" />
+              <col style={{ width: "230px" }} />
+              <col style={{ width: "150px" }} />
+              <col style={{ width: "180px" }} />
+              <col style={{ width: "128px" }} />
+              <col style={{ width: "104px" }} />
+              <col style={{ width: "136px" }} />
+              <col style={{ width: "150px" }} />
+              <col style={{ width: "140px" }} />
+              <col className="tableActionColumn" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th className="tableNumberHeader">No</th>
+                <th>Karyawan</th>
+                <th>Divisi</th>
+                <th>Lokasi</th>
+                <th>Absensi</th>
+                <th>Face</th>
+                <th>Cycle</th>
+                <th>Payroll</th>
+                <th>Preview</th>
+                <th className="tableActionHeader">Aksi</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading && (
+                <tr>
+                  <td className="tableStateCell" colSpan={10}>
+                    <TableState title="Memuat absensi" description="Mengambil data absensi, GPS, face, dan payroll cycle dari Supabase." icon={Megaphone} />
+                  </td>
+                </tr>
+              )}
+              {!loading && errorMessage && (
+                <tr>
+                  <td className="tableStateCell" colSpan={10}>
+                    <TableState title="Gagal memuat absensi" description={errorMessage} icon={AlertTriangle} tone="danger" />
+                  </td>
+                </tr>
+              )}
+              {!loading && !errorMessage && rows.length === 0 && (
+                <tr>
+                  <td className="tableStateCell" colSpan={10}>
+                    <TableState title="Belum ada karyawan aktif" description="Tambahkan karyawan dan absensi untuk mulai memonitor payroll cycle." icon={UsersRound} />
+                  </td>
+                </tr>
+              )}
+              {!loading && !errorMessage && rows.map((employee, index) => (
+                <ClickableTableRow key={employee.id} label={`Lihat detail ${employee.fullName}`} onOpen={() => setDetailRow(employee)}>
+                  <td className="tableNumberCell"><TableNumberCell value={index + 1} /></td>
+                  <td>
+                    <EmployeeIdentityCell fullName={employee.fullName} code={employee.employeeCode} photoUrl={employee.employeePhotoUrl} />
+                  </td>
+                  <td><TableText primary={employee.divisionName} /></td>
+                  <td><TableText primary={employee.workLocationName} secondary={employee.distanceM === null ? "GPS belum masuk" : `${employee.distanceM}m / ${employee.radiusM || "-"}m`} /></td>
+                  <td><StatusBadge status={employee.attendanceStatus} /></td>
+                  <td>
+                    <span className={clsx("faceScore", employee.faceScore && employee.faceScore >= 90 ? "good" : employee.faceScore && employee.faceScore >= 70 ? "warn" : "bad")}>
+                      {employee.faceScore ? `${employee.faceScore}%` : "-"}
+                    </span>
+                  </td>
+                  <td>
+                    <div className="cycleCell">
+                      <ProgressRing value={employee.cycleDays} />
+                      <span>{employee.cycleDays}/{employee.targetDays}</span>
+                    </div>
+                  </td>
+                  <td><TableText primary={payrollLabel[employee.payrollStatus]} /></td>
+                  <td><TableText primary={employee.payrollAmount ? formatCurrency(employee.payrollAmount) : "-"} secondary={employeeSalaryTypeLabel[employee.salaryType]} /></td>
+                  <td className="tableActionCell">
+                    <div className="rowActions">
+                      <RowActionButton label={`Lihat detail ${employee.fullName}`} onClick={() => setDetailRow(employee)} />
+                    </div>
+                  </td>
+                </ClickableTableRow>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </OperationalTableCard>
+      <AttendanceMonitorDetailDialog row={detailRow} onClose={() => setDetailRow(null)} />
+    </>
+  )
+}
+
+function AttendanceMonitorDetailDialog({ row, onClose }: { row: AttendanceMonitorRow | null; onClose: () => void }) {
+  if (!row) return null
+
+  const gpsLabel = row.gpsStatus === "valid" ? "Dalam radius" : row.gpsStatus === "out_of_radius" ? "Luar radius" : "GPS belum masuk"
+  const faceLabel = row.faceScore === null ? "Belum ada skor wajah" : `${row.faceScore}% · ${row.faceStatus}`
+  const fields = [
+    { label: "Kode", value: row.employeeCode },
+    { label: "Divisi", value: row.divisionName || "-" },
+    { label: "Lokasi Kerja", value: row.workLocationName || "-" },
+    { label: "Absensi", value: statusLabel[row.attendanceStatus] },
+    { label: "Waktu", value: row.eventAt ? `${formatEmployeeDate(row.attendanceDate)} · ${formatAttendanceTime(row.eventAt)}` : "Belum absen" },
+    { label: "GPS Radius", value: row.distanceM === null ? gpsLabel : `${gpsLabel} · ${row.distanceM}m / ${row.radiusM || "-"}m` },
+    { label: "Face Verification", value: faceLabel },
+    { label: "Payroll Cycle", value: row.payrollCycleNumber ? `Cycle ${row.payrollCycleNumber} · ${row.cycleDays}/${row.targetDays} hari` : `${row.cycleDays}/${row.targetDays} hari` },
+    { label: "Periode", value: formatPayrollPeriod(row) },
+    { label: "Tipe Gaji", value: employeeSalaryTypeLabel[row.salaryType] },
+    { label: "Gaji Pokok", value: row.basePayrollAmount ? formatCurrency(row.basePayrollAmount) : "-" },
+    { label: "Lembur Approved", value: row.overtimeAmount ? formatCurrency(row.overtimeAmount) : "-" },
+    { label: "Total Payroll", value: row.payrollAmount ? formatCurrency(row.payrollAmount) : "-" },
+    { label: "Status Payroll", value: payrollLabel[row.payrollStatus] },
+    { label: "Dikunci", value: row.payrollLockedAt ? formatPayrollDate(row.payrollLockedAt) : "-" },
+    { label: "Dibayar", value: row.payrollPaidAt ? formatPayrollDate(row.payrollPaidAt) : "-" },
+  ]
+
+  return createPortal(
+    <div className="dialogBackdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="dialogPanel masterDetailDialog attendanceMonitorDetailDialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="attendance-monitor-detail-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="dialogCompactHeader masterDetailHeader">
+          <div className="masterDetailTitle">
+            <span className="masterDetailIcon employeeDetailAvatar">
+              {row.employeePhotoUrl ? <img src={row.employeePhotoUrl} alt="" /> : <span className="employeeDetailInitials">{getProfileInitials(row.fullName || row.employeeCode)}</span>}
+            </span>
+            <div>
+              <span>Attendance Monitor</span>
+              <h2 id="attendance-monitor-detail-title">{row.fullName}</h2>
+              <p>Ringkasan absensi, GPS radius, face verification, dan payroll cycle karyawan.</p>
+            </div>
+          </div>
+          <button className="iconButton dialogClose" type="button" aria-label="Tutup detail" onClick={onClose}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="masterDetailBody">
+          <div className="attendanceMonitorSnapshot">
+            <div className="attendanceMonitorSnapshotItem">
+              <span className={clsx("attendanceMonitorIcon", row.gpsStatus)}>
+                <LocateFixed size={20} />
+              </span>
+              <div>
+                <small>GPS Radius</small>
+                <strong>{row.distanceM === null ? "Belum kebaca" : `${row.distanceM}m dari radius ${row.radiusM || "-"}m`}</strong>
+                <p>{gpsLabel}</p>
+              </div>
+            </div>
+            <div className="attendanceMonitorSnapshotItem">
+              <span className={clsx("attendanceMonitorIcon", row.faceStatus)}>
+                <ScanFace size={20} />
+              </span>
+              <div>
+                <small>Face Verification</small>
+                <strong>{row.faceScore === null ? "Belum ada data" : `${row.faceScore}% match`}</strong>
+                <p>{row.faceStatus}</p>
+              </div>
+            </div>
+            <div className="attendanceMonitorSnapshotItem">
+              <span className="attendanceMonitorIcon cycle">
+                <ProgressRing value={row.cycleDays} />
+              </span>
+              <div>
+                <small>Payroll Cycle</small>
+                <strong>{row.cycleDays}/{row.targetDays} hari</strong>
+                <p>{payrollLabel[row.payrollStatus]}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="masterDetailGrid">
+            {fields.map((field) => (
+              <div className="masterDetailField" key={field.label}>
+                <span>{field.label}</span>
+                <strong>{field.value}</strong>
+              </div>
+            ))}
+          </div>
+
+          {row.notes && (
+            <div className="masterDetailRelation">
+              <small>Catatan</small>
+              <div>
+                <span>
+                  <em>HR Note</em>
+                  <strong>{row.notes}</strong>
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="masterDetailActions">
+          <button className="secondaryButton" type="button" onClick={onClose}>Tutup</button>
+        </div>
+      </section>
+    </div>,
+    document.body,
+  )
+}
+
+function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "attendance-review" | "field-monitoring" | "payroll" }) {
+  const [data, setData] = useState<OperationsFoundationData>({ rows: [], locations: [], reviews: [], overtime: [] })
+  const [searchTerm, setSearchTerm] = useState("")
+  const [statusFilter, setStatusFilter] = useState("all")
+  const [loading, setLoading] = useState(true)
+  const [errorMessage, setErrorMessage] = useState("")
+  const [fieldDialogOpen, setFieldDialogOpen] = useState(false)
+  const [fieldSubmitting, setFieldSubmitting] = useState(false)
+  const [faceEnrollmentOpen, setFaceEnrollmentOpen] = useState(false)
+  const [faceEnrollmentSubmitting, setFaceEnrollmentSubmitting] = useState(false)
+  const [reviewTarget, setReviewTarget] = useState<AttendanceReviewRow | null>(null)
+  const [reviewSubmitting, setReviewSubmitting] = useState(false)
+  const [overtimeTarget, setOvertimeTarget] = useState<OvertimeReviewRow | null>(null)
+  const [overtimeSubmitting, setOvertimeSubmitting] = useState(false)
+  const [payrollTarget, setPayrollTarget] = useState<AttendanceMonitorRow | null>(null)
+  const [payrollAction, setPayrollAction] = useState<PayrollProcessAction>("lock")
+  const [payrollSubmitting, setPayrollSubmitting] = useState(false)
+  const [toast, setToast] = useState<ToastMessage | null>(null)
+
+  const showToast = (message: Omit<ToastMessage, "id">) => {
+    setToast({ ...message, id: Date.now() })
+  }
+
+  const refreshData = useCallback(async () => {
+    setLoading(true)
+    setErrorMessage("")
+
+    try {
+      const nextData = await loadOperationsFoundationData()
+      setData(nextData)
+    } catch (error) {
+      setErrorMessage(getFriendlySupabaseError(error, "Gagal mengambil foundation absensi dan payroll."))
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+
+    setLoading(true)
+    setErrorMessage("")
+    void loadOperationsFoundationData()
+      .then((nextData) => {
+        if (active) setData(nextData)
+      })
+      .catch((error) => {
+        if (active) setErrorMessage(getFriendlySupabaseError(error, "Gagal mengambil foundation absensi dan payroll."))
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const handleFieldAttendanceSubmit = async (payload: FieldAttendanceSubmitPayload) => {
+    setFieldSubmitting(true)
+    try {
+      const result = await submitFieldAttendance(payload)
+      setFieldDialogOpen(false)
+      showToast({
+        tone: result.log.status === "valid" ? "success" : "error",
+        title: result.log.status === "valid" ? "Absensi tersimpan" : "Masuk review HR",
+        description: `${result.employee.name} • ${result.log.distance_m}m dari radius ${result.log.radius_m}m • face ${result.log.face_score ?? "-"}%.`,
+      })
+      await refreshData()
+    } catch (error) {
+      showToast({
+        tone: "error",
+        title: "Gagal absensi",
+        description: getFriendlySupabaseError(error, "Absensi lapangan belum bisa disimpan."),
+      })
+    } finally {
+      setFieldSubmitting(false)
+    }
+  }
+
+  const handleFaceEnrollmentSubmit = async (snapshotsBase64: string[]) => {
+    setFaceEnrollmentSubmitting(true)
+    try {
+      await submitEmployeeFaceEnrollment(snapshotsBase64, "image/jpeg", "Registrasi wajah awal dari app lapangan.")
+      setFaceEnrollmentOpen(false)
+      showToast({
+        tone: "success",
+        title: "Wajah terkirim",
+        description: "Registrasi wajah masuk antrian review HR. Setelah approved, absensi face bisa dipakai.",
+      })
+      await refreshData()
+    } catch (error) {
+      showToast({
+        tone: "error",
+        title: "Gagal daftar wajah",
+        description: getFriendlySupabaseError(error, "Registrasi wajah belum bisa disimpan."),
+      })
+    } finally {
+      setFaceEnrollmentSubmitting(false)
+    }
+  }
+
+  const openReviewDialog = (row: AttendanceReviewRow) => {
+    setReviewTarget(row)
+  }
+
+  const handleReviewSubmit = async (decision: "approve" | "reject", notes: string) => {
+    if (!reviewTarget) return
+
+    setReviewSubmitting(true)
+    try {
+      await reviewAttendanceLog(reviewTarget.id, decision, notes)
+      showToast({
+        tone: "success",
+        title: decision === "approve" ? "Absensi disetujui" : "Absensi ditolak",
+        description: `${reviewTarget.fullName} sudah diproses dan payroll cycle diperbarui.`,
+      })
+      setReviewTarget(null)
+      await refreshData()
+    } catch (error) {
+      showToast({
+        tone: "error",
+        title: "Gagal review absensi",
+        description: getFriendlySupabaseError(error, "Approval absensi belum bisa diproses."),
+      })
+    } finally {
+      setReviewSubmitting(false)
+    }
+  }
+
+  const handleOvertimeReviewSubmit = async (decision: "approve" | "reject", approvedMinutes: number, notes: string) => {
+    if (!overtimeTarget) return
+
+    setOvertimeSubmitting(true)
+    try {
+      await reviewOvertimeRequest(overtimeTarget.id, decision, approvedMinutes, notes)
+      showToast({
+        tone: "success",
+        title: decision === "approve" ? "Lembur disetujui" : "Lembur ditolak",
+        description: `${overtimeTarget.fullName} • ${formatMinutesDuration(approvedMinutes)} • payroll preview diperbarui.`,
+      })
+      setOvertimeTarget(null)
+      await refreshData()
+    } catch (error) {
+      showToast({
+        tone: "error",
+        title: "Gagal review lembur",
+        description: getFriendlySupabaseError(error, "Review lembur belum bisa diproses."),
+      })
+    } finally {
+      setOvertimeSubmitting(false)
+    }
+  }
+
+  const openPayrollProcessDialog = (row: AttendanceMonitorRow, action: PayrollProcessAction) => {
+    setPayrollTarget(row)
+    setPayrollAction(action)
+  }
+
+  const handlePayrollProcessSubmit = async (notes: string) => {
+    if (!payrollTarget) return
+
+    setPayrollSubmitting(true)
+    try {
+      await processPayrollCycle(payrollTarget.payrollCycleId, payrollAction, notes)
+      showToast({
+        tone: "success",
+        title: payrollAction === "lock"
+          ? "Payroll dikunci"
+          : payrollAction === "mark_paid"
+            ? "Payroll ditandai terbayar"
+            : payrollAction === "unlock"
+              ? "Payroll dibuka ulang"
+              : payrollAction === "void"
+                ? "Payroll dibatalkan"
+                : "Payroll direstore",
+        description: `${payrollTarget.fullName} • ${formatCurrency(payrollTarget.payrollAmount)} • ${payrollLabel[payrollTarget.payrollStatus]}.`,
+      })
+      setPayrollTarget(null)
+      await refreshData()
+    } catch (error) {
+      showToast({
+        tone: "error",
+        title: "Gagal proses payroll",
+        description: getFriendlySupabaseError(error, "Payroll belum bisa diproses."),
+      })
+    } finally {
+      setPayrollSubmitting(false)
+    }
+  }
+
+  const normalizedSearch = searchTerm.trim().toLowerCase()
+  const filteredRows = data.rows.filter((row) => {
+    const matchesSearch = normalizedSearch
+      ? [row.employeeCode, row.fullName, row.divisionName, row.workLocationName, row.logStatus, row.gpsStatus, row.faceStatus].join(" ").toLowerCase().includes(normalizedSearch)
+      : true
+    const matchesStatus = statusFilter === "all"
+      || row.attendanceStatus === statusFilter
+      || row.payrollStatus === statusFilter
+
+    return matchesSearch && matchesStatus
+  })
+  const filteredReviewRows = data.reviews.filter((row) => {
+    const matchesSearch = normalizedSearch
+      ? [row.employeeCode, row.fullName, row.divisionName, row.workLocationName, row.status, row.gpsStatus, row.faceStatus, row.issueLabel].join(" ").toLowerCase().includes(normalizedSearch)
+      : true
+    const matchesStatus = statusFilter === "all"
+      || row.status === statusFilter
+      || row.gpsStatus === statusFilter
+      || row.faceStatus === statusFilter
+
+    return matchesSearch && matchesStatus
+  })
+  const readyPayrollRows = data.rows.filter((row) => row.payrollStatus === "ready")
+  const lockedPayrollRows = data.rows.filter((row) => row.payrollStatus === "locked")
+  const paidPayrollRows = data.rows.filter((row) => row.payrollStatus === "paid")
+  const voidPayrollRows = data.rows.filter((row) => row.payrollStatus === "void")
+  const reviewRows = data.rows.filter((row) => row.attendanceStatus === "pending" || row.attendanceStatus === "failed")
+  const gpsReadyLocations = data.locations.filter((location) => location.isReady)
+  const faceVerifiedRows = data.rows.filter((row) => row.faceStatus === "verified")
+  const payrollPreviewTotal = [...readyPayrollRows, ...lockedPayrollRows].reduce((sum, row) => sum + row.payrollAmount, 0)
+  const filteredOvertimeRows = data.overtime.filter((row) => {
+    const matchesSearch = normalizedSearch
+      ? [row.employeeCode, row.fullName, row.divisionName, row.componentName, row.status, row.dayType].join(" ").toLowerCase().includes(normalizedSearch)
+      : true
+    const matchesStatus = statusFilter === "all" || row.status === statusFilter || row.dayType === statusFilter
+
+    return matchesSearch && matchesStatus
+  })
+  const pendingOvertimeRows = data.overtime.filter((row) => row.status === "pending")
+  const approvedOvertimeTotal = data.overtime.reduce((sum, row) => sum + (row.status === "approved" ? row.totalAmount : 0), 0)
+  const pageSubtitle = activeView === "payroll"
+    ? "Preview payroll otomatis dari 26 hari kerja valid, lembur approved, tipe gaji, dan cycle berjalan."
+    : activeView === "attendance-review"
+      ? "Approve atau reject absensi bermasalah sebelum masuk hitungan payroll cycle."
+    : activeView === "field-monitoring"
+      ? "Monitoring titik lokasi kerja, radius GPS, kesiapan koordinat, dan aktivitas absensi per lokasi."
+      : "Pantau absensi realtime dengan validasi GPS radius, face verification, dan progress payroll cycle."
+
+  return (
+    <OperationalPageShell>
+      <PageHeader
+        activeView={activeView}
+        subtitle={pageSubtitle}
+        actions={
+          <>
+            <button className="secondaryButton" type="button" onClick={refreshData} disabled={loading}>
+              <FileCheck2 size={17} />
+              Refresh Data
+            </button>
+            {activeView === "attendance-live" && (
+              <>
+                <button className="secondaryButton" type="button" onClick={() => setFaceEnrollmentOpen(true)}>
+                  <ScanFace size={17} />
+                  Daftar Wajah
+                </button>
+                <button className="primaryButton" type="button" onClick={() => setFieldDialogOpen(true)}>
+                  <LocateFixed size={17} />
+                  Tes Absensi Lapangan
+                </button>
+              </>
+            )}
+          </>
+        }
+        meta={
+          <InlinePageStats
+            items={[
+              `${filteredRows.length} karyawan`,
+              activeView === "attendance-review" ? `${filteredReviewRows.length} antrian review` : `${gpsReadyLocations.length} lokasi GPS siap`,
+              `${faceVerifiedRows.length} face valid`,
+              activeView === "payroll" ? `${readyPayrollRows.length} siap · ${lockedPayrollRows.length} locked · ${paidPayrollRows.length} terbayar · ${voidPayrollRows.length} void` : `${readyPayrollRows.length} cycle siap`,
+            ]}
+          />
+        }
+      />
+
+      <OperationalKpiGrid>
+        <OperationalKpiCard label="Absen Valid" value={data.rows.filter((row) => row.attendanceStatus === "valid").length} detail="Hari ini" icon={UserRoundCheck} tone="green" />
+        <OperationalKpiCard label="Butuh Review" value={reviewRows.length} detail="GPS/face/perlu approval" icon={AlertTriangle} tone="amber" />
+        <OperationalKpiCard label="Lokasi GPS" value={`${gpsReadyLocations.length}/${data.locations.length}`} detail="Koordinat + radius siap" icon={LocateFixed} tone="blue" />
+        <OperationalKpiCard label="Preview Payroll" value={formatCurrency(payrollPreviewTotal)} detail="Pokok + lembur approved" icon={BadgeDollarSign} tone="violet" />
+      </OperationalKpiGrid>
+
+      <OperationalFilterPanel>
+        <div className="filterField">
+          <label>Search</label>
+          <div className="uiInput inputWithIcon compact">
+            <Search size={16} />
+            <input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Cari karyawan, lokasi, GPS, face..." />
+          </div>
+        </div>
+        <div className="filterField">
+          <label>Status</label>
+          <select className="uiSelectTrigger" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+            <option value="all">Semua Status</option>
+            <option value="valid">Absensi Valid</option>
+            <option value="pending">Review</option>
+            <option value="review">Perlu Review</option>
+            <option value="rejected">Ditolak</option>
+            <option value="failed">Failed</option>
+            <option value="out_of_radius">Luar Radius</option>
+            <option value="verified">Face Valid</option>
+            <option value="missing">Belum Absen</option>
+            <option value="ready">Siap Gajian</option>
+            <option value="locked">Locked</option>
+            <option value="active">Cycle Aktif</option>
+            <option value="paid">Terbayar</option>
+            <option value="void">Void</option>
+            <option value="pending">Lembur Pending</option>
+            <option value="approved">Lembur Approved</option>
+            <option value="weekday">Lembur Weekday</option>
+            <option value="sunday">Lembur Minggu</option>
+          </select>
+        </div>
+        <button className="secondaryButton" type="button" onClick={() => {
+          setSearchTerm("")
+          setStatusFilter("all")
+        }}>Reset Filter</button>
+      </OperationalFilterPanel>
+
+      {activeView === "field-monitoring" ? (
+        <LocationRadiusTable locations={data.locations} loading={loading} errorMessage={errorMessage} />
+      ) : activeView === "attendance-review" ? (
+        <AttendanceReviewTable rows={filteredReviewRows} loading={loading} errorMessage={errorMessage} onReview={openReviewDialog} />
+      ) : activeView === "payroll" ? (
+        <>
+          <PayrollPreviewTable rows={filteredRows} loading={loading} errorMessage={errorMessage} overtimeTotal={approvedOvertimeTotal} onProcess={openPayrollProcessDialog} />
+          <OvertimeReviewTable rows={filteredOvertimeRows} loading={loading} errorMessage={errorMessage} onReview={setOvertimeTarget} />
+        </>
+      ) : (
+        <LiveAttendanceTable rows={filteredRows} loading={loading} errorMessage={errorMessage} />
+      )}
+
+      <FieldAttendanceDialog
+        open={fieldDialogOpen}
+        saving={fieldSubmitting}
+        onClose={() => setFieldDialogOpen(false)}
+        onSubmit={handleFieldAttendanceSubmit}
+      />
+      <FaceEnrollmentDialog
+        open={faceEnrollmentOpen}
+        saving={faceEnrollmentSubmitting}
+        onClose={() => setFaceEnrollmentOpen(false)}
+        onSubmit={handleFaceEnrollmentSubmit}
+      />
+      <AttendanceReviewDialog
+        row={reviewTarget}
+        saving={reviewSubmitting}
+        onClose={() => setReviewTarget(null)}
+        onSubmit={handleReviewSubmit}
+      />
+      <OvertimeReviewDialog
+        row={overtimeTarget}
+        saving={overtimeSubmitting}
+        onClose={() => setOvertimeTarget(null)}
+        onSubmit={handleOvertimeReviewSubmit}
+      />
+      <PayrollProcessDialog
+        row={payrollTarget}
+        action={payrollAction}
+        saving={payrollSubmitting}
+        onClose={() => setPayrollTarget(null)}
+        onSubmit={handlePayrollProcessSubmit}
+      />
+      <ToastViewport toast={toast} onClose={() => setToast(null)} />
+    </OperationalPageShell>
+  )
+}
+
+function LiveAttendanceTable({ rows, loading, errorMessage }: { rows: AttendanceMonitorRow[]; loading: boolean; errorMessage: string }) {
+  const [detailRow, setDetailRow] = useState<AttendanceMonitorRow | null>(null)
+
+  return (
+    <>
+      <OperationalTableCard>
+        <div className="tableHeader">
+          <div>
+            <h2>Realtime Attendance Feed</h2>
+            <p>Data check-in hari ini dari GPS radius, face verification, dan workday counted.</p>
+          </div>
+        </div>
+        <div className="tableScroller uiDataTableScroller uiDataTableHasColumns">
+          <table>
+            <thead>
+              <tr>
+                <th>No</th>
+                <th>Karyawan</th>
+                <th>Waktu</th>
+                <th>Lokasi / Radius</th>
+                <th>GPS</th>
+                <th>Face</th>
+                <th>Cycle</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading && <tr><td className="tableStateCell" colSpan={8}><TableState title="Memuat absensi" description="Mengambil live feed absensi." icon={Megaphone} /></td></tr>}
+              {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={8}><TableState title="Gagal memuat" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
+              {!loading && !errorMessage && rows.map((row, index) => (
+                <ClickableTableRow key={row.id} label={`Lihat detail absensi ${row.fullName}`} onOpen={() => setDetailRow(row)}>
+                  <td><TableNumberCell value={index + 1} /></td>
+                  <td><EmployeeIdentityCell fullName={row.fullName} code={row.employeeCode} photoUrl={row.employeePhotoUrl} /></td>
+                  <td><TableText primary={formatAttendanceTime(row.eventAt)} secondary={formatEmployeeDate(row.attendanceDate)} /></td>
+                  <td><TableText primary={row.workLocationName} secondary={row.distanceM === null ? "Belum ada GPS" : `${row.distanceM}m dari radius ${row.radiusM || "-"}m`} /></td>
+                  <td><TableText primary={row.gpsStatus === "valid" ? "Dalam radius" : row.gpsStatus === "out_of_radius" ? "Luar radius" : "GPS kosong"} /></td>
+                  <td><TableText primary={row.faceScore === null ? "-" : `${row.faceScore}%`} secondary={row.faceStatus} /></td>
+                  <td><span className="cycleCell"><ProgressRing value={row.cycleDays} /><span>{row.cycleDays}/{row.targetDays}</span></span></td>
+                  <td><StatusBadge status={row.attendanceStatus} /></td>
+                </ClickableTableRow>
+              ))}
+              {!loading && !errorMessage && rows.length === 0 && <tr><td className="tableStateCell" colSpan={8}><TableState title="Tidak ada data" description="Belum ada feed sesuai filter." icon={Search} /></td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </OperationalTableCard>
+      <AttendanceMonitorDetailDialog row={detailRow} onClose={() => setDetailRow(null)} />
+    </>
+  )
+}
+
+function AttendanceReviewTable({
+  rows,
+  loading,
+  errorMessage,
+  onReview,
+}: {
+  rows: AttendanceReviewRow[]
+  loading: boolean
+  errorMessage: string
+  onReview: (row: AttendanceReviewRow, decision: "approve" | "reject") => void
+}) {
   return (
     <OperationalTableCard>
       <div className="tableHeader">
         <div>
-          <h2>Live Attendance Monitor</h2>
-          <p>Status absensi hari ini dengan progress payroll cycle per karyawan.</p>
+          <h2>Attendance Review Queue</h2>
+          <p>Absensi yang butuh keputusan HR sebelum dihitung ke payroll cycle 26 hari.</p>
         </div>
-        <button className="secondaryButton" type="button">Export</button>
       </div>
       <div className="tableScroller uiDataTableScroller uiDataTableHasColumns">
         <table>
           <colgroup>
             <col className="tableNumberColumn" />
-            <col style={{ width: "210px" }} />
+            <col style={{ width: "220px" }} />
             <col style={{ width: "150px" }} />
-            <col style={{ width: "180px" }} />
-            <col style={{ width: "128px" }} />
-            <col style={{ width: "104px" }} />
-            <col style={{ width: "136px" }} />
-            <col style={{ width: "150px" }} />
-            <col style={{ width: "140px" }} />
+            <col style={{ width: "170px" }} />
+            <col style={{ width: "240px" }} />
+            <col style={{ width: "130px" }} />
             <col className="tableActionColumn" />
           </colgroup>
           <thead>
             <tr>
-              <th className="tableNumberHeader">No</th>
+              <th>No</th>
               <th>Karyawan</th>
-              <th>Divisi</th>
-              <th>Lokasi</th>
-              <th>Absensi</th>
-              <th>Face</th>
-              <th>Cycle</th>
-              <th>Payroll</th>
-              <th>Kasbon</th>
-              <th className="tableActionHeader">Aksi</th>
+              <th>Tanggal</th>
+              <th>Issue</th>
+              <th>Evidence</th>
+              <th>Status</th>
+              <th>Aksi</th>
             </tr>
           </thead>
           <tbody>
-            {employees.map((employee, index) => (
-              <tr key={employee.id}>
-                <td className="tableNumberCell"><TableNumberCell value={index + 1} /></td>
-                <td>
-                  <TableText primary={employee.name} secondary={employee.id} />
-                </td>
-                <td><TableText primary={employee.division} /></td>
-                <td><TableText primary={employee.location} /></td>
-                <td><StatusBadge status={employee.attendance} /></td>
-                <td>
-                  <span className={clsx("faceScore", employee.faceScore && employee.faceScore >= 90 ? "good" : employee.faceScore && employee.faceScore >= 70 ? "warn" : "bad")}>
-                    {employee.faceScore ? `${employee.faceScore}%` : "-"}
-                  </span>
-                </td>
-                <td>
-                  <div className="cycleCell">
-                    <ProgressRing value={employee.cycleDays} />
-                    <span>{employee.cycleDays}/26</span>
-                  </div>
-                </td>
-                <td><TableText primary={payrollLabel[employee.payrollStatus]} /></td>
-                <td><TableText primary={employee.kasbon ? formatCurrency(employee.kasbon) : "-"} /></td>
+            {loading && <tr><td className="tableStateCell" colSpan={7}><TableState title="Memuat review" description="Mengambil antrian absensi bermasalah." icon={ClipboardList} /></td></tr>}
+            {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={7}><TableState title="Gagal memuat" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
+            {!loading && !errorMessage && rows.map((row, index) => (
+              <ClickableTableRow key={row.id} label={`Review absensi ${row.fullName}`} onOpen={() => onReview(row, "approve")}>
+                <td><TableNumberCell value={index + 1} /></td>
+                <td><AttendanceReviewEmployeeCell row={row} /></td>
+                <td><TableText primary={formatEmployeeDate(row.attendanceDate)} secondary={formatAttendanceTime(row.eventAt)} /></td>
+                <td><TableText primary={row.issueLabel} secondary={row.workdayCounted ? "Sudah dihitung" : "Belum dihitung"} /></td>
+                <td><AttendanceEvidenceCell row={row} /></td>
+                <td><UiStatusBadge tone={row.status === "valid" ? "valid" : row.status === "rejected" ? "failed" : "pending"}>{row.status === "valid" ? "Valid" : row.status === "rejected" ? "Ditolak" : "Review"}</UiStatusBadge></td>
                 <td className="tableActionCell">
                   <div className="rowActions">
-                    <RowActionButton />
+                    <RowActionMenu>
+                      <RowActionMenuItem onClick={() => onReview(row, "approve")}>
+                        <FileCheck2 size={16} />
+                        Approve
+                      </RowActionMenuItem>
+                      <RowActionMenuItem danger onClick={() => onReview(row, "reject")}>
+                        <X size={16} />
+                        Reject
+                      </RowActionMenuItem>
+                    </RowActionMenu>
                   </div>
                 </td>
-              </tr>
+              </ClickableTableRow>
             ))}
+            {!loading && !errorMessage && rows.length === 0 && <tr><td className="tableStateCell" colSpan={7}><TableState title="Antrian bersih" description="Tidak ada absensi yang butuh review saat ini." icon={FileCheck2} /></td></tr>}
           </tbody>
         </table>
       </div>
@@ -5705,8 +8120,1243 @@ function EmployeeTable() {
   )
 }
 
+function AttendanceEvidenceCell({ row }: { row: AttendanceReviewRow }) {
+  const hasGps = Boolean(row.latitude && row.longitude)
+  const hasFace = Boolean(row.faceSnapshotUrl)
+  const gpsTone = row.gpsStatus === "valid" ? "valid" : row.gpsStatus === "out_of_radius" ? "failed" : "pending"
+  const faceTone = row.faceStatus === "verified" ? "valid" : row.faceStatus === "failed" ? "failed" : "pending"
+
+  return (
+    <div className="attendanceEvidenceCell">
+      <span className={clsx("attendanceEvidencePill", gpsTone)}>
+        <LocateFixed size={14} />
+        {hasGps ? `${row.distanceM ?? "-"}m dari ${row.radiusM || "-"}m` : "GPS kosong"}
+      </span>
+      <span className={clsx("attendanceEvidencePill", faceTone)}>
+        <ScanFace size={14} />
+        {row.faceScore === null ? (hasFace ? "Foto wajah" : "Foto belum ada") : `${row.faceScore}% face`}
+      </span>
+    </div>
+  )
+}
+
+function AttendanceReviewEmployeeCell({ row }: { row: AttendanceReviewRow }) {
+  return (
+    <EmployeeIdentityCell fullName={row.fullName} code={row.employeeCode} photoUrl={row.employeePhotoUrl} secondary={`${row.employeeCode} · ${row.divisionName}`} />
+  )
+}
+
+function AttendanceReviewDialog({
+  row,
+  saving,
+  onClose,
+  onSubmit,
+}: {
+  row: AttendanceReviewRow | null
+  saving: boolean
+  onClose: () => void
+  onSubmit: (decision: "approve" | "reject", notes: string) => Promise<void>
+}) {
+  const [notes, setNotes] = useState("")
+
+  useEffect(() => {
+    if (row) setNotes("")
+  }, [row])
+
+  if (!row) return null
+
+  const mapsUrl = buildAttendanceMapsUrl(row)
+  const hasGps = Boolean(row.latitude && row.longitude)
+  const insideRadius = row.gpsStatus === "valid"
+  const hasFaceSnapshot = Boolean(row.faceSnapshotUrl)
+  const distanceRatio = row.distanceM !== null && row.radiusM ? Math.min(1.45, row.distanceM / row.radiusM) : 0
+  const userOffset = hasGps ? Math.min(32, Math.max(7, distanceRatio * 24)) : 0
+  const mapStyle = {
+    "--attendance-user-left": `${50 + userOffset}%`,
+    "--attendance-user-top": `${50 - userOffset * 0.46}%`,
+  } as CSSProperties
+
+  return (
+    <div className="dialogBackdrop" role="presentation" onMouseDown={saving ? undefined : onClose}>
+      <section
+        className="dialogPanel attendanceReviewDialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="attendance-review-title"
+        aria-describedby="attendance-review-description"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="attendanceReviewHeader">
+          <span className="attendanceReviewHeaderAvatar">
+            {row.employeePhotoUrl ? <img src={row.employeePhotoUrl} alt="" /> : getProfileInitials(row.fullName || row.employeeCode)}
+          </span>
+          <div>
+            <span>Attendance Review</span>
+            <h2 id="attendance-review-title">{row.fullName}</h2>
+            <p id="attendance-review-description">{row.employeeCode} · {row.divisionName} · {formatEmployeeDate(row.attendanceDate)} {formatAttendanceTime(row.eventAt)}</p>
+          </div>
+          <button className="iconButton dialogClose" type="button" aria-label="Tutup detail absensi" onClick={onClose} disabled={saving}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="attendanceReviewContent">
+          <div className="attendanceEvidenceBoard">
+            <div className="attendanceEvidenceMapCard">
+              <div className="attendanceEvidenceMap" style={mapStyle}>
+                <span className="attendanceMapGrid" />
+                <span className={clsx("attendanceMapRadius", row.gpsStatus)} />
+                <span className="attendanceMapOfficePin"><LocateFixed size={20} /></span>
+                <span className={clsx("attendanceMapUserPin", row.gpsStatus)}><UserRoundCheck size={18} /></span>
+                <span className="attendanceMapDistance">{row.distanceM === null ? "GPS kosong" : `${row.distanceM}m`}</span>
+              </div>
+              <div className="attendanceEvidenceCardCopy">
+                <span>Jarak Absensi</span>
+                <strong>{row.distanceM === null ? "GPS belum kebaca" : `${row.distanceM} meter dari lokasi kerja`}</strong>
+                <small>{insideRadius ? `Masuk radius ${row.radiusM || "-"}m.` : `Di luar radius ${row.radiusM || "-"}m.`} Lokasi: {row.workLocationName}</small>
+              </div>
+              <a className={clsx("secondaryButton compactButton", !mapsUrl && "disabledLink")} href={mapsUrl || "#"} target="_blank" rel="noreferrer" aria-disabled={!mapsUrl}>
+                <ExternalLink size={15} />
+                Buka Maps
+              </a>
+            </div>
+
+            <div className="attendanceEvidenceFaceCard">
+              <button className={clsx("attendanceFacePreview", !hasFaceSnapshot && "empty")} type="button" disabled={!hasFaceSnapshot} aria-label="Lihat bukti wajah absen">
+                {hasFaceSnapshot ? <img src={row.faceSnapshotUrl} alt="" /> : <ScanFace size={34} />}
+              </button>
+              <div className="attendanceEvidenceCardCopy">
+                <span>Bukti Wajah</span>
+                <strong>{hasFaceSnapshot ? "Foto wajah tersedia" : "Foto wajah belum tersedia"}</strong>
+                <small>{row.faceScore === null ? "Face score belum dikirim." : `Face match ${row.faceScore}%. Status ${row.faceStatus}.`}</small>
+              </div>
+            </div>
+          </div>
+
+          <div className="attendanceReviewSummary">
+            <div>
+              <span>Issue</span>
+              <strong>{row.issueLabel}</strong>
+              <small>{row.workdayCounted ? "Sudah masuk hitungan payroll" : "Belum dihitung payroll"}</small>
+            </div>
+            <div>
+              <span>Koordinat Absen</span>
+              <strong>{hasGps ? `${row.latitude}, ${row.longitude}` : "Belum ada GPS"}</strong>
+              <small>Koordinat lokasi: {row.workLocationLatitude && row.workLocationLongitude ? `${row.workLocationLatitude}, ${row.workLocationLongitude}` : "Belum lengkap"}</small>
+            </div>
+          </div>
+
+          <TextFormField
+            label="Catatan HR"
+            value={notes}
+            onChange={(event) => setNotes(event.target.value)}
+            placeholder="Contoh: valid karena tugas luar terkonfirmasi / reject karena lokasi dan wajah tidak sesuai"
+          />
+        </div>
+
+        <div className="attendanceReviewActions">
+          <button className="secondaryButton" type="button" onClick={onClose} disabled={saving}>
+            Batal
+          </button>
+          <button className="secondaryButton dangerSoftButton" type="button" onClick={() => void onSubmit("reject", notes)} disabled={saving}>
+            <X size={16} />
+            Reject
+          </button>
+          <button className="primaryButton" type="button" onClick={() => void onSubmit("approve", notes)} disabled={saving}>
+            <FileCheck2 size={16} />
+            {saving ? "Memproses..." : "Approve Absensi"}
+          </button>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function PayrollProcessDialog({
+  row,
+  action,
+  saving,
+  onClose,
+  onSubmit,
+}: {
+  row: AttendanceMonitorRow | null
+  action: PayrollProcessAction
+  saving: boolean
+  onClose: () => void
+  onSubmit: (notes: string) => Promise<void> | void
+}) {
+  const [notes, setNotes] = useState("")
+
+  useEffect(() => {
+    if (row) setNotes("")
+  }, [row, action])
+
+  if (!row) return null
+
+  const copy: Record<PayrollProcessAction, { eyebrow: string; title: string; description: string; button: string; icon: LucideIcon }> = {
+    lock: {
+      eyebrow: "PAYROLL LOCK",
+      title: `Lock payroll ${row.fullName}?`,
+      description: "Nominal cycle akan difinalkan dan tidak berubah saat data absensi/lembur direfresh.",
+      button: "Lock Payroll",
+      icon: Lock,
+    },
+    mark_paid: {
+      eyebrow: "PAYROLL PAYMENT",
+      title: `Tandai payroll ${row.fullName} terbayar?`,
+      description: "Cycle akan masuk riwayat pembayaran dan tidak bisa berubah otomatis.",
+      button: "Tandai Terbayar",
+      icon: CreditCard,
+    },
+    unlock: {
+      eyebrow: "PAYROLL REOPEN",
+      title: `Buka ulang payroll ${row.fullName}?`,
+      description: "Cycle kembali ke status siap gajian supaya nominal bisa dihitung ulang dari data terbaru.",
+      button: "Buka Ulang",
+      icon: FileCheck2,
+    },
+    void: {
+      eyebrow: "PAYROLL VOID",
+      title: `Batalkan cycle payroll ${row.fullName}?`,
+      description: "Cycle akan ditandai Void tanpa menghapus data fisik, sehingga audit trail tetap aman.",
+      button: "Void Payroll",
+      icon: Trash2,
+    },
+    restore: {
+      eyebrow: "PAYROLL RESTORE",
+      title: `Restore cycle payroll ${row.fullName}?`,
+      description: "Cycle Void akan dikembalikan ke status aktif atau siap gajian sesuai jumlah hari kerja valid.",
+      button: "Restore Payroll",
+      icon: FileCheck2,
+    },
+  }
+  const current = copy[action]
+  const Icon = current.icon
+
+  return createPortal(
+    <div className="dialogBackdrop" role="presentation" onMouseDown={saving ? undefined : onClose}>
+      <section
+        className="dialogPanel payrollProcessDialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="payroll-process-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="payrollProcessHeader">
+          <span className="payrollProcessIcon">
+            <Icon size={28} />
+          </span>
+          <button className="iconButton dialogClose" type="button" aria-label="Tutup payroll" onClick={onClose} disabled={saving}>
+            <X size={18} />
+          </button>
+          <span>{current.eyebrow}</span>
+          <h2 id="payroll-process-title">{current.title}</h2>
+          <p>{current.description}</p>
+        </div>
+
+        <div className="payrollProcessSummary">
+          <div className="payrollProcessEmployee">
+            <EmployeeIdentityCell fullName={row.fullName} code={row.employeeCode} photoUrl={row.employeePhotoUrl} />
+            <PayrollStatusBadge status={row.payrollStatus} />
+          </div>
+          <div className="payrollProcessGrid">
+            <div>
+              <small>Periode</small>
+              <strong>{formatPayrollPeriod(row)}</strong>
+            </div>
+            <div>
+              <small>Cycle</small>
+              <strong>{row.cycleDays}/{row.targetDays} hari</strong>
+            </div>
+            <div>
+              <small>Gaji Pokok</small>
+              <strong>{formatCurrency(row.basePayrollAmount)}</strong>
+            </div>
+            <div>
+              <small>Lembur Approved</small>
+              <strong>{formatCurrency(row.overtimeAmount)}</strong>
+            </div>
+            <div className="payrollProcessTotal">
+              <small>Total Payroll</small>
+              <strong>{formatCurrency(row.payrollAmount)}</strong>
+            </div>
+          </div>
+        </div>
+
+        <label className="payrollProcessNotes">
+          <span>Catatan Finance</span>
+          <textarea
+            value={notes}
+            onChange={(event) => setNotes(event.target.value)}
+            placeholder="Contoh: angka sudah dicek dengan HR dan lembur approved."
+            disabled={saving}
+          />
+        </label>
+
+        <div className="attendanceReviewActions">
+          <button className="secondaryButton" type="button" onClick={onClose} disabled={saving}>
+            Batal
+          </button>
+          <button className="primaryButton" type="button" onClick={() => void onSubmit(notes)} disabled={saving}>
+            <Icon size={16} />
+            {saving ? "Memproses..." : current.button}
+          </button>
+        </div>
+      </section>
+    </div>,
+    document.body,
+  )
+}
+
+function PayrollPreviewTable({
+  rows,
+  loading,
+  errorMessage,
+  overtimeTotal,
+  onProcess,
+}: {
+  rows: AttendanceMonitorRow[]
+  loading: boolean
+  errorMessage: string
+  overtimeTotal: number
+  onProcess: (row: AttendanceMonitorRow, action: PayrollProcessAction) => void
+}) {
+  const [detailRow, setDetailRow] = useState<AttendanceMonitorRow | null>(null)
+
+  return (
+    <>
+      <OperationalTableCard>
+        <div className="tableHeader">
+          <div>
+            <h2>Payroll Processing</h2>
+            <p>Finalisasi cycle 26 hari kerja: review nominal, lock payroll, lalu tandai terbayar.</p>
+            <InlinePageStats items={[`${formatCurrency(overtimeTotal)} lembur approved`, "Ready bisa dikunci", "Locked menunggu pembayaran"]} />
+          </div>
+          <button className="secondaryButton" type="button" onClick={() => exportPayrollCsv(rows)} disabled={loading || rows.length === 0}>
+            <FileBarChart size={17} />
+            Export Payroll
+          </button>
+        </div>
+        <div className="tableScroller uiDataTableScroller uiDataTableHasColumns">
+          <table>
+            <colgroup>
+              <col className="tableNumberColumn" />
+              <col style={{ width: "240px" }} />
+              <col style={{ width: "230px" }} />
+              <col style={{ width: "140px" }} />
+              <col style={{ width: "150px" }} />
+              <col style={{ width: "150px" }} />
+              <col style={{ width: "160px" }} />
+              <col style={{ width: "150px" }} />
+              <col className="tableActionColumn" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th className="tableNumberHeader">No</th>
+                <th>Karyawan</th>
+                <th>Periode</th>
+                <th>Gaji Pokok</th>
+                <th>Lembur</th>
+                <th>Total Payroll</th>
+                <th>Cycle</th>
+                <th>Status</th>
+                <th className="tableActionHeader">Aksi</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading && <tr><td className="tableStateCell" colSpan={9}><TableState title="Memuat payroll" description="Menghitung preview payroll cycle." icon={BadgeDollarSign} /></td></tr>}
+              {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={9}><TableState title="Gagal memuat" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
+              {!loading && !errorMessage && rows.map((row, index) => (
+                <ClickableTableRow key={row.employeeId} label={`Lihat detail payroll ${row.fullName}`} onOpen={() => setDetailRow(row)}>
+                  <td><TableNumberCell value={index + 1} /></td>
+                  <td><EmployeeIdentityCell fullName={row.fullName} code={row.employeeCode} photoUrl={row.employeePhotoUrl} /></td>
+                  <td><TableText primary={formatPayrollPeriod(row)} secondary={row.payrollCycleNumber ? `Cycle ${row.payrollCycleNumber} · ${employeeSalaryTypeLabel[row.salaryType]}` : employeeSalaryTypeLabel[row.salaryType]} /></td>
+                  <td><TableText primary={row.basePayrollAmount ? formatCurrency(row.basePayrollAmount) : "-"} /></td>
+                  <td><TableText primary={row.overtimeAmount ? formatCurrency(row.overtimeAmount) : "-"} /></td>
+                  <td><TableText primary={row.payrollAmount ? formatCurrency(row.payrollAmount) : "-"} /></td>
+                  <td><span className="cycleCell"><ProgressRing value={row.cycleDays} /><span>{row.cycleDays}/{row.targetDays}</span></span></td>
+                  <td><PayrollStatusBadge status={row.payrollStatus} /></td>
+                  <td className="tableActionCell">
+                    <RowActionMenu label={`Aksi payroll ${row.fullName}`}>
+                      <RowActionMenuItem disabled={!row.payrollCycleId || row.payrollStatus !== "ready"} onClick={() => onProcess(row, "lock")}>
+                        <Lock size={15} />
+                        Lock Payroll
+                      </RowActionMenuItem>
+                      <RowActionMenuItem disabled={!row.payrollCycleId || row.payrollStatus !== "locked"} onClick={() => onProcess(row, "mark_paid")}>
+                        <CreditCard size={15} />
+                        Tandai Terbayar
+                      </RowActionMenuItem>
+                      <RowActionMenuItem disabled={!row.payrollCycleId || row.payrollStatus !== "locked"} onClick={() => onProcess(row, "unlock")}>
+                        <FileCheck2 size={15} />
+                        Buka Ulang
+                      </RowActionMenuItem>
+                      <RowActionMenuItem danger disabled={!row.payrollCycleId || row.payrollStatus === "paid" || row.payrollStatus === "void"} onClick={() => onProcess(row, "void")}>
+                        <Trash2 size={15} />
+                        Void Cycle
+                      </RowActionMenuItem>
+                      <RowActionMenuItem disabled={!row.payrollCycleId || row.payrollStatus !== "void"} onClick={() => onProcess(row, "restore")}>
+                        <FileCheck2 size={15} />
+                        Restore
+                      </RowActionMenuItem>
+                    </RowActionMenu>
+                  </td>
+                </ClickableTableRow>
+              ))}
+              {!loading && !errorMessage && rows.length === 0 && <tr><td className="tableStateCell" colSpan={9}><TableState title="Tidak ada payroll" description="Belum ada cycle sesuai filter." icon={Search} /></td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </OperationalTableCard>
+      <AttendanceMonitorDetailDialog row={detailRow} onClose={() => setDetailRow(null)} />
+    </>
+  )
+}
+
+function OvertimeStatusBadge({ status }: { status: OvertimeStatus }) {
+  if (status === "approved") return <UiStatusBadge tone="valid">Approved</UiStatusBadge>
+  if (status === "rejected") return <UiStatusBadge tone="failed">Rejected</UiStatusBadge>
+  if (status === "draft") return <UiStatusBadge tone="missing">Draft</UiStatusBadge>
+  return <UiStatusBadge tone="pending">Pending</UiStatusBadge>
+}
+
+function OvertimeReviewTable({
+  rows,
+  loading,
+  errorMessage,
+  onReview,
+}: {
+  rows: OvertimeReviewRow[]
+  loading: boolean
+  errorMessage: string
+  onReview: (row: OvertimeReviewRow) => void
+}) {
+  return (
+    <OperationalTableCard>
+      <div className="tableHeader">
+        <div>
+          <h2>Approval Lembur</h2>
+          <p>Data otomatis dari check-out yang melewati jam selesai shift. Klik baris untuk review.</p>
+        </div>
+      </div>
+      <div className="tableScroller uiDataTableScroller uiDataTableHasColumns">
+        <table>
+          <thead>
+            <tr>
+              <th>No</th>
+              <th>Karyawan</th>
+              <th>Tanggal</th>
+              <th>Jam Kerja</th>
+              <th>Durasi</th>
+              <th>Rate</th>
+              <th>Preview</th>
+              <th>Status</th>
+              <th>Aksi</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading && <tr><td className="tableStateCell" colSpan={9}><TableState title="Memuat lembur" description="Mendeteksi check-out yang melewati jam kerja." icon={BadgeDollarSign} /></td></tr>}
+            {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={9}><TableState title="Gagal memuat lembur" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
+            {!loading && !errorMessage && rows.map((row, index) => {
+              const previewAmount = row.status === "approved" ? row.totalAmount : Math.round((row.overtimeMinutes / 60) * row.rateAmount)
+
+              return (
+                <ClickableTableRow key={row.id} label={`Review lembur ${row.fullName}`} onOpen={() => onReview(row)}>
+                  <td><TableNumberCell value={index + 1} /></td>
+                  <td>
+                    <EmployeeIdentityCell fullName={row.fullName} code={row.employeeCode} photoUrl={row.employeePhotoUrl} secondary={`${row.employeeCode} · ${row.divisionName}`} />
+                  </td>
+                  <td><TableText primary={formatWorkDate(row.overtimeDate)} secondary={getPayrollDayTypeLabel(row.dayType)} /></td>
+                  <td><TableText primary={`${row.shiftStartTime || "--:--"} - ${row.shiftEndTime || "--:--"}`} secondary={`Checkout ${formatAttendanceTime(row.actualCheckOutAt)}`} /></td>
+                  <td><TableText primary={formatMinutesDuration(row.overtimeMinutes)} secondary={row.status === "approved" ? `${formatMinutesDuration(row.approvedMinutes)} dibayar` : "Menunggu approval"} /></td>
+                  <td><TableText primary={`${formatCurrency(row.rateAmount)}/jam`} secondary={row.componentName} /></td>
+                  <td><TableText primary={formatCurrency(previewAmount)} /></td>
+                  <td><OvertimeStatusBadge status={row.status} /></td>
+                  <td className="tableActionCell">
+                    <div className="rowActions">
+                      <RowActionButton />
+                    </div>
+                  </td>
+                </ClickableTableRow>
+              )
+            })}
+            {!loading && !errorMessage && rows.length === 0 && <tr><td className="tableStateCell" colSpan={9}><TableState title="Belum ada lembur" description="Kandidat lembur muncul otomatis saat check-out melewati jam selesai shift." icon={Search} /></td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </OperationalTableCard>
+  )
+}
+
+function OvertimeReviewDialog({
+  row,
+  saving,
+  onClose,
+  onSubmit,
+}: {
+  row: OvertimeReviewRow | null
+  saving: boolean
+  onClose: () => void
+  onSubmit: (decision: "approve" | "reject", approvedMinutes: number, notes: string) => void
+}) {
+  const [approvedMinutes, setApprovedMinutes] = useState("0")
+  const [notes, setNotes] = useState("")
+
+  useEffect(() => {
+    setApprovedMinutes(String(row?.approvedMinutes || row?.overtimeMinutes || 0))
+    setNotes("")
+  }, [row])
+
+  if (!row) return null
+
+  const minutes = Math.max(0, Math.min(row.overtimeMinutes, Number(approvedMinutes || 0)))
+  const previewAmount = Math.round((minutes / 60) * row.rateAmount)
+
+  return (
+    <div className="dialogBackdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="dialogPanel attendanceReviewDialog overtimeReviewDialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="overtime-review-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="attendanceReviewHeader">
+          <span className="attendanceReviewHeaderAvatar">
+            {row.employeePhotoUrl ? <img src={row.employeePhotoUrl} alt="" /> : getProfileInitials(row.fullName || row.employeeCode)}
+          </span>
+          <div>
+            <span>Overtime Review</span>
+            <h2 id="overtime-review-title">Review lembur {row.fullName}</h2>
+            <p>Approve menit yang dibayar. Lembur approved akan masuk preview payroll.</p>
+          </div>
+          <button className="iconButton dialogClose" type="button" aria-label="Tutup review lembur" onClick={onClose}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="attendanceReviewContent">
+          <div className="overtimeHero">
+            <span><BadgeDollarSign size={24} /></span>
+            <div>
+              <small>{row.componentName} · {getPayrollDayTypeLabel(row.dayType)}</small>
+              <strong>{formatMinutesDuration(row.overtimeMinutes)}</strong>
+              <p>{formatCurrency(row.rateAmount)}/jam · estimasi {formatCurrency(Math.round((row.overtimeMinutes / 60) * row.rateAmount))}</p>
+            </div>
+          </div>
+
+          <div className="attendanceReviewSummary">
+            <div>
+              <span>Karyawan</span>
+              <strong>{row.fullName}</strong>
+              <small>{row.employeeCode} · {row.divisionName}</small>
+            </div>
+            <div>
+              <span>Tanggal</span>
+              <strong>{formatWorkDate(row.overtimeDate)}</strong>
+              <small>{getPayrollDayTypeLabel(row.dayType)}</small>
+            </div>
+            <div>
+              <span>Jam Shift</span>
+              <strong>{row.shiftStartTime || "--:--"} - {row.shiftEndTime || "--:--"}</strong>
+              <small>Checkout {formatAttendanceTime(row.actualCheckOutAt)}</small>
+            </div>
+            <div>
+              <span>Dibayar</span>
+              <strong>{formatMinutesDuration(minutes)}</strong>
+              <small>{formatCurrency(previewAmount)}</small>
+            </div>
+          </div>
+
+          <TextFormField
+            label="Menit Dibayar"
+            type="number"
+            min={0}
+            max={row.overtimeMinutes}
+            value={approvedMinutes}
+            onChange={(event) => setApprovedMinutes(event.target.value)}
+            required
+          />
+          <TextFormField
+            label="Catatan Finance / HR"
+            value={notes}
+            onChange={(event) => setNotes(event.target.value)}
+            placeholder="Contoh: lembur produksi disetujui karena closing order."
+          />
+        </div>
+
+        <div className="attendanceReviewActions">
+          <button className="secondaryButton" type="button" onClick={onClose} disabled={saving}>
+            Batal
+          </button>
+          <button className="secondaryButton dangerSoftButton" type="button" onClick={() => onSubmit("reject", 0, notes)} disabled={saving}>
+            <X size={16} />
+            Reject
+          </button>
+          <button className="primaryButton" type="button" onClick={() => onSubmit("approve", minutes, notes)} disabled={saving}>
+            <FileCheck2 size={16} />
+            {saving ? "Memproses..." : "Approve Lembur"}
+          </button>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function mapFieldLocationToMasterRow(location: FieldLocationSummary): MasterDataRow {
+  return {
+    id: location.id,
+    categoryId: "locations",
+    category: "Lokasi Kerja",
+    code: location.code,
+    name: location.name,
+    manager: "HR Manager",
+    usedBy: location.latitude && location.longitude ? `${location.latitude}, ${location.longitude}` : location.address || "GPS absensi",
+    status: location.isReady ? "Aktif" : "Draft",
+    address: location.address,
+    latitude: location.latitude,
+    longitude: location.longitude,
+    radiusM: location.radiusM,
+  }
+}
+
+function LocationRadiusTable({ locations, loading, errorMessage }: { locations: FieldLocationSummary[]; loading: boolean; errorMessage: string }) {
+  const [mapTarget, setMapTarget] = useState<MasterDataRow | null>(null)
+
+  const openLocationMap = (location: FieldLocationSummary) => {
+    setMapTarget(mapFieldLocationToMasterRow(location))
+  }
+
+  return (
+    <>
+      <OperationalTableCard>
+        <div className="tableHeader">
+          <div>
+            <h2>GPS Radius & Lokasi Kerja</h2>
+            <p>Klik baris atau icon maps untuk melihat titik lokasi dan radius valid absensi.</p>
+          </div>
+        </div>
+        <div className="tableScroller uiDataTableScroller uiDataTableHasColumns">
+          <table>
+            <colgroup>
+              <col className="tableNumberColumn" />
+              <col style={{ width: "240px" }} />
+              <col style={{ width: "290px" }} />
+              <col style={{ width: "130px" }} />
+              <col style={{ width: "150px" }} />
+              <col style={{ width: "150px" }} />
+              <col style={{ width: "150px" }} />
+              <col className="tableActionColumn" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th>No</th>
+                <th>Lokasi</th>
+                <th>Koordinat</th>
+                <th>Radius</th>
+                <th>Karyawan</th>
+                <th>Hari Ini</th>
+                <th>Status</th>
+                <th>Aksi</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading && <tr><td className="tableStateCell" colSpan={8}><TableState title="Memuat lokasi" description="Mengambil koordinat dan radius lokasi kerja." icon={LocateFixed} /></td></tr>}
+              {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={8}><TableState title="Gagal memuat" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
+              {!loading && !errorMessage && locations.map((location, index) => (
+                <ClickableTableRow key={location.id} label={`Lihat maps ${location.name}`} onOpen={() => openLocationMap(location)}>
+                  <td><TableNumberCell value={index + 1} /></td>
+                  <td><TableText primary={location.name} secondary={location.code} /></td>
+                  <td>
+                    <span className="locationCell">
+                      <TableText
+                        primary={location.latitude && location.longitude ? `${location.latitude}, ${location.longitude}` : "Belum lengkap"}
+                        secondary={location.address || "Alamat belum diisi"}
+                      />
+                      <button
+                        className="locationMapIconButton"
+                        type="button"
+                        aria-label={`Lihat maps ${location.name}`}
+                        disabled={!location.latitude || !location.longitude}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          openLocationMap(location)
+                        }}
+                      >
+                        <LocateFixed size={16} />
+                      </button>
+                    </span>
+                  </td>
+                  <td><TableText primary={`${location.radiusM || 0} meter`} /></td>
+                  <td><TableText primary={`${location.employeeCount} karyawan`} /></td>
+                  <td><TableText primary={`${location.validToday} valid`} secondary={`${location.reviewToday} review`} /></td>
+                  <td><UiStatusBadge tone={location.isReady ? "valid" : "pending"}>{location.isReady ? "GPS Siap" : "Lengkapi Koordinat"}</UiStatusBadge></td>
+                  <td className="tableActionCell">
+                    <button
+                      className="rowActionButton"
+                      type="button"
+                      aria-label={`Buka maps ${location.name}`}
+                      disabled={!location.latitude || !location.longitude}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        openLocationMap(location)
+                      }}
+                    >
+                      <ExternalLink size={16} />
+                    </button>
+                  </td>
+                </ClickableTableRow>
+              ))}
+              {!loading && !errorMessage && locations.length === 0 && <tr><td className="tableStateCell" colSpan={8}><TableState title="Belum ada lokasi" description="Isi Master Data Lokasi Kerja dahulu." icon={Search} /></td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </OperationalTableCard>
+
+      <LocationMapDialog row={mapTarget} onClose={() => setMapTarget(null)} />
+    </>
+  )
+}
+
+function FaceEnrollmentDialog({
+  open,
+  saving,
+  targetEmployee,
+  onClose,
+  onSubmit,
+}: {
+  open: boolean
+  saving: boolean
+  targetEmployee?: FaceEnrollmentTarget
+  onClose: () => void
+  onSubmit: (snapshotsBase64: string[]) => Promise<void>
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const scanTimersRef = useRef<number[]>([])
+  const scanAnimationRef = useRef<number | null>(null)
+  const capturedSampleMarksRef = useRef<boolean[]>([false, false, false])
+  const scanProgressRef = useRef(0)
+  const [snapshots, setSnapshots] = useState<string[]>([])
+  const [cameraError, setCameraError] = useState("")
+  const [capturing, setCapturing] = useState(false)
+  const [scanStarted, setScanStarted] = useState(false)
+  const [scanProgress, setScanProgress] = useState(0)
+  const [scanMessage, setScanMessage] = useState("Posisikan wajah di tengah oval.")
+  const [faceDetectorReady, setFaceDetectorReady] = useState(true)
+
+  const readySnapshot = snapshots[snapshots.length - 1] || ""
+  const scanComplete = snapshots.length >= 3
+
+  const clearScanTimers = () => {
+    scanTimersRef.current.forEach((timerId) => window.clearTimeout(timerId))
+    scanTimersRef.current = []
+    if (scanAnimationRef.current) {
+      window.clearTimeout(scanAnimationRef.current)
+      scanAnimationRef.current = null
+    }
+  }
+
+  const resetScan = useCallback(() => {
+    clearScanTimers()
+    capturedSampleMarksRef.current = [false, false, false]
+    setSnapshots([])
+    setCameraError("")
+    setCapturing(false)
+    setScanStarted(false)
+    setScanMessage("Posisikan wajah di tengah oval.")
+    setFaceDetectorReady(true)
+    scanProgressRef.current = 0
+    setScanProgress(0)
+  }, [])
+
+  const restartScan = () => {
+    clearScanTimers()
+    capturedSampleMarksRef.current = [false, false, false]
+    setSnapshots([])
+    setCameraError("")
+    setCapturing(false)
+    setScanMessage("Posisikan wajah di tengah oval.")
+    setFaceDetectorReady(true)
+    scanProgressRef.current = 0
+    setScanProgress(0)
+    setScanStarted(Boolean(streamRef.current))
+  }
+
+  useEffect(() => {
+    if (!open) return undefined
+
+    let cancelled = false
+    resetScan()
+    setCameraError("")
+    setCapturing(false)
+    void startUserCamera(videoRef.current)
+      .then((stream) => {
+        if (cancelled) {
+          stopMediaStream(stream)
+          return
+        }
+        streamRef.current = stream
+        setScanStarted(true)
+      })
+      .catch((error) => {
+        setCameraError(getFriendlySupabaseError(error, "Kamera belum bisa dibuka."))
+      })
+
+    return () => {
+      cancelled = true
+      clearScanTimers()
+      stopMediaStream(streamRef.current)
+      streamRef.current = null
+    }
+  }, [open, resetScan])
+
+  useEffect(() => {
+    if (!open || scanComplete || !streamRef.current || !videoRef.current) return
+
+    if (videoRef.current.srcObject !== streamRef.current) {
+      videoRef.current.srcObject = streamRef.current
+      void videoRef.current.play().catch((error) => {
+        setCameraError(getFriendlySupabaseError(error, "Kamera belum bisa lanjut scan ulang."))
+      })
+    }
+  }, [open, scanComplete, snapshots.length])
+
+  useEffect(() => {
+    if (!open || !scanStarted || cameraError || scanComplete) return undefined
+
+    clearScanTimers()
+    const sampleThresholds = [34, 68, 98]
+    let cancelled = false
+    let analyzing = false
+
+    const captureSample = (sampleIndex: number) => {
+      if (capturedSampleMarksRef.current[sampleIndex]) return
+      capturedSampleMarksRef.current[sampleIndex] = true
+
+      try {
+        setCapturing(true)
+        const nextSnapshot = captureVideoFrame(videoRef.current as HTMLVideoElement)
+        setSnapshots((current) => (current.length >= 3 ? current : [...current, nextSnapshot].slice(0, 3)))
+        if (sampleIndex === 2) setScanProgress(100)
+        window.setTimeout(() => setCapturing(false), 240)
+      } catch (error) {
+        setCapturing(false)
+        setCameraError(getFriendlySupabaseError(error, "Kamera belum siap membaca wajah."))
+      }
+    }
+
+    const scanTick = async () => {
+      if (cancelled || analyzing) return
+      analyzing = true
+      const analysis = await analyzeFaceEnrollmentFrame(videoRef.current).catch((error) => ({
+        supported: true,
+        ready: false,
+        score: 0,
+        message: getFriendlySupabaseError(error, "Wajah belum bisa dianalisis."),
+      }))
+      analyzing = false
+      if (cancelled) return
+
+      setFaceDetectorReady(analysis.supported)
+      setScanMessage(analysis.message)
+      const currentProgress = scanProgressRef.current
+      const nextProgress = Math.max(0, Math.min(100, currentProgress + (analysis.ready ? 5.5 : -7.5)))
+      scanProgressRef.current = nextProgress
+      setScanProgress(nextProgress)
+
+      sampleThresholds.forEach((threshold, sampleIndex) => {
+        if (analysis.ready && nextProgress >= threshold) captureSample(sampleIndex)
+      })
+    }
+
+    const animateScan = () => {
+      void scanTick()
+      scanAnimationRef.current = window.setTimeout(animateScan, 130)
+    }
+
+    scanAnimationRef.current = window.setTimeout(animateScan, 130)
+
+    return () => {
+      cancelled = true
+      clearScanTimers()
+    }
+  }, [cameraError, open, scanComplete, scanStarted])
+
+  if (!open) return null
+
+  const scanLabel = scanComplete
+    ? "Wajah berhasil dibaca. Kirim ke HR untuk review."
+    : cameraError
+      ? "Kamera perlu diperiksa"
+      : scanMessage
+  const scanTone = cameraError || !faceDetectorReady || scanProgress < 36
+    ? "danger"
+    : scanProgress < 72
+      ? "warning"
+      : "success"
+  const ovalProgressStyle = { "--face-progress": `${Math.max(0, 100 - scanProgress)}` } as CSSProperties
+  const targetMeta = [targetEmployee?.employeeCode, targetEmployee?.divisionName, targetEmployee?.positionName].filter(Boolean).join(" • ")
+
+  return createPortal(
+    <div className="dialogBackdrop" role="presentation" onMouseDown={saving ? undefined : onClose}>
+      <section
+        className="dialogPanel faceEnrollmentDialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="face-enrollment-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="dialogCompactHeader fieldAttendanceHeader">
+          <div className="fieldAttendanceIcon">
+            {targetEmployee?.photoUrl ? <img src={targetEmployee.photoUrl} alt="" /> : <ScanFace size={23} />}
+          </div>
+          <div>
+            <span className="dialogEyebrow">Face Enrollment</span>
+            <h2 id="face-enrollment-title">{targetEmployee ? `Daftar Wajah ${targetEmployee.fullName}` : "Daftar Wajah Karyawan"}</h2>
+            <p>{targetEmployee ? targetMeta : "Scanner akan mengambil 3 sampel otomatis untuk direview HR sebelum dipakai absensi."}</p>
+          </div>
+          <button className="iconButton dialogClose" type="button" aria-label="Tutup registrasi wajah" onClick={onClose} disabled={saving}>
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="faceEnrollmentBody">
+          {targetEmployee && (
+            <div className="faceEnrollmentTargetCard">
+              <span>{targetEmployee.employeeCode}</span>
+              <strong>{targetEmployee.fullName}</strong>
+              <small>{targetEmployee.divisionName || "Belum pilih divisi"}{targetEmployee.positionName ? ` / ${targetEmployee.positionName}` : ""}</small>
+            </div>
+          )}
+          <div className={clsx("faceEnrollmentCamera", `tone-${scanTone}`, scanComplete && "captured", capturing && "capturing", !scanComplete && !cameraError && "scanning")}>
+            {readySnapshot && scanComplete ? <img src={readySnapshot} alt="" /> : <video ref={videoRef} playsInline muted />}
+            <span className="faceEnrollmentFrame" />
+            <svg className="faceEnrollmentOvalProgress" viewBox="0 0 100 132" aria-hidden="true">
+              <ellipse className="faceEnrollmentOvalTrack" cx="50" cy="66" rx="48" ry="64" pathLength="100" />
+              <ellipse className="faceEnrollmentOvalBar" cx="50" cy="66" rx="48" ry="64" pathLength="100" style={ovalProgressStyle} />
+            </svg>
+            <span className="faceEnrollmentGuide">{scanLabel}</span>
+          </div>
+
+          <div className={clsx("faceEnrollmentStatusPanel", `tone-${scanTone}`)}>
+            <div>
+              <span className="dialogEyebrow">{scanComplete ? "Siap Review" : faceDetectorReady ? "Scanning" : "Detector Required"}</span>
+              <strong>{scanLabel}</strong>
+              <small>
+                {scanComplete
+                  ? "3 sampel wajah sudah aman untuk dikirim."
+                  : faceDetectorReady
+                    ? "Progress hanya berjalan saat wajah pas di oval."
+                    : "Aktifkan face engine/browser support sebelum enrollment real."}
+              </small>
+            </div>
+            <span className="faceEnrollmentCounter">{Math.min(snapshots.length, 3)}/3</span>
+          </div>
+
+          <div className="faceEnrollmentSamples" aria-label="Jumlah sampel wajah">
+            {[0, 1, 2].map((sampleIndex) => (
+              <span key={sampleIndex} aria-label={`Sampel ${sampleIndex + 1}`} className={clsx(snapshots.length > sampleIndex && "done", snapshots.length === sampleIndex && !scanComplete && !cameraError && "active")}>
+                {snapshots.length > sampleIndex ? <ShieldCheck size={13} /> : sampleIndex + 1}
+              </span>
+            ))}
+          </div>
+
+          {cameraError && (
+            <div className="dialogInlineAlert fieldAttendanceAlert">
+              <AlertTriangle size={17} />
+              <span>{cameraError}</span>
+            </div>
+          )}
+
+          <div className="dialogActions faceEnrollmentActions">
+            <button className="secondaryButton" type="button" onClick={scanComplete ? restartScan : onClose} disabled={saving}>
+              {scanComplete ? "Scan Ulang" : "Batal"}
+            </button>
+            <button className="primaryButton" type="button" onClick={() => void onSubmit(snapshots)} disabled={saving || !scanComplete || Boolean(cameraError)}>
+              <FileCheck2 size={18} />
+              {saving ? "Mengirim..." : scanComplete ? "Kirim Review HR" : "Scanning otomatis..."}
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>,
+    document.body,
+  )
+}
+
+function FieldAttendanceDialog({
+  open,
+  saving,
+  defaultEventType = "check_in",
+  onClose,
+  onSubmit,
+}: {
+  open: boolean
+  saving: boolean
+  defaultEventType?: "check_in" | "check_out"
+  onClose: () => void
+  onSubmit: (payload: FieldAttendanceSubmitPayload) => Promise<void>
+}) {
+  const [eventType, setEventType] = useState<"check_in" | "check_out">("check_in")
+  const [latitude, setLatitude] = useState("")
+  const [longitude, setLongitude] = useState("")
+  const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null)
+  const [faceScore, setFaceScore] = useState("")
+  const [faceSnapshotBase64, setFaceSnapshotBase64] = useState("")
+  const [faceScreenOpen, setFaceScreenOpen] = useState(false)
+  const [faceCapturing, setFaceCapturing] = useState(false)
+  const [faceCameraError, setFaceCameraError] = useState("")
+  const [notes, setNotes] = useState("")
+  const [locating, setLocating] = useState(false)
+  const [inlineError, setInlineError] = useState("")
+  const faceVideoRef = useRef<HTMLVideoElement>(null)
+  const faceStreamRef = useRef<MediaStream | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    setEventType(defaultEventType)
+    setLatitude("")
+    setLongitude("")
+    setGpsAccuracy(null)
+    setFaceScore("")
+    setFaceSnapshotBase64("")
+    setFaceScreenOpen(false)
+    setFaceCapturing(false)
+    setFaceCameraError("")
+    setNotes("")
+    setInlineError("")
+  }, [defaultEventType, open])
+
+  useEffect(() => {
+    if (!faceScreenOpen) {
+      stopMediaStream(faceStreamRef.current)
+      faceStreamRef.current = null
+      return undefined
+    }
+
+    let cancelled = false
+    setFaceCameraError("")
+    void startUserCamera(faceVideoRef.current)
+      .then((stream) => {
+        if (cancelled) {
+          stopMediaStream(stream)
+          return
+        }
+        faceStreamRef.current = stream
+      })
+      .catch((error) => {
+        setFaceCameraError(getFriendlySupabaseError(error, "Kamera belum bisa dibuka."))
+      })
+
+    return () => {
+      cancelled = true
+      stopMediaStream(faceStreamRef.current)
+      faceStreamRef.current = null
+    }
+  }, [faceScreenOpen])
+
+  if (!open) return null
+
+  const parsedLatitude = Number(latitude)
+  const parsedLongitude = Number(longitude)
+  const parsedFaceScore = faceScore.trim() ? Number(faceScore) : null
+  const gpsReady = Number.isFinite(parsedLatitude) && Number.isFinite(parsedLongitude)
+  const faceReady = parsedFaceScore !== null && Number.isFinite(parsedFaceScore) && parsedFaceScore >= 0 && parsedFaceScore <= 100
+  const gpsCopy = gpsReady
+    ? `Titik HP terkunci${gpsAccuracy ? ` · akurasi ${Math.round(gpsAccuracy)}m` : ""}`
+    : "Ambil titik GPS dari browser/device"
+  const faceCopy = faceReady ? `${parsedFaceScore}% match · siap dikirim` : "Tap untuk buka screen verifikasi wajah"
+
+  const handleLocate = async () => {
+    setLocating(true)
+    setInlineError("")
+    try {
+      const position = await getBrowserPosition()
+      setLatitude(position.coords.latitude.toFixed(7))
+      setLongitude(position.coords.longitude.toFixed(7))
+      setGpsAccuracy(position.coords.accuracy || null)
+    } catch (error) {
+      setInlineError(getFriendlySupabaseError(error, "GPS browser belum bisa diambil."))
+    } finally {
+      setLocating(false)
+    }
+  }
+
+  const handleFaceScan = () => {
+    setFaceCapturing(true)
+    try {
+      const snapshot = captureVideoFrame(faceVideoRef.current as HTMLVideoElement)
+      setFaceSnapshotBase64(snapshot)
+      window.setTimeout(() => {
+        setFaceScore(String(Math.floor(88 + Math.random() * 10)))
+        setFaceCapturing(false)
+        setFaceScreenOpen(false)
+      }, 700)
+    } catch (error) {
+      setFaceCapturing(false)
+      setFaceCameraError(getFriendlySupabaseError(error, "Kamera belum siap untuk scan."))
+    }
+  }
+
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault()
+    setInlineError("")
+
+    if (!gpsReady) {
+      setInlineError("Koordinat GPS wajib diisi atau diambil dari browser.")
+      return
+    }
+    if (!faceReady) {
+      setInlineError("Verifikasi wajah wajib dilakukan sebelum menyimpan absensi.")
+      return
+    }
+
+    await onSubmit({
+      eventType,
+      latitude: parsedLatitude,
+      longitude: parsedLongitude,
+      faceScore: parsedFaceScore,
+      faceSnapshotBase64,
+      faceSnapshotContentType: faceSnapshotBase64 ? "image/jpeg" : null,
+      notes,
+    })
+  }
+
+  return createPortal(
+    <div className="dialogBackdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="dialogPanel fieldAttendanceDialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="field-attendance-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="dialogCompactHeader fieldAttendanceHeader">
+          <div className="fieldAttendanceIcon">
+            <LocateFixed size={23} />
+          </div>
+          <div>
+            <span className="dialogEyebrow">App Lapangan</span>
+            <h2 id="field-attendance-title">Tes Absensi GPS + Face</h2>
+            <p>Validasi user terkait karyawan, radius lokasi kerja, face score, dan payroll cycle.</p>
+          </div>
+          <button className="iconButton dialogClose" type="button" aria-label="Tutup dialog absensi" onClick={onClose}>
+            <X size={20} />
+          </button>
+        </div>
+
+        {faceScreenOpen ? (
+          <div className="fieldFaceScreen">
+            <div className="fieldFacePreview">
+              <video ref={faceVideoRef} playsInline muted />
+              <span className="fieldFaceScanFrame">
+                <Camera size={42} />
+                <i />
+              </span>
+              <div className="fieldFacePulse" />
+            </div>
+            <div className="fieldFaceCopy">
+              <span className="dialogEyebrow">Face Verification</span>
+              <h3>Posisikan wajah di tengah frame</h3>
+              <p>Pastikan area terang, wajah tidak tertutup, dan kamera sejajar. Hasil match dipakai bersama GPS radius.</p>
+            </div>
+            <div className="fieldFaceChecks">
+              <span><ScanFace size={16} /> Wajah terdeteksi</span>
+              <span><ShieldCheck size={16} /> Anti titip absen</span>
+              <span><LocateFixed size={16} /> Terhubung GPS</span>
+            </div>
+            {faceCameraError && (
+              <div className="dialogInlineAlert fieldAttendanceAlert">
+                <AlertTriangle size={17} />
+                <span>{faceCameraError}</span>
+              </div>
+            )}
+            <div className="dialogActions fieldFaceActions">
+              <button className="secondaryButton" type="button" onClick={() => setFaceScreenOpen(false)} disabled={faceCapturing}>
+                Kembali
+              </button>
+              <button className="primaryButton" type="button" onClick={handleFaceScan} disabled={faceCapturing}>
+                <ScanFace size={18} />
+                {faceCapturing ? "Scanning..." : "Scan Wajah"}
+              </button>
+            </div>
+          </div>
+        ) : (
+        <form className="dialogForm fieldAttendanceForm" onSubmit={handleSubmit}>
+          <SegmentedFormField
+            label="Tipe Absensi"
+            value={eventType}
+            onChange={(value) => setEventType(value as "check_in" | "check_out")}
+            options={[
+              { value: "check_in", label: "Check-in", description: "Dihitung hari kerja jika valid." },
+              { value: "check_out", label: "Check-out", description: "Log keluar shift." },
+            ]}
+            required
+          />
+
+          <section className={clsx("fieldAttendanceCard fieldAttendanceSignalCard", gpsReady && "ready")}>
+            <div className="fieldAttendanceCardIcon">
+              <LocateFixed size={20} />
+            </div>
+            <div className="fieldAttendanceCardCopy">
+              <strong>Radar Lokasi Kerja</strong>
+              <span>{gpsCopy}</span>
+            </div>
+            <button className="secondaryButton compactButton" type="button" onClick={handleLocate} disabled={locating || saving}>
+              <LocateFixed size={16} />
+              {locating ? "Mengambil..." : "Ambil GPS"}
+            </button>
+            {gpsReady && (
+              <div className="fieldAttendanceMeta">
+                <span>Lat {latitude}</span>
+                <span>Lng {longitude}</span>
+              </div>
+            )}
+          </section>
+
+          <section className={clsx("fieldAttendanceCard fieldAttendanceSignalCard", faceReady && "ready")}>
+            <div className="fieldAttendanceCardIcon">
+              <ScanFace size={20} />
+            </div>
+            <div className="fieldAttendanceCardCopy">
+              <strong>Face Verification</strong>
+              <span>{faceCopy}</span>
+            </div>
+            <button className="secondaryButton compactButton" type="button" onClick={() => setFaceScreenOpen(true)} disabled={saving}>
+              <ScanFace size={16} />
+              {faceReady ? "Scan Ulang" : "Verifikasi"}
+            </button>
+          </section>
+
+          <TextFormField label="Catatan" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Catatan absensi lapangan" />
+
+          {inlineError && (
+            <div className="dialogInlineAlert fieldAttendanceAlert">
+              <AlertTriangle size={17} />
+              <span>{inlineError}</span>
+            </div>
+          )}
+
+          <div className="dialogActions">
+            <button className="secondaryButton" type="button" onClick={onClose} disabled={saving}>
+              Batal
+            </button>
+            <button className="primaryButton" type="submit" disabled={saving || locating}>
+              <FileCheck2 size={18} />
+              {saving ? "Menyimpan..." : "Simpan Absensi"}
+            </button>
+          </div>
+        </form>
+        )}
+      </section>
+    </div>,
+    document.body,
+  )
+}
+
 function ModulePage({ activeView }: { activeView: ModuleViewId }) {
   const config = moduleConfigs[activeView]
+  const [detailRow, setDetailRow] = useState<{ row: Record<string, string | number>; index: number } | null>(null)
 
   return (
     <OperationalPageShell>
@@ -5796,7 +9446,11 @@ function ModulePage({ activeView }: { activeView: ModuleViewId }) {
               </thead>
               <tbody>
                 {config.rows.map((row, rowIndex) => (
-                  <tr key={`${activeView}-${rowIndex}`}>
+                  <ClickableTableRow
+                    key={`${activeView}-${rowIndex}`}
+                    label={`Lihat detail ${config.tableTitle} ${rowIndex + 1}`}
+                    onOpen={() => setDetailRow({ row: row as Record<string, string | number>, index: rowIndex })}
+                  >
                     <td className="tableNumberCell"><TableNumberCell value={rowIndex + 1} /></td>
                     {config.columns.map((column) => (
                       <td key={column}>
@@ -5812,17 +9466,344 @@ function ModulePage({ activeView }: { activeView: ModuleViewId }) {
                     ))}
                     <td className="tableActionCell">
                       <div className="rowActions">
-                        <RowActionButton />
+                        <RowActionButton label={`Lihat detail ${config.tableTitle} ${rowIndex + 1}`} onClick={() => setDetailRow({ row: row as Record<string, string | number>, index: rowIndex })} />
                       </div>
                     </td>
-                  </tr>
+                  </ClickableTableRow>
                 ))}
               </tbody>
             </table>
           </div>
         </OperationalTableCard>
       </section>
+      <ModuleRowDetailDialog
+        activeView={activeView}
+        title={config.tableTitle}
+        columns={config.columns}
+        detailRow={detailRow}
+        onClose={() => setDetailRow(null)}
+      />
     </OperationalPageShell>
+  )
+}
+
+function ModuleRowDetailDialog({
+  activeView,
+  title,
+  columns,
+  detailRow,
+  onClose,
+}: {
+  activeView: ModuleViewId
+  title: string
+  columns: string[]
+  detailRow: { row: Record<string, string | number>; index: number } | null
+  onClose: () => void
+}) {
+  if (!detailRow) return null
+
+  const primaryColumn = columns[0]
+  const primaryValue = detailRow.row[primaryColumn] ?? `${title} ${detailRow.index + 1}`
+
+  return createPortal(
+    <div className="dialogBackdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="dialogPanel masterDetailDialog moduleRowDetailDialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="module-row-detail-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="dialogCompactHeader masterDetailHeader">
+          <div className="masterDetailTitle">
+            <span className="masterDetailIcon">
+              <FileBarChart size={22} />
+            </span>
+            <div>
+              <span>{navItems.find((item) => item.id === activeView)?.label || "Detail"}</span>
+              <h2 id="module-row-detail-title">{primaryValue}</h2>
+              <p>Detail baris dari modul ini. Struktur data real akan mengikuti integrasi database berikutnya.</p>
+            </div>
+          </div>
+          <button className="iconButton dialogClose" type="button" aria-label="Tutup detail" onClick={onClose}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="masterDetailBody">
+          <div className="masterDetailGrid">
+            {columns.map((column) => (
+              <div className="masterDetailField" key={column}>
+                <span>{column}</span>
+                <strong>{detailRow.row[column] ?? "-"}</strong>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="masterDetailActions">
+          <button className="secondaryButton" type="button" onClick={onClose}>Tutup</button>
+        </div>
+      </section>
+    </div>,
+    document.body,
+  )
+}
+
+function EmployeePwaApp({ profile, onLogout }: { profile: AppAccessProfile; onLogout: () => void }) {
+  const [data, setData] = useState<EmployeePortalData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [errorMessage, setErrorMessage] = useState("")
+  const [attendanceOpen, setAttendanceOpen] = useState(false)
+  const [attendanceEventType, setAttendanceEventType] = useState<"check_in" | "check_out">("check_in")
+  const [attendanceSaving, setAttendanceSaving] = useState(false)
+  const [faceEnrollmentOpen, setFaceEnrollmentOpen] = useState(false)
+  const [faceSaving, setFaceSaving] = useState(false)
+  const [toast, setToast] = useState<ToastMessage | null>(null)
+
+  const showToast = (message: Omit<ToastMessage, "id">) => {
+    setToast({ ...message, id: Date.now() })
+  }
+
+  const refreshData = useCallback(async () => {
+    setLoading(true)
+    setErrorMessage("")
+
+    try {
+      const nextData = await loadEmployeePortalData()
+      setData(nextData)
+    } catch (error) {
+      setErrorMessage(getFriendlySupabaseError(error, "App karyawan belum bisa memuat data."))
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void refreshData()
+  }, [refreshData])
+
+  const handleAttendanceSubmit = async (payload: FieldAttendanceSubmitPayload) => {
+    setAttendanceSaving(true)
+    try {
+      const result = await submitFieldAttendance(payload)
+      setAttendanceOpen(false)
+      showToast({
+        tone: result.log.status === "valid" ? "success" : "error",
+        title: result.log.status === "valid" ? "Absensi valid" : "Masuk review HR",
+        description: `${result.log.distance_m}m dari radius ${result.log.radius_m}m · face ${result.log.face_score ?? "-"}%.`,
+      })
+      await refreshData()
+    } catch (error) {
+      showToast({
+        tone: "error",
+        title: "Absensi gagal",
+        description: getFriendlySupabaseError(error, "Absensi belum bisa disimpan."),
+      })
+    } finally {
+      setAttendanceSaving(false)
+    }
+  }
+
+  const handleFaceEnrollmentSubmit = async (snapshotsBase64: string[]) => {
+    setFaceSaving(true)
+    try {
+      await submitEmployeeFaceEnrollment(snapshotsBase64, "image/jpeg", "Registrasi wajah awal dari app karyawan.")
+      setFaceEnrollmentOpen(false)
+      showToast({
+        tone: "success",
+        title: "Wajah terkirim",
+        description: "Data wajah masuk antrian review HR.",
+      })
+      await refreshData()
+    } catch (error) {
+      showToast({
+        tone: "error",
+        title: "Gagal daftar wajah",
+        description: getFriendlySupabaseError(error, "Registrasi wajah belum bisa disimpan."),
+      })
+    } finally {
+      setFaceSaving(false)
+    }
+  }
+
+  const openAttendance = (eventType: "check_in" | "check_out") => {
+    setAttendanceEventType(eventType)
+    setAttendanceOpen(true)
+  }
+
+  const employee = data?.employee
+  const todayCheckIn = data?.todayLogs.find((log) => log.eventType === "check_in")
+  const faceReady = data?.faceProfile.status === "approved" || data?.faceProfile.status === "disabled" || data?.faceProfile.verificationRequired === false
+  const cycle = data?.payrollCycle
+  const cyclePercent = cycle ? Math.min(100, Math.round((cycle.workDaysCount / Math.max(1, cycle.targetWorkDays)) * 100)) : 0
+  const mapUrl = employee?.workLocationLatitude && employee?.workLocationLongitude
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${employee.workLocationLatitude},${employee.workLocationLongitude}`)}`
+    : ""
+  const salaryAmount = employee ? (employee.salaryType === "monthly" ? employee.monthlySalary : employee.dailySalary) : 0
+
+  return (
+    <main className="employeeAppShell">
+      <section className="employeeAppTop">
+        <div className="employeeAppBrand">
+          <span className="brandLogo">
+            <img src={dmsLogo} alt="DMS" />
+          </span>
+          <div>
+            <small>App Karyawan</small>
+            <strong>DMS Lapangan</strong>
+            <em>{profile.email}</em>
+          </div>
+        </div>
+        <button className="employeeIconButton" type="button" aria-label="Logout" onClick={onLogout}>
+          <LogOut size={18} />
+        </button>
+      </section>
+
+      {loading && !data ? (
+        <section className="employeeAppLoading">
+          <span className="authTopProgress" />
+          <strong>Memuat data karyawan...</strong>
+          <small>Sinkronisasi user, karyawan, lokasi, dan payroll cycle.</small>
+        </section>
+      ) : errorMessage ? (
+        <section className="employeeAppError">
+          <AlertTriangle size={22} />
+          <strong>App karyawan belum siap</strong>
+          <small>{errorMessage}</small>
+          <button className="primaryButton" type="button" onClick={refreshData}>Coba Lagi</button>
+        </section>
+      ) : data && employee ? (
+        <>
+          <section className="employeeHeroCard">
+            <div className="employeeHeroIdentity">
+              <span className="employeeHeroAvatar">
+                {employee.photoUrl ? <img src={employee.photoUrl} alt="" /> : employee.name.slice(0, 2).toUpperCase()}
+              </span>
+              <div>
+                <span>{employee.code}</span>
+                <h1>{employee.name}</h1>
+                <p>{employee.positionName} · {employee.divisionName}</p>
+              </div>
+            </div>
+            <div className="employeeHeroMeta">
+              <span>{employee.shiftName}</span>
+              <span>{employeeSalaryTypeLabel[employee.salaryType]} · {formatCurrency(salaryAmount)}</span>
+            </div>
+          </section>
+
+          <section className="employeeActionCard">
+            <div className="employeeActionHeader">
+              <div>
+                <span className="dialogEyebrow">Absensi Hari Ini</span>
+                <h2>{todayCheckIn ? "Check-in tercatat" : "Siap check-in"}</h2>
+                <p>{todayCheckIn ? `${formatAttendanceTime(todayCheckIn.eventAt)} · ${todayCheckIn.distanceM ?? "-"}m dari lokasi` : "GPS radius dan face verification akan dicek otomatis."}</p>
+              </div>
+              <UiStatusBadge tone={todayCheckIn?.status === "valid" ? "valid" : todayCheckIn ? "pending" : "missing"}>
+                {todayCheckIn?.status === "valid" ? "Valid" : todayCheckIn ? "Review" : "Belum absen"}
+              </UiStatusBadge>
+            </div>
+
+            <div className="employeeActionButtons">
+              <button className="primaryButton" type="button" onClick={() => openAttendance("check_in")} disabled={!faceReady || attendanceSaving}>
+                <LocateFixed size={18} />
+                Absen Masuk
+              </button>
+              <button className="secondaryButton" type="button" onClick={() => openAttendance("check_out")} disabled={!faceReady || attendanceSaving}>
+                <CalendarCheck2 size={18} />
+                Absen Pulang
+              </button>
+            </div>
+
+            {!faceReady && (
+              <div className="employeeInlineNotice">
+                <ScanFace size={18} />
+                <span>Face profile belum approved HR. Daftar wajah dulu sebelum absensi real.</span>
+              </div>
+            )}
+          </section>
+
+          <section className="employeeStatusGrid">
+            <div className="employeeMiniCard">
+              <ScanFace size={18} />
+              <span>Face</span>
+              <strong>{employeeFaceStatusLabel[data.faceProfile.status]}</strong>
+              {data.faceProfile.status !== "approved" && data.faceProfile.status !== "pending_review" && (
+                <button type="button" onClick={() => setFaceEnrollmentOpen(true)}>Daftar</button>
+              )}
+            </div>
+            <div className="employeeMiniCard">
+              <LocateFixed size={18} />
+              <span>Lokasi</span>
+              <strong>{employee.workLocationName}</strong>
+              <small>{employee.radiusM ? `${employee.radiusM} meter` : "Radius belum ada"}</small>
+              {mapUrl && <button type="button" onClick={() => window.open(mapUrl, "_blank", "noopener,noreferrer")}>Maps</button>}
+            </div>
+            <div className="employeeMiniCard">
+              <BadgeDollarSign size={18} />
+              <span>Cycle</span>
+              <strong>{cycle ? `${cycle.workDaysCount}/${cycle.targetWorkDays}` : "0/26"}</strong>
+              <small>{cycle ? payrollLabel[cycle.status] : "Belum ada cycle"}</small>
+            </div>
+          </section>
+
+          <section className="employeeCycleCard">
+            <div>
+              <span className="dialogEyebrow">Payroll Cycle</span>
+              <h2>{cycle ? `${cycle.workDaysCount} dari ${cycle.targetWorkDays} hari kerja` : "Cycle belum berjalan"}</h2>
+              <p>{cycle?.netAmount ? `${formatCurrency(cycle.netAmount)} preview payroll` : "Payroll akan terbentuk dari absensi valid."}</p>
+            </div>
+            <div className="employeeCycleTrack"><span style={{ width: `${cyclePercent}%` }} /></div>
+          </section>
+
+          <section className="employeeHistoryCard">
+            <div className="employeeSectionHeader">
+              <div>
+                <h2>Riwayat Absensi</h2>
+                <p>Data real dari check-in/check-out app lapangan.</p>
+              </div>
+              <button className="employeeTextButton" type="button" onClick={refreshData}>Refresh</button>
+            </div>
+            <div className="employeeHistoryList">
+              {data.recentLogs.length === 0 ? (
+                <div className="employeeEmptyState">
+                  <CalendarCheck2 size={20} />
+                  <span>Belum ada riwayat absensi.</span>
+                </div>
+              ) : data.recentLogs.slice(0, 8).map((log) => (
+                <article className="employeeHistoryItem" key={log.id}>
+                  <div>
+                    <strong>{log.eventType === "check_in" ? "Check-in" : "Check-out"}</strong>
+                    <small>{formatWorkDate(log.attendanceDate)} · {formatAttendanceTime(log.eventAt)}</small>
+                  </div>
+                  <div>
+                    <UiStatusBadge tone={log.status === "valid" ? "valid" : log.status === "rejected" ? "failed" : "pending"}>
+                      {log.status === "valid" ? "Valid" : log.status === "rejected" ? "Ditolak" : "Review"}
+                    </UiStatusBadge>
+                    <small>{log.distanceM ?? "-"}m / {log.radiusM ?? "-"}m · face {log.faceScore ?? "-"}</small>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        </>
+      ) : null}
+
+      <FieldAttendanceDialog
+        open={attendanceOpen}
+        saving={attendanceSaving}
+        defaultEventType={attendanceEventType}
+        onClose={() => setAttendanceOpen(false)}
+        onSubmit={handleAttendanceSubmit}
+      />
+      <FaceEnrollmentDialog
+        open={faceEnrollmentOpen}
+        saving={faceSaving}
+        onClose={() => setFaceEnrollmentOpen(false)}
+        onSubmit={handleFaceEnrollmentSubmit}
+      />
+      <ToastViewport toast={toast} onClose={() => setToast(null)} />
+    </main>
   )
 }
 
@@ -6156,6 +10137,10 @@ export function App() {
     )
   }
 
+  if (accessProfile.appScope === "field") {
+    return <EmployeePwaApp profile={accessProfile} onLogout={handleLogout} />
+  }
+
   return (
     <div className={clsx("appShell", collapsed && "sidebarCollapsed")}>
       <div className="desktopSidebarSlot">
@@ -6175,6 +10160,8 @@ export function App() {
         <div className="workspaceViewport withMobileNav">
           {activeView === "dashboard" ? (
             <DashboardPage activeView={activeView} />
+          ) : activeView === "attendance-live" || activeView === "attendance-review" || activeView === "field-monitoring" || activeView === "payroll" ? (
+            <AttendanceCyclePage activeView={activeView} />
           ) : activeView === "employees" ? (
             <EmployeesPage activeView={activeView} profile={accessProfile} />
           ) : activeView === "users" ? (

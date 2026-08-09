@@ -12,7 +12,7 @@
     "preview": "vite preview",
     "lint": "tsc --noEmit",
     "db:migrate": "node scripts/run-migration.mjs",
-    "supabase:functions:deploy": "supabase functions deploy app-users --project-ref heibhxempixiiqmalyuf && supabase functions deploy role-permissions --project-ref heibhxempixiiqmalyuf"
+    "supabase:functions:deploy": "supabase functions deploy app-users --project-ref heibhxempixiiqmalyuf && supabase functions deploy role-permissions --project-ref heibhxempixiiqmalyuf && supabase functions deploy attendance-review --project-ref heibhxempixiiqmalyuf && supabase functions deploy field-attendance --project-ref heibhxempixiiqmalyuf && supabase functions deploy overtime-review --project-ref heibhxempixiiqmalyuf && supabase functions deploy payroll-processing --project-ref heibhxempixiiqmalyuf && supabase functions deploy employee-face-profiles --project-ref heibhxempixiiqmalyuf"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.0",
