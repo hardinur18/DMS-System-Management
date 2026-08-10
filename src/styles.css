@@ -6345,6 +6345,7 @@ button {
 }
 
 .employeeAppShell {
+  width: 100%;
   min-height: 100dvh;
   padding: 16px 14px calc(24px + env(safe-area-inset-bottom));
   color: #07182e;
@@ -6372,10 +6373,11 @@ button {
   z-index: 20;
   top: 10px;
   display: flex;
+  width: min(560px, 100%);
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 14px;
+  margin: 0 auto 14px;
   padding: 10px;
   border-radius: 24px;
 }
@@ -6388,9 +6390,24 @@ button {
 }
 
 .employeeAppBrand .brandLogo {
+  display: inline-grid;
   width: 46px;
   height: 46px;
   flex: 0 0 auto;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(226, 232, 240, 0.92);
+  border-radius: 999px;
+  background: #ffffff;
+}
+
+.employeeAppBrand .brandLogo img {
+  display: block;
+  width: 34px;
+  max-width: 34px;
+  height: 34px;
+  max-height: 34px;
+  object-fit: contain;
 }
 
 .employeeAppBrand div {
