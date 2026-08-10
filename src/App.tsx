@@ -224,9 +224,17 @@ interface FieldAttendanceSubmitPayload {
   latitude: number
   longitude: number
   faceScore: number | null
+  faceEmbedding?: number[] | null
+  faceEmbeddingModel?: string | null
   faceSnapshotBase64?: string | null
   faceSnapshotContentType?: string | null
   notes: string
+}
+
+interface FaceEnrollmentSubmitPayload {
+  snapshotsBase64: string[]
+  faceEmbeddings: number[][]
+  faceEmbeddingModel: string
 }
 
 interface FieldAttendanceResult {
@@ -3656,6 +3664,69 @@ function captureVideoFrame(video: HTMLVideoElement, contentType = "image/jpeg") 
   return canvas.toDataURL(contentType, 0.88)
 }
 
+const faceEmbeddingModel = "@vladmandic/face-api:tiny-face-detector+68tiny+recognition@1.7.15"
+const faceEmbeddingModelPath = "/face-models"
+let faceEmbeddingEnginePromise: Promise<any> | null = null
+
+async function loadFaceEmbeddingEngine() {
+  if (!faceEmbeddingEnginePromise) {
+    faceEmbeddingEnginePromise = import("@vladmandic/face-api").then(async (faceapi) => {
+      await Promise.all([
+        faceapi.nets.tinyFaceDetector.loadFromUri(faceEmbeddingModelPath),
+        faceapi.nets.faceLandmark68TinyNet.loadFromUri(faceEmbeddingModelPath),
+        faceapi.nets.faceRecognitionNet.loadFromUri(faceEmbeddingModelPath),
+      ])
+      return faceapi
+    })
+  }
+
+  return faceEmbeddingEnginePromise
+}
+
+function normalizeFaceEmbedding(value: ArrayLike<number>) {
+  const vector = Array.from(value, (item) => Number(item))
+  if (vector.length !== 128 || vector.some((item) => !Number.isFinite(item))) {
+    throw new Error("Embedding wajah tidak valid.")
+  }
+  return vector.map((item) => Number(item.toFixed(8)))
+}
+
+function loadImageFromDataUrl(dataUrl: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => resolve(image)
+    image.onerror = () => reject(new Error("Snapshot wajah belum bisa dibaca."))
+    image.src = dataUrl
+  })
+}
+
+async function extractFaceEmbeddingFromMedia(source: HTMLVideoElement | HTMLImageElement) {
+  const faceapi = await loadFaceEmbeddingEngine()
+  const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.45 })
+  const result = await faceapi
+    .detectSingleFace(source, options)
+    .withFaceLandmarks(true)
+    .withFaceDescriptor()
+
+  if (!result?.descriptor) throw new Error("Wajah belum terbaca oleh embedding engine.")
+  return normalizeFaceEmbedding(result.descriptor)
+}
+
+async function extractFaceEmbeddingFromDataUrl(dataUrl: string) {
+  const image = await loadImageFromDataUrl(dataUrl)
+  return extractFaceEmbeddingFromMedia(image)
+}
+
+async function extractEnrollmentFaceEmbeddings(snapshotsBase64: string[]) {
+  const embeddings: number[][] = []
+
+  for (const snapshot of snapshotsBase64.slice(0, 3)) {
+    embeddings.push(await extractFaceEmbeddingFromDataUrl(snapshot))
+  }
+
+  return embeddings
+}
+
 function calculateFrameQualityScore(video: HTMLVideoElement) {
   const width = 96
   const height = 128
@@ -3914,7 +3985,14 @@ async function getFunctionInvokeError(error: unknown, fallback: string) {
   return error instanceof Error ? error.message || fallback : fallback
 }
 
-async function submitEmployeeFaceEnrollment(snapshotsBase64: string[], snapshotContentType = "image/jpeg", notes = "", employeeId = "") {
+async function submitEmployeeFaceEnrollment(
+  snapshotsBase64: string[],
+  snapshotContentType = "image/jpeg",
+  notes = "",
+  employeeId = "",
+  faceEmbeddings: number[][] = [],
+  model = faceEmbeddingModel,
+) {
   const { data, error } = await supabase.functions.invoke("employee-face-profiles", {
     body: {
       action: employeeId ? "submit_for_employee" : "submit_self",
@@ -3923,6 +4001,9 @@ async function submitEmployeeFaceEnrollment(snapshotsBase64: string[], snapshotC
         snapshotBase64: snapshotsBase64[0] || "",
         snapshotsBase64,
         snapshotContentType,
+        faceEmbedding: faceEmbeddings[0] || [],
+        faceEmbeddings,
+        faceEmbeddingModel: model,
         notes,
         threshold: 85,
       },
@@ -4301,7 +4382,7 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
     }
   }
 
-  const handleEmployeeFaceEnrollmentSubmit = async (snapshotsBase64: string[]) => {
+  const handleEmployeeFaceEnrollmentSubmit = async (payload: FaceEnrollmentSubmitPayload) => {
     if (!faceEnrollmentRow) return
 
     setFaceEnrollmentSubmitting(true)
@@ -4309,15 +4390,18 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
 
     try {
       await submitEmployeeFaceEnrollment(
-        snapshotsBase64,
+        payload.snapshotsBase64,
         "image/jpeg",
         `Registrasi wajah ${faceEnrollmentRow.employeeCode} dari management app.`,
         faceEnrollmentRow.id,
+        payload.faceEmbeddings,
+        payload.faceEmbeddingModel,
       )
       await writeAuditLog("Submit employee face profile by management", "employee_face_profiles", faceEnrollmentRow.id, {
         employee_code: faceEnrollmentRow.employeeCode,
         full_name: faceEnrollmentRow.fullName,
-        samples: snapshotsBase64.length,
+        samples: payload.snapshotsBase64.length,
+        embeddings: payload.faceEmbeddings.length,
       }).catch(() => {})
       const data = await fetchRows()
       const nextRow = data?.rows.find((item) => item.id === faceEnrollmentRow.id) || null
@@ -7944,10 +8028,17 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
     }
   }
 
-  const handleFaceEnrollmentSubmit = async (snapshotsBase64: string[]) => {
+  const handleFaceEnrollmentSubmit = async (payload: FaceEnrollmentSubmitPayload) => {
     setFaceEnrollmentSubmitting(true)
     try {
-      await submitEmployeeFaceEnrollment(snapshotsBase64, "image/jpeg", "Registrasi wajah awal dari app lapangan.")
+      await submitEmployeeFaceEnrollment(
+        payload.snapshotsBase64,
+        "image/jpeg",
+        "Registrasi wajah awal dari app lapangan.",
+        "",
+        payload.faceEmbeddings,
+        payload.faceEmbeddingModel,
+      )
       setFaceEnrollmentOpen(false)
       showToast({
         tone: "success",
@@ -9068,7 +9159,7 @@ function FaceEnrollmentDialog({
   saving: boolean
   targetEmployee?: FaceEnrollmentTarget
   onClose: () => void
-  onSubmit: (snapshotsBase64: string[]) => Promise<void>
+  onSubmit: (payload: FaceEnrollmentSubmitPayload) => Promise<void>
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -9083,6 +9174,7 @@ function FaceEnrollmentDialog({
   const [scanProgress, setScanProgress] = useState(0)
   const [scanMessage, setScanMessage] = useState("Posisikan wajah di tengah oval.")
   const [faceDetectorReady, setFaceDetectorReady] = useState(true)
+  const [embeddingMessage, setEmbeddingMessage] = useState("")
 
   const readySnapshot = snapshots[snapshots.length - 1] || ""
   const scanComplete = snapshots.length >= 3
@@ -9105,6 +9197,7 @@ function FaceEnrollmentDialog({
     setScanStarted(false)
     setScanMessage("Posisikan wajah di tengah oval.")
     setFaceDetectorReady(true)
+    setEmbeddingMessage("")
     scanProgressRef.current = 0
     setScanProgress(0)
   }, [])
@@ -9117,9 +9210,27 @@ function FaceEnrollmentDialog({
     setCapturing(false)
     setScanMessage("Posisikan wajah di tengah oval.")
     setFaceDetectorReady(true)
+    setEmbeddingMessage("")
     scanProgressRef.current = 0
     setScanProgress(0)
     setScanStarted(Boolean(streamRef.current))
+  }
+
+  const handleSubmitEnrollment = async () => {
+    if (!scanComplete) return
+    setEmbeddingMessage("Membaca embedding wajah...")
+    try {
+      const faceEmbeddings = await extractEnrollmentFaceEmbeddings(snapshots)
+      await onSubmit({
+        snapshotsBase64: snapshots,
+        faceEmbeddings,
+        faceEmbeddingModel,
+      })
+      setEmbeddingMessage("")
+    } catch (error) {
+      setEmbeddingMessage("")
+      setCameraError(getFriendlySupabaseError(error, "Embedding wajah belum bisa dibuat. Scan ulang dengan wajah lebih jelas."))
+    }
   }
 
   useEffect(() => {
@@ -9283,7 +9394,9 @@ function FaceEnrollmentDialog({
               <span className="dialogEyebrow">{scanComplete ? "Siap Review" : faceDetectorReady ? "Scanning" : "Detector Required"}</span>
               <strong>{scanLabel}</strong>
               <small>
-                {scanComplete
+              {embeddingMessage
+                ? embeddingMessage
+                : scanComplete
                   ? "3 sampel wajah sudah aman untuk dikirim."
                   : faceDetectorReady
                     ? "Progress hanya berjalan saat wajah pas di oval."
@@ -9312,9 +9425,9 @@ function FaceEnrollmentDialog({
             <button className="secondaryButton" type="button" onClick={scanComplete ? restartScan : onClose} disabled={saving}>
               {scanComplete ? "Scan Ulang" : "Batal"}
             </button>
-            <button className="primaryButton" type="button" onClick={() => void onSubmit(snapshots)} disabled={saving || !scanComplete || Boolean(cameraError)}>
+            <button className="primaryButton" type="button" onClick={() => void handleSubmitEnrollment()} disabled={saving || !scanComplete || Boolean(cameraError)}>
               <FileCheck2 size={18} />
-              {saving ? "Mengirim..." : scanComplete ? "Kirim Review HR" : "Scanning otomatis..."}
+              {saving || embeddingMessage ? "Memproses..." : scanComplete ? "Kirim Review HR" : "Scanning otomatis..."}
             </button>
           </div>
         </div>
@@ -9342,6 +9455,7 @@ function FieldAttendanceDialog({
   const [longitude, setLongitude] = useState("")
   const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null)
   const [faceScore, setFaceScore] = useState("")
+  const [faceEmbedding, setFaceEmbedding] = useState<number[] | null>(null)
   const [faceSnapshotBase64, setFaceSnapshotBase64] = useState("")
   const [faceScreenOpen, setFaceScreenOpen] = useState(false)
   const [faceCapturing, setFaceCapturing] = useState(false)
@@ -9365,6 +9479,7 @@ function FieldAttendanceDialog({
     setLongitude("")
     setGpsAccuracy(null)
     setFaceScore("")
+    setFaceEmbedding(null)
     setFaceSnapshotBase64("")
     setFaceScreenOpen(false)
     setFaceCapturing(false)
@@ -9426,17 +9541,19 @@ function FieldAttendanceDialog({
     let cancelled = false
     let analyzing = false
 
-    const finishCapture = (score: number) => {
+    const finishCapture = async (score: number) => {
       if (faceCapturedRef.current || !faceVideoRef.current) return
       faceCapturedRef.current = true
       setFaceCapturing(true)
 
       try {
         const snapshot = captureVideoFrame(faceVideoRef.current)
+        const embedding = await extractFaceEmbeddingFromDataUrl(snapshot)
         setFaceSnapshotBase64(snapshot)
+        setFaceEmbedding(embedding)
         setFaceScore(String(Math.max(0, Math.min(100, Math.round(score)))))
         setFaceScanProgress(100)
-        setFaceScanMessage("Snapshot wajah tersimpan.")
+        setFaceScanMessage("Embedding wajah tersimpan.")
         window.setTimeout(() => {
           setFaceCapturing(false)
           setFaceScreenOpen(false)
@@ -9444,7 +9561,7 @@ function FieldAttendanceDialog({
       } catch (error) {
         faceCapturedRef.current = false
         setFaceCapturing(false)
-        setFaceCameraError(getFriendlySupabaseError(error, "Kamera belum siap untuk scan."))
+        setFaceCameraError(getFriendlySupabaseError(error, "Wajah belum bisa dibuat embedding. Scan ulang dengan wajah lebih jelas."))
       }
     }
 
@@ -9467,7 +9584,7 @@ function FieldAttendanceDialog({
       setFaceScanProgress(nextProgress)
 
       if (analysis.ready && nextProgress >= 100) {
-        finishCapture(analysis.score)
+        void finishCapture(analysis.score)
         return
       }
 
@@ -9495,7 +9612,7 @@ function FieldAttendanceDialog({
   const gpsCopy = gpsReady
     ? `Titik HP terkunci${gpsAccuracy ? ` · akurasi ${Math.round(gpsAccuracy)}m` : ""}`
     : "Ambil titik GPS dari browser/device"
-  const faceCopy = faceReady ? `${parsedFaceScore}% match · snapshot tersimpan` : "Tap untuk buka screen verifikasi wajah"
+  const faceCopy = faceReady && faceEmbedding ? `${parsedFaceScore}% quality · embedding siap` : "Tap untuk buka screen verifikasi wajah"
 
   const handleLocate = async () => {
     setLocating(true)
@@ -9520,7 +9637,7 @@ function FieldAttendanceDialog({
       setInlineError("Koordinat GPS wajib diisi atau diambil dari browser.")
       return
     }
-    if (!faceReady) {
+    if (!faceReady || !faceEmbedding) {
       setInlineError("Verifikasi wajah wajib dilakukan sebelum menyimpan absensi.")
       return
     }
@@ -9530,6 +9647,8 @@ function FieldAttendanceDialog({
       latitude: parsedLatitude,
       longitude: parsedLongitude,
       faceScore: parsedFaceScore,
+      faceEmbedding,
+      faceEmbeddingModel,
       faceSnapshotBase64,
       faceSnapshotContentType: faceSnapshotBase64 ? "image/jpeg" : null,
       notes,
@@ -9922,10 +10041,17 @@ function EmployeePwaApp({ profile, onLogout }: { profile: AppAccessProfile; onLo
     }
   }
 
-  const handleFaceEnrollmentSubmit = async (snapshotsBase64: string[]) => {
+  const handleFaceEnrollmentSubmit = async (payload: FaceEnrollmentSubmitPayload) => {
     setFaceSaving(true)
     try {
-      await submitEmployeeFaceEnrollment(snapshotsBase64, "image/jpeg", "Registrasi wajah awal dari app karyawan.")
+      await submitEmployeeFaceEnrollment(
+        payload.snapshotsBase64,
+        "image/jpeg",
+        "Registrasi wajah awal dari app karyawan.",
+        "",
+        payload.faceEmbeddings,
+        payload.faceEmbeddingModel,
+      )
       setFaceEnrollmentOpen(false)
       showToast({
         tone: "success",

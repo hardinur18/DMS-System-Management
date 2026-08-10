@@ -7,6 +7,9 @@ interface FaceProfilePayload {
   snapshotBase64?: string | null
   snapshotsBase64?: string[] | null
   snapshotContentType?: string | null
+  faceEmbedding?: number[] | null
+  faceEmbeddings?: number[][] | null
+  faceEmbeddingModel?: string | null
   threshold?: number | null
   verificationRequired?: boolean
   notes?: string
@@ -54,6 +57,19 @@ function buildReferencePath(employeeCode: string, contentType: string, sampleInd
   const safeCode = employeeCode.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, "-") || "EMPLOYEE"
   const suffix = sampleIndex ? `-${sampleIndex}` : ""
   return `profiles/${safeCode}/reference${suffix}.${getImageExtension(contentType)}`
+}
+
+function normalizeEmbedding(value: unknown) {
+  if (!Array.isArray(value)) return []
+  const vector = value.map((item) => Number(item))
+  assertPayload(vector.length === 128, "Embedding wajah wajib berisi 128 angka.")
+  assertPayload(vector.every((item) => Number.isFinite(item) && item >= -2 && item <= 2), "Embedding wajah tidak valid.")
+  return vector.map((item) => Number(item.toFixed(8)))
+}
+
+function normalizeEmbeddings(value: unknown) {
+  if (!Array.isArray(value)) return []
+  return value.slice(0, 3).map((item) => normalizeEmbedding(item))
 }
 
 function referencePathVariants(employeeCode: string) {
@@ -170,10 +186,15 @@ Deno.serve(async (request) => {
       assertPayload(allowedContentTypes.includes(snapshotContentType), "Format foto wajah wajib JPG, PNG, atau WEBP.")
 
       const decodedSamples = submittedSnapshots.map((snapshot) => decodeBase64Image(snapshot))
+      const submittedEmbeddings = normalizeEmbeddings(payload.faceEmbeddings)
+      const fallbackEmbedding = normalizeEmbedding(payload.faceEmbedding)
+      const nextEmbeddings = submittedEmbeddings.length > 0 ? submittedEmbeddings : [fallbackEmbedding].filter((vector) => vector.length > 0)
+      const nextPrimaryEmbedding = nextEmbeddings[0] || []
       const totalBytes = decodedSamples.reduce((total, bytes) => total + bytes.length, 0)
       assertPayload(decodedSamples.every((bytes) => bytes.length > 0), "Foto wajah tidak valid.")
       assertPayload(decodedSamples.every((bytes) => bytes.length <= 2 * 1024 * 1024), "Ukuran tiap foto wajah maksimal 2MB.")
       assertPayload(totalBytes <= 6 * 1024 * 1024, "Total sampel wajah maksimal 6MB.")
+      assertPayload(nextEmbeddings.length > 0, "Embedding wajah wajib dikirim.")
 
       const nextPaths = decodedSamples.map((_, index) => buildReferencePath(employee.employee_code, snapshotContentType, index + 1))
       const previewPath = nextPaths[nextPaths.length - 1]
@@ -200,13 +221,18 @@ Deno.serve(async (request) => {
           face_score_threshold: threshold,
           reference_image_path: previewPath,
           reference_image_paths: nextPaths,
+          face_embedding: nextPrimaryEmbedding,
+          face_embeddings: nextEmbeddings,
+          face_embedding_model: payload.faceEmbeddingModel?.trim() || "unknown",
+          face_embedding_version: "1",
+          face_embedding_updated_at: now,
           submitted_at: now,
           reviewed_at: null,
           reviewed_by: null,
           review_notes: null,
           notes: payload.notes?.trim() || (action === "submit_for_employee" ? "Registrasi wajah dari management app." : "Registrasi wajah dari app lapangan."),
         }, { onConflict: "employee_id" })
-        .select("id, employee_id, status, reference_image_path, reference_image_paths, face_score_threshold, submitted_at, reviewed_at, review_notes")
+        .select("id, employee_id, status, reference_image_path, reference_image_paths, face_score_threshold, submitted_at, reviewed_at, review_notes, face_embedding_model")
         .single()
 
       if (upsertError) throw upsertError
@@ -218,7 +244,7 @@ Deno.serve(async (request) => {
         target_table: "employee_face_profiles",
         target_id: profile.id,
         status: "success",
-        metadata: { employee_code: employee.employee_code, source: action === "submit_for_employee" ? "management-app" : "field-app", samples: nextPaths.length },
+        metadata: { employee_code: employee.employee_code, source: action === "submit_for_employee" ? "management-app" : "field-app", samples: nextPaths.length, embeddings: nextEmbeddings.length },
       })
 
       return jsonResponse({ ok: true, profile, employee: { id: employee.id, code: employee.employee_code, name: employee.full_name } })
@@ -304,6 +330,11 @@ Deno.serve(async (request) => {
           face_score_threshold: threshold,
           reference_image_path: null,
           reference_image_paths: [],
+          face_embedding: [],
+          face_embeddings: [],
+          face_embedding_model: null,
+          face_embedding_version: null,
+          face_embedding_updated_at: null,
           submitted_at: null,
           reviewed_at: now,
           reviewed_by: actor.id,

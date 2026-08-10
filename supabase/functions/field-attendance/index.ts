@@ -7,6 +7,8 @@ interface FieldAttendancePayload {
   latitude?: number
   longitude?: number
   faceScore?: number | null
+  faceEmbedding?: number[] | null
+  faceEmbeddingModel?: string | null
   faceSnapshotBase64?: string | null
   faceSnapshotContentType?: string | null
   faceSnapshotPath?: string | null
@@ -65,6 +67,54 @@ function getImageExtension(contentType: string) {
   return "jpg"
 }
 
+function normalizeEmbedding(value: unknown) {
+  if (!Array.isArray(value)) return []
+  const vector = value.map((item) => Number(item))
+  assertPayload(vector.length === 128, "Embedding wajah wajib berisi 128 angka.")
+  assertPayload(vector.every((item) => Number.isFinite(item) && item >= -2 && item <= 2), "Embedding wajah tidak valid.")
+  return vector
+}
+
+function normalizeEmbeddings(value: unknown) {
+  if (!Array.isArray(value)) return []
+  return value.map((item) => normalizeEmbedding(item)).filter((vector) => vector.length === 128)
+}
+
+function cosineScore(candidate: number[], reference: number[]) {
+  let dot = 0
+  let candidateNorm = 0
+  let referenceNorm = 0
+
+  for (let index = 0; index < candidate.length; index += 1) {
+    dot += candidate[index] * reference[index]
+    candidateNorm += candidate[index] * candidate[index]
+    referenceNorm += reference[index] * reference[index]
+  }
+
+  if (!candidateNorm || !referenceNorm) return 0
+  const similarity = dot / (Math.sqrt(candidateNorm) * Math.sqrt(referenceNorm))
+  return Math.max(0, Math.min(100, Math.round(((similarity + 1) / 2) * 100)))
+}
+
+function euclideanDistance(candidate: number[], reference: number[]) {
+  let total = 0
+  for (let index = 0; index < candidate.length; index += 1) {
+    total += (candidate[index] - reference[index]) ** 2
+  }
+  return Number(Math.sqrt(total).toFixed(6))
+}
+
+function findBestFaceMatch(candidate: number[], references: number[][]) {
+  return references.reduce(
+    (best, reference) => {
+      const score = cosineScore(candidate, reference)
+      const distance = euclideanDistance(candidate, reference)
+      return score > best.score ? { score, distance } : best
+    },
+    { score: 0, distance: null as number | null },
+  )
+}
+
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders })
   if (request.method !== "POST") return jsonResponse({ error: "Method not allowed" }, 405)
@@ -94,6 +144,8 @@ Deno.serve(async (request) => {
     const latitude = toNumber(payload.latitude)
     const longitude = toNumber(payload.longitude)
     const faceScore = payload.faceScore === null || payload.faceScore === undefined ? null : toNumber(payload.faceScore)
+    const faceEmbedding = normalizeEmbedding(payload.faceEmbedding)
+    const faceEmbeddingModel = payload.faceEmbeddingModel?.trim() || null
     const faceSnapshotBase64 = payload.faceSnapshotBase64?.trim() || ""
     const faceSnapshotContentType = payload.faceSnapshotContentType?.trim() || "image/jpeg"
     let faceSnapshotPath = payload.faceSnapshotPath?.trim() || null
@@ -151,7 +203,7 @@ Deno.serve(async (request) => {
 
     const { data: faceProfile, error: faceProfileError } = await adminClient
       .from("employee_face_profiles")
-      .select("verification_required, face_score_threshold, status, reference_image_path")
+      .select("verification_required, face_score_threshold, status, reference_image_path, face_embedding, face_embeddings, face_embedding_model")
       .eq("employee_id", employee.id)
       .maybeSingle()
 
@@ -164,13 +216,31 @@ Deno.serve(async (request) => {
       return jsonResponse({ error: "Profil wajah belum approved HR. Daftarkan wajah dulu sebelum absensi." }, 422)
     }
 
+    const referenceEmbeddings = verificationRequired
+      ? normalizeEmbeddings(faceProfile?.face_embeddings).concat(normalizeEmbedding(faceProfile?.face_embedding)).filter((vector, index, rows) => (
+        vector.length === 128 && rows.findIndex((item) => JSON.stringify(item) === JSON.stringify(vector)) === index
+      ))
+      : []
+    const embeddingMatch = verificationRequired && faceEmbedding.length === 128 && referenceEmbeddings.length > 0
+      ? findBestFaceMatch(faceEmbedding, referenceEmbeddings)
+      : null
+    const effectiveFaceScore = embeddingMatch?.score ?? faceScore
+    const faceMatchDistance = embeddingMatch?.distance ?? null
+
+    if (verificationRequired && referenceEmbeddings.length === 0) {
+      return jsonResponse({ error: "Profil wajah belum punya embedding. Daftarkan ulang wajah sebelum absensi." }, 422)
+    }
+    if (verificationRequired && faceEmbedding.length !== 128) {
+      return jsonResponse({ error: "Embedding wajah absensi belum valid. Scan wajah ulang." }, 422)
+    }
+
     const faceStatus = !verificationRequired
       ? "not_required"
-      : faceScore === null
+      : effectiveFaceScore === null
         ? "review"
-        : faceScore >= faceThreshold
+        : effectiveFaceScore >= faceThreshold
           ? "verified"
-          : faceScore >= Math.max(0, faceThreshold - 15)
+          : effectiveFaceScore >= Math.max(0, faceThreshold - 15)
             ? "review"
             : "failed"
     const status = gpsStatus === "valid" && (faceStatus === "verified" || faceStatus === "not_required") ? "valid" : "review"
@@ -203,7 +273,9 @@ Deno.serve(async (request) => {
       radius_m: radiusM,
       gps_status: gpsStatus,
       face_status: faceStatus,
-      face_score: faceScore,
+      face_score: effectiveFaceScore,
+      face_embedding_model: faceEmbeddingModel || faceProfile?.face_embedding_model || null,
+      face_match_distance: faceMatchDistance,
       status,
       workday_counted: workdayCounted,
       source: "field_app",
@@ -216,7 +288,7 @@ Deno.serve(async (request) => {
     const { data: log, error: logError } = await adminClient
       .from("attendance_logs")
       .upsert(logPayload, { onConflict: "employee_id,attendance_date,event_type" })
-      .select("id, attendance_date, event_type, status, gps_status, face_status, distance_m, radius_m, face_score, face_snapshot_path")
+      .select("id, attendance_date, event_type, status, gps_status, face_status, distance_m, radius_m, face_score, face_match_distance, face_snapshot_path")
       .single()
 
     if (logError) throw logError
