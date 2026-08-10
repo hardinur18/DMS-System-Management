@@ -1,4 +1,4 @@
--- Backfill GPS evidence for existing dummy attendance logs.
+-- Backfill GPS evidence for existing sample attendance logs.
 -- New field attendance submissions write the real employee latitude/longitude.
 
 update public.attendance_logs as attendance_logs
@@ -21,4 +21,4 @@ where attendance_logs.work_location_id = work_locations.id
 
 insert into public.audit_logs (actor_name, action, target_table, target_id, status, metadata)
 values
-  ('System', 'Backfill attendance GPS evidence', 'attendance_logs', '20260807000900', 'success', '{"source":"migration","module":"attendance-approval","note":"dummy gps evidence only"}'::jsonb);
+  ('System', 'Backfill attendance GPS evidence', 'attendance_logs', '20260807000900', 'success', '{"source":"migration","module":"attendance-approval","note":"sample gps evidence only"}'::jsonb);

@@ -518,11 +518,16 @@ interface AppAccessProfile {
 }
 
 interface AuditEvent {
+  id: string
   time: string
   actor: string
   action: string
   target: string
+  targetTable: string
+  targetId: string
   status: string
+  metadata: string
+  createdAt: string
 }
 
 interface PermissionDefinition {
@@ -662,6 +667,20 @@ const navItems: NavItem[] = [
   { id: "profile", label: "Profil Saya", icon: UserRoundCheck, group: "Sistem & Akses" },
 ]
 
+const productionReadyViews = new Set<ViewId>([
+  "dashboard",
+  "attendance-live",
+  "employees",
+  "attendance-review",
+  "field-monitoring",
+  "payroll",
+  "master-data",
+  "users",
+  "role-permission",
+  "audit-log",
+  "profile",
+])
+
 const viewPermissionMap: Partial<Record<ViewId, string>> = {
   dashboard: "dashboard.view",
   "attendance-live": "attendance.view",
@@ -700,13 +719,6 @@ const managementUsers: ManagementUser[] = [
   { id: "USR-004", name: "Fajar Nugroho", email: "fajar.ops@dms.local", role: "Supervisor", division: "Produksi", lastLogin: "04 Aug 06:59", twoFactor: "Disabled", status: "active" },
   { id: "USR-005", name: "Nadya Lestari", email: "nadya.admin@dms.local", role: "Admin", division: "Packing", lastLogin: "Belum login", twoFactor: "Pending", status: "invited" },
   { id: "USR-006", name: "Bagas Maulana", email: "bagas.viewer@dms.local", role: "Viewer", division: "Warehouse", lastLogin: "01 Aug 14:11", twoFactor: "Disabled", status: "locked" },
-]
-
-const auditEvents: AuditEvent[] = [
-  { time: "08:12", actor: "Hardinur Rahman", action: "Login management app", target: "Dashboard", status: "Success" },
-  { time: "07:58", actor: "Sinta Maharani", action: "Invite user", target: "Aldi Finance", status: "Success" },
-  { time: "07:42", actor: "Sinta Maharani", action: "Update role", target: "Supervisor", status: "Success" },
-  { time: "Kemarin", actor: "System", action: "Lock inactive user", target: "Bagas Viewer", status: "Review" },
 ]
 
 const masterCategories: MasterCategory[] = [
@@ -799,14 +811,14 @@ const moduleConfigs: Record<ModuleViewId, ModuleConfig> = {
     ],
     filters: ["Semua Lokasi", "Gudang Utama", "Kantor Admin", "Workshop"],
     formTitle: "Override Absensi",
-    formDescription: "Dummy form untuk koreksi HR saat data valid di lapangan perlu disesuaikan.",
+    formDescription: "Draft form untuk koreksi HR saat data valid di lapangan perlu disesuaikan.",
     formFields: [
       { label: "Karyawan", placeholder: "Pilih / cari karyawan" },
       { label: "Tanggal", placeholder: "2026-08-04", type: "date" },
       { label: "Catatan", placeholder: "Alasan koreksi absensi" },
     ],
     tableTitle: "Realtime Attendance Feed",
-    tableDescription: "Log dummy absensi mobile yang masuk dari user karyawan.",
+    tableDescription: "Log draft absensi mobile yang masuk dari user karyawan.",
     columns: ["Karyawan", "Waktu", "Lokasi", "Radius", "Face", "Status"],
     rows: [
       { Karyawan: "Rizky Pratama", Waktu: "07:58 WIB", Lokasi: "Gudang Utama", Radius: "18 m", Face: "98%", Status: "Valid" },
@@ -825,14 +837,14 @@ const moduleConfigs: Record<ModuleViewId, ModuleConfig> = {
     ],
     filters: ["Semua Divisi", "Produksi", "Packing", "Finance", "Warehouse"],
     formTitle: "Tambah Karyawan",
-    formDescription: "Dummy form awal untuk struktur data karyawan sebelum CRUD backend.",
+    formDescription: "Draft form awal untuk struktur data karyawan sebelum CRUD backend.",
     formFields: [
       { label: "Nama Lengkap", placeholder: "Nama karyawan" },
       { label: "Divisi", placeholder: "Produksi / Finance / Warehouse" },
       { label: "Gaji Harian", placeholder: "150000", type: "number" },
     ],
     tableTitle: "Employee Directory",
-    tableDescription: "Daftar dummy karyawan dengan status payroll cycle.",
+    tableDescription: "Daftar draft karyawan dengan status payroll cycle.",
     columns: ["Karyawan", "Divisi", "Jabatan", "Gaji Harian", "Cycle", "Status"],
     rows: [
       { Karyawan: "Rizky Pratama", Divisi: "Produksi", Jabatan: "Operator", "Gaji Harian": "Rp150.000", Cycle: "26/26", Status: "Aktif" },
@@ -851,14 +863,14 @@ const moduleConfigs: Record<ModuleViewId, ModuleConfig> = {
     ],
     filters: ["Semua Request", "Izin", "Sakit", "Cuti", "Koreksi Jam"],
     formTitle: "Input Request Manual",
-    formDescription: "Dummy form untuk request yang masuk via HR/management.",
+    formDescription: "Draft form untuk request yang masuk via HR/management.",
     formFields: [
       { label: "Tipe Request", placeholder: "Izin / Sakit / Cuti" },
       { label: "Tanggal", placeholder: "2026-08-04", type: "date" },
       { label: "Keterangan", placeholder: "Ringkasan pengajuan" },
     ],
     tableTitle: "Attendance Requests",
-    tableDescription: "Antrian dummy pengajuan absensi karyawan.",
+    tableDescription: "Antrian draft pengajuan absensi karyawan.",
     columns: ["Request", "Karyawan", "Tanggal", "Lampiran", "PIC", "Status"],
     rows: [
       { Request: "Sakit", Karyawan: "Aldi Saputra", Tanggal: "04 Aug 2026", Lampiran: "Surat dokter", PIC: "HR Manager", Status: "Pending" },
@@ -876,14 +888,14 @@ const moduleConfigs: Record<ModuleViewId, ModuleConfig> = {
     ],
     filters: ["Semua Status", "Pending", "Approved", "Rejected"],
     formTitle: "Keputusan Review",
-    formDescription: "Dummy action untuk approve/reject absensi sebelum masuk hitungan gaji.",
+    formDescription: "Draft action untuk approve/reject absensi sebelum masuk hitungan gaji.",
     formFields: [
       { label: "ID Absensi", placeholder: "ATT-00021" },
       { label: "Keputusan", placeholder: "Approve / Reject" },
       { label: "Catatan HR", placeholder: "Catatan audit" },
     ],
     tableTitle: "Review Queue",
-    tableDescription: "Data dummy yang belum otomatis valid.",
+    tableDescription: "Data draft yang belum otomatis valid.",
     columns: ["ID", "Karyawan", "Issue", "Radius", "Face", "Status"],
     rows: [
       { ID: "ATT-00021", Karyawan: "Bagas Maulana", Issue: "Face score rendah", Radius: "24 m", Face: "48%", Status: "Pending" },
@@ -901,14 +913,14 @@ const moduleConfigs: Record<ModuleViewId, ModuleConfig> = {
     ],
     filters: ["Semua Zona", "Gudang Utama", "Kantor Admin", "Workshop"],
     formTitle: "Assign Lokasi",
-    formDescription: "Dummy form untuk mengatur lokasi kerja sementara per karyawan/shift.",
+    formDescription: "Draft form untuk mengatur lokasi kerja sementara per karyawan/shift.",
     formFields: [
       { label: "Karyawan", placeholder: "Pilih karyawan" },
       { label: "Lokasi Kerja", placeholder: "Gudang Utama" },
       { label: "Radius", placeholder: "100", type: "number" },
     ],
     tableTitle: "Field Monitor",
-    tableDescription: "Snapshot dummy posisi dan aktivitas tim.",
+    tableDescription: "Snapshot draft posisi dan aktivitas tim.",
     columns: ["Karyawan", "Zona", "Last Seen", "Radius", "Device", "Status"],
     rows: [
       { Karyawan: "Fajar Nugroho", Zona: "Workshop", "Last Seen": "2 menit lalu", Radius: "12 m", Device: "Android", Status: "Online" },
@@ -926,14 +938,14 @@ const moduleConfigs: Record<ModuleViewId, ModuleConfig> = {
     ],
     filters: ["Semua Cycle", "Siap Gajian", "Cycle Aktif", "Terbayar"],
     formTitle: "Input Komponen Gaji",
-    formDescription: "Dummy form untuk bonus, potongan, dan penyesuaian sebelum payroll final.",
+    formDescription: "Draft form untuk bonus, potongan, dan penyesuaian sebelum payroll final.",
     formFields: [
       { label: "Karyawan", placeholder: "Pilih karyawan" },
       { label: "Bonus", placeholder: "250000", type: "number" },
       { label: "Potongan", placeholder: "0", type: "number" },
     ],
     tableTitle: "Payroll Cycle",
-    tableDescription: "Draft dummy payroll berdasarkan 26 hari kerja valid.",
+    tableDescription: "Draft payroll berdasarkan 26 hari kerja valid.",
     columns: ["Karyawan", "Hari Valid", "Gaji Pokok", "Bonus", "Kasbon", "Status"],
     rows: [
       { Karyawan: "Rizky Pratama", "Hari Valid": "26/26", "Gaji Pokok": "Rp3.900.000", Bonus: "Rp250.000", Kasbon: "Rp350.000", Status: "Ready" },
@@ -951,14 +963,14 @@ const moduleConfigs: Record<ModuleViewId, ModuleConfig> = {
     ],
     filters: ["Semua Kasbon", "Pending", "Approved", "Dicicil", "Lunas"],
     formTitle: "Input Kasbon",
-    formDescription: "Dummy form untuk pengajuan dan pencatatan kasbon manual.",
+    formDescription: "Draft form untuk pengajuan dan pencatatan kasbon manual.",
     formFields: [
       { label: "Karyawan", placeholder: "Pilih karyawan" },
       { label: "Nominal", placeholder: "500000", type: "number" },
       { label: "Tenor Potong", placeholder: "1x / 2x / 3x" },
     ],
     tableTitle: "Cash Advance Ledger",
-    tableDescription: "Ledger dummy kasbon yang akan terhubung ke payroll.",
+    tableDescription: "Ledger draft kasbon yang akan terhubung ke payroll.",
     columns: ["Kode", "Karyawan", "Nominal", "Terbayar", "Sisa", "Status"],
     rows: [
       { Kode: "KB-001", Karyawan: "Rizky Pratama", Nominal: "Rp500.000", Terbayar: "Rp150.000", Sisa: "Rp350.000", Status: "Dicicil" },
@@ -976,14 +988,14 @@ const moduleConfigs: Record<ModuleViewId, ModuleConfig> = {
     ],
     filters: ["Semua Lokasi", "Aktif", "Draft", "Nonaktif"],
     formTitle: "Tambah Lokasi",
-    formDescription: "Dummy form untuk titik GPS dan radius absen karyawan.",
+    formDescription: "Draft form untuk titik GPS dan radius absen karyawan.",
     formFields: [
       { label: "Nama Lokasi", placeholder: "Gudang Utama" },
       { label: "Koordinat", placeholder: "-6.200000, 106.816666" },
       { label: "Radius Meter", placeholder: "100", type: "number" },
     ],
     tableTitle: "Work Location Master",
-    tableDescription: "Master dummy lokasi yang menjadi acuan absensi mobile.",
+    tableDescription: "Master draft lokasi yang menjadi acuan absensi mobile.",
     columns: ["Lokasi", "Koordinat", "Radius", "Divisi", "PIC", "Status"],
     rows: [
       { Lokasi: "Gudang Utama", Koordinat: "-6.2201, 106.8321", Radius: "100 m", Divisi: "Produksi, Packing", PIC: "Supervisor", Status: "Aktif" },
@@ -3644,6 +3656,36 @@ function captureVideoFrame(video: HTMLVideoElement, contentType = "image/jpeg") 
   return canvas.toDataURL(contentType, 0.88)
 }
 
+function calculateFrameQualityScore(video: HTMLVideoElement) {
+  const width = 96
+  const height = 128
+  const canvas = document.createElement("canvas")
+  canvas.width = width
+  canvas.height = height
+  const context = canvas.getContext("2d", { willReadFrequently: true })
+
+  if (!context) return 0
+
+  context.drawImage(video, 0, 0, width, height)
+  const pixels = context.getImageData(0, 0, width, height).data
+  let luminanceTotal = 0
+  let luminanceSquaredTotal = 0
+
+  for (let index = 0; index < pixels.length; index += 4) {
+    const luminance = pixels[index] * 0.2126 + pixels[index + 1] * 0.7152 + pixels[index + 2] * 0.0722
+    luminanceTotal += luminance
+    luminanceSquaredTotal += luminance * luminance
+  }
+
+  const pixelCount = width * height
+  const mean = luminanceTotal / pixelCount
+  const variance = Math.max(0, luminanceSquaredTotal / pixelCount - mean * mean)
+  const brightnessScore = Math.max(0, 1 - Math.abs(mean - 132) / 132)
+  const contrastScore = Math.min(1, Math.sqrt(variance) / 58)
+
+  return Math.round((brightnessScore * 0.64 + contrastScore * 0.36) * 100)
+}
+
 async function analyzeFaceEnrollmentFrame(video: HTMLVideoElement | null) {
   if (!video || !video.videoWidth || !video.videoHeight) {
     return { supported: true, ready: false, score: 0, message: "Preview kamera belum siap." }
@@ -3692,6 +3734,58 @@ async function analyzeFaceEnrollmentFrame(video: HTMLVideoElement | null) {
     ready: score >= 76,
     score,
     message: score >= 76 ? "Wajah pas. Tahan beberapa detik." : "Tahan wajah tetap sejajar.",
+  }
+}
+
+async function analyzeAttendanceFaceFrame(video: HTMLVideoElement | null) {
+  if (!video || !video.videoWidth || !video.videoHeight) {
+    return { supported: true, ready: false, score: 0, message: "Preview kamera belum siap." }
+  }
+
+  const FaceDetectorConstructor = (window as unknown as {
+    FaceDetector?: new (options?: { fastMode?: boolean; maxDetectedFaces?: number }) => {
+      detect: (source: HTMLVideoElement) => Promise<Array<{ boundingBox: DOMRectReadOnly | { x: number; y: number; width: number; height: number } }>>
+    }
+  }).FaceDetector
+
+  const qualityScore = calculateFrameQualityScore(video)
+
+  if (!FaceDetectorConstructor) {
+    return {
+      supported: false,
+      ready: qualityScore >= 72,
+      score: Math.max(60, Math.min(88, qualityScore)),
+      message: qualityScore >= 72 ? "Frame wajah cukup jelas. Tahan posisi." : "Perbaiki cahaya dan posisi wajah.",
+    }
+  }
+
+  const detector = new FaceDetectorConstructor({ fastMode: true, maxDetectedFaces: 2 })
+  const faces = await detector.detect(video)
+
+  if (faces.length === 0) return { supported: true, ready: false, score: qualityScore, message: "Wajah belum terbaca." }
+  if (faces.length > 1) return { supported: true, ready: false, score: qualityScore, message: "Pastikan hanya satu wajah di kamera." }
+
+  const face = faces[0].boundingBox
+  const width = video.videoWidth
+  const height = video.videoHeight
+  const centerX = face.x + face.width / 2
+  const centerY = face.y + face.height / 2
+  const offsetX = Math.abs(centerX - width / 2) / width
+  const offsetY = Math.abs(centerY - height / 2) / height
+  const faceHeightRatio = face.height / height
+  const centerScore = Math.max(0, 1 - (offsetX / 0.22 + offsetY / 0.26) / 2)
+  const sizeScore = Math.max(0, 1 - Math.abs(faceHeightRatio - 0.56) / 0.36)
+  const score = Math.round((centerScore * 0.48 + sizeScore * 0.32 + (qualityScore / 100) * 0.2) * 100)
+
+  if (faceHeightRatio < 0.3) return { supported: true, ready: false, score, message: "Dekatkan wajah sedikit." }
+  if (faceHeightRatio > 0.92) return { supported: true, ready: false, score, message: "Wajah terlalu dekat. Mundur sedikit." }
+  if (offsetX > 0.22 || offsetY > 0.26) return { supported: true, ready: false, score, message: "Geser wajah ke tengah frame." }
+
+  return {
+    supported: true,
+    ready: score >= 76,
+    score,
+    message: score >= 76 ? "Wajah terbaca. Menyimpan snapshot..." : "Tahan wajah tetap sejajar.",
   }
 }
 
@@ -5448,6 +5542,7 @@ function UsersPage({ activeView, profile }: { activeView: ViewId; profile: AppAc
         open={dialogOpen}
         mode={editingRow ? "edit" : "create"}
         currentUserId={editingRow?.id || ""}
+        selfAccountLocked={Boolean(editingRow && editingRow.id === profile.id)}
         initialValues={formInitialValues}
         roles={roles}
         divisions={divisions}
@@ -5611,6 +5706,7 @@ function UserAccessDialog({
   open,
   mode,
   currentUserId,
+  selfAccountLocked,
   initialValues,
   roles,
   divisions,
@@ -5622,6 +5718,7 @@ function UserAccessDialog({
   open: boolean
   mode: "create" | "edit"
   currentUserId: string
+  selfAccountLocked: boolean
   initialValues: UserAccessFormValues
   roles: UserAccessOption[]
   divisions: UserAccessOption[]
@@ -5646,7 +5743,7 @@ function UserAccessDialog({
   const activeDivisions = divisions.filter((division) => division.isActive || division.id === values.divisionId)
   const activeEmployees = employees.filter((employee) => employee.isActive || employee.id === values.employeeId)
 
-  return (
+  return createPortal(
     <div className="dialogBackdrop" role="presentation" onMouseDown={onClose}>
       <section
         className="dialogPanel inviteDialog"
@@ -5667,7 +5764,15 @@ function UserAccessDialog({
         </div>
         <form className="dialogForm" onSubmit={(event) => {
           event.preventDefault()
-          const nextErrors = validateUserAccessForm(values, employees, currentUserId)
+          const protectedValues = selfAccountLocked
+            ? {
+              ...values,
+              email: initialValues.email,
+              roleId: initialValues.roleId,
+              status: initialValues.status,
+            }
+            : values
+          const nextErrors = validateUserAccessForm(protectedValues, employees, currentUserId)
 
           if (nextErrors.length > 0) {
             setFormErrors(nextErrors)
@@ -5677,10 +5782,16 @@ function UserAccessDialog({
 
           setFormErrors([])
           setSubmitError("")
-          void onSubmit(values).catch((error) => {
+          void onSubmit(protectedValues).catch((error) => {
             setSubmitError(getFriendlySupabaseError(error, "Gagal menyimpan user."))
           })
         }}>
+          {selfAccountLocked && (
+            <div className="protectedAccountNotice">
+              <ShieldCheck size={17} />
+              <span>Akun ini sedang kamu pakai. Email, role, dan status dikunci supaya akses utama tidak terkunci sendiri.</span>
+            </div>
+          )}
           {(formErrors.length > 0 || submitError) && (
             <div className="formValidationPanel">
               <AlertTriangle size={18} />
@@ -5695,8 +5806,8 @@ function UserAccessDialog({
           )}
           <TextFormField label="Kode User" value={values.userCode} readOnly disabled required />
           <TextFormField label="Nama User" value={values.fullName} onChange={(event) => setValues((current) => ({ ...current, fullName: event.target.value }))} placeholder="Nama lengkap" required />
-          <TextFormField label="Email Login" type="email" value={values.email} onChange={(event) => setValues((current) => ({ ...current, email: event.target.value }))} placeholder="nama@dms.local" required />
-          <SelectFormField label="Role" value={values.roleId} onChange={(event) => setValues((current) => ({ ...current, roleId: event.target.value }))} required>
+          <TextFormField label="Email Login" type="email" value={selfAccountLocked ? initialValues.email : values.email} onChange={(event) => setValues((current) => ({ ...current, email: event.target.value }))} placeholder="nama@dms.local" disabled={selfAccountLocked} required />
+          <SelectFormField label="Role" value={selfAccountLocked ? initialValues.roleId : values.roleId} onChange={(event) => setValues((current) => ({ ...current, roleId: event.target.value }))} disabled={selfAccountLocked} required>
             <option value="">Pilih role</option>
             {activeRoles.map((role) => (
               <option value={role.id} key={role.id}>{role.name}</option>
@@ -5726,7 +5837,7 @@ function UserAccessDialog({
               )
             })}
           </SelectFormField>
-          <SelectFormField label="Status" value={values.status} onChange={(event) => setValues((current) => ({ ...current, status: event.target.value as UserStatus }))} required>
+          <SelectFormField label="Status" value={selfAccountLocked ? initialValues.status : values.status} onChange={(event) => setValues((current) => ({ ...current, status: event.target.value as UserStatus }))} disabled={selfAccountLocked} required>
             <option value="invited">Invite</option>
             <option value="active">Aktif</option>
             <option value="locked">Locked</option>
@@ -5746,7 +5857,8 @@ function UserAccessDialog({
           </div>
         </form>
       </section>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -5813,6 +5925,28 @@ function UserAccessDetailDialog({
   canLock: boolean
 }) {
   if (!row) return null
+  const linkedEmployee = row.employeeCode ? `${row.employeeCode} - ${row.employeeName}` : "Belum dikaitkan"
+  const primaryMeta = [
+    row.userCode,
+    appScopeLabel[row.appScope],
+    row.divisionName,
+  ].filter(Boolean)
+  const accessLines = [
+    { label: "Role akses", value: row.roleName },
+    { label: "Divisi", value: row.divisionName },
+    { label: "Karyawan terkait", value: linkedEmployee },
+    { label: "Scope app", value: appScopeLabel[row.appScope] },
+    { label: "2FA", value: twoFactorLabel[row.twoFactorStatus] },
+  ]
+  const securityLines = [
+    { label: "Email verified", value: <EmailVerifiedBadge verifiedAt={row.emailVerifiedAt} /> },
+    { label: "Last login", value: formatUserDateTime(row.lastLoginAt) },
+    { label: "Invite dikirim", value: formatUserDateTime(row.invitedAt) },
+    { label: "Setup password", value: formatUserDateTime(row.passwordSetupSentAt, "Belum dikirim") },
+    { label: "Reset password", value: formatUserDateTime(row.passwordResetSentAt, "Belum dikirim") },
+    { label: "Password manual", value: formatUserDateTime(row.passwordManualSetAt, "Belum dibuat") },
+    { label: "Wajib ganti password", value: row.forcePasswordChange ? "Ya" : "Tidak" },
+  ]
 
   return createPortal(
     <div className="dialogBackdrop" role="presentation" onMouseDown={onClose}>
@@ -5824,40 +5958,64 @@ function UserAccessDetailDialog({
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="dialogCompactHeader masterDetailHeader">
-          <div className="masterDetailTitle">
-            <span className="masterDetailIcon">
+          <div className="userDetailHero">
+            <span className="userDetailAvatar">
               <ShieldCheck size={22} />
             </span>
             <div>
-              <span>{row.roleName}</span>
+              <span className="userDetailEyebrow">{row.roleName}</span>
               <h2 id="user-detail-title">{row.fullName}</h2>
               <p>{row.email}</p>
+              <div className="userDetailMeta">
+                {primaryMeta.map((item) => <span key={item}>{item}</span>)}
+              </div>
             </div>
           </div>
           <button className="iconButton dialogClose" type="button" aria-label="Tutup detail user" onClick={onClose}>
             <X size={18} />
           </button>
         </div>
-        <div className="masterDetailBody">
-          <div className="masterDetailGrid">
-            <div className="masterDetailField"><span>Kode User</span><strong>{row.userCode}</strong></div>
-            <div className="masterDetailField"><span>Status</span><strong><UserStatusBadge status={row.status} /></strong></div>
-            <div className="masterDetailField"><span>Email Verified</span><strong><EmailVerifiedBadge verifiedAt={row.emailVerifiedAt} /></strong></div>
-            <div className="masterDetailField"><span>Role</span><strong>{row.roleName}</strong></div>
-            <div className="masterDetailField"><span>Divisi</span><strong>{row.divisionName}</strong></div>
-            <div className="masterDetailField"><span>Karyawan Terkait</span><strong>{row.employeeCode ? `${row.employeeCode} - ${row.employeeName}` : "Belum dikaitkan"}</strong></div>
-            <div className="masterDetailField"><span>Scope App</span><strong>{appScopeLabel[row.appScope]}</strong></div>
-            <div className="masterDetailField"><span>2FA</span><strong>{twoFactorLabel[row.twoFactorStatus]}</strong></div>
-            <div className="masterDetailField"><span>Last Login</span><strong>{formatUserDateTime(row.lastLoginAt)}</strong></div>
-            <div className="masterDetailField"><span>Invited</span><strong>{formatUserDateTime(row.invitedAt)}</strong></div>
-            <div className="masterDetailField"><span>Setup Password</span><strong>{formatUserDateTime(row.passwordSetupSentAt, "Belum dikirim")}</strong></div>
-            <div className="masterDetailField"><span>Reset Password</span><strong>{formatUserDateTime(row.passwordResetSentAt, "Belum dikirim")}</strong></div>
-            <div className="masterDetailField"><span>Password Manual</span><strong>{formatUserDateTime(row.passwordManualSetAt, "Belum dibuat")}</strong></div>
-            <div className="masterDetailField"><span>Wajib Ganti Password</span><strong>{row.forcePasswordChange ? "Ya" : "Tidak"}</strong></div>
-            <div className="masterDetailField"><span>Catatan</span><strong>{row.notes || "-"}</strong></div>
-          </div>
+        <div className="userDetailBody">
+          <section className="userDetailSummary">
+            <div>
+              <span>Status akses</span>
+              <UserStatusBadge status={row.status} />
+            </div>
+            <p>
+              User ini terhubung ke role <strong>{row.roleName}</strong>, scope <strong>{appScopeLabel[row.appScope]}</strong>,
+              dan {row.employeeCode ? <>data karyawan <strong>{linkedEmployee}</strong>.</> : <>belum terhubung ke data karyawan.</>}
+            </p>
+          </section>
+          <section className="userDetailSection">
+            <h3>Akses Operasional</h3>
+            <div className="userDetailRows">
+              {accessLines.map((item) => (
+                <div className="userDetailLine" key={item.label}>
+                  <span>{item.label}</span>
+                  <strong>{item.value}</strong>
+                </div>
+              ))}
+            </div>
+          </section>
+          <section className="userDetailSection">
+            <h3>Keamanan Akun</h3>
+            <div className="userDetailRows">
+              {securityLines.map((item) => (
+                <div className="userDetailLine" key={item.label}>
+                  <span>{item.label}</span>
+                  <strong>{item.value}</strong>
+                </div>
+              ))}
+            </div>
+          </section>
+          {row.notes && (
+            <section className="userDetailNote">
+              <span>Catatan</span>
+              <p>{row.notes}</p>
+            </section>
+          )}
         </div>
-        <div className="masterDetailActions">
+        <div className="masterDetailActions userDetailActions">
           <button className="secondaryButton" type="button" disabled={!canEdit} onClick={() => onEdit(row)}>
             <Pencil size={16} />
             Edit
@@ -6365,7 +6523,60 @@ function RolePermissionDetailDialog({
 }
 
 function AuditLogPage({ activeView }: { activeView: ViewId }) {
+  const [events, setEvents] = useState<AuditEvent[]>([])
+  const [loading, setLoading] = useState(true)
+  const [errorMessage, setErrorMessage] = useState("")
   const [detailEvent, setDetailEvent] = useState<{ event: AuditEvent; index: number } | null>(null)
+
+  const refreshEvents = useCallback(async () => {
+    setLoading(true)
+    setErrorMessage("")
+
+    try {
+      const { data, error } = await supabase
+        .from("audit_logs")
+        .select("id, actor_name, action, target_table, target_id, status, metadata, created_at")
+        .order("created_at", { ascending: false })
+        .limit(100)
+
+      if (error) throw error
+
+      const mappedEvents = ((data || []) as Array<Record<string, unknown>>).map((row) => {
+        const targetTable = String(row.target_table || "-")
+        const targetId = String(row.target_id || "")
+        const metadata = row.metadata && typeof row.metadata === "object"
+          ? JSON.stringify(row.metadata, null, 2)
+          : String(row.metadata || "{}")
+
+        return {
+          id: String(row.id || `${targetTable}-${targetId}-${row.created_at}`),
+          time: formatUserDateTime(String(row.created_at || ""), "-"),
+          actor: String(row.actor_name || "System"),
+          action: String(row.action || "-"),
+          target: targetId ? `${targetTable} / ${formatShortId(targetId, "REF")}` : targetTable,
+          targetTable,
+          targetId,
+          status: String(row.status || "success"),
+          metadata,
+          createdAt: String(row.created_at || ""),
+        }
+      })
+
+      setEvents(mappedEvents)
+    } catch (error) {
+      setErrorMessage(getFriendlySupabaseError(error, "Audit log belum bisa dimuat."))
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void refreshEvents()
+  }, [refreshEvents])
+
+  const successCount = events.filter((event) => event.status.toLowerCase() === "success").length
+  const reviewCount = events.filter((event) => ["pending", "review"].includes(event.status.toLowerCase())).length
+  const failedCount = events.filter((event) => event.status.toLowerCase() === "failed").length
 
   return (
     <OperationalPageShell>
@@ -6375,19 +6586,22 @@ function AuditLogPage({ activeView }: { activeView: ViewId }) {
       />
 
       <OperationalKpiGrid>
-        <OperationalKpiCard label="Event" value={auditEvents.length} detail="Dummy hari ini" icon={FileBarChart} tone="blue" />
-        <OperationalKpiCard label="Success" value={3} detail="Aktivitas aman" icon={FileCheck2} tone="green" />
-        <OperationalKpiCard label="Review" value={1} detail="Butuh cek HR" icon={AlertTriangle} tone="amber" />
-        <OperationalKpiCard label="Retention" value="180 hari" detail="Rencana audit log" icon={Database} tone="violet" />
+        <OperationalKpiCard label="Event" value={events.length} detail="100 aktivitas terbaru" icon={FileBarChart} tone="blue" />
+        <OperationalKpiCard label="Success" value={successCount} detail="Aktivitas aman" icon={FileCheck2} tone="green" />
+        <OperationalKpiCard label="Review" value={reviewCount} detail="Butuh pengecekan" icon={AlertTriangle} tone="amber" />
+        <OperationalKpiCard label="Failed" value={failedCount} detail="Perlu investigasi" icon={AlertCircle} tone="rose" />
       </OperationalKpiGrid>
 
       <OperationalTableCard>
         <div className="tableHeader">
           <div>
             <h2>Audit Log</h2>
-            <p>Dummy aktivitas user dan sistem untuk kebutuhan compliance.</p>
+            <p>Data live dari Supabase untuk melacak perubahan penting di management app.</p>
           </div>
-          <button className="secondaryButton" type="button">Export Log</button>
+          <button className="secondaryButton" type="button" onClick={() => void refreshEvents()} disabled={loading}>
+            <FileCheck2 size={17} />
+            Refresh Log
+          </button>
         </div>
         <div className="tableScroller uiDataTableScroller uiDataTableHasColumns">
           <table>
@@ -6412,13 +6626,34 @@ function AuditLogPage({ activeView }: { activeView: ViewId }) {
               </tr>
             </thead>
             <tbody>
-              {auditEvents.map((event, index) => (
-                <ClickableTableRow key={`${event.time}-${event.action}`} label={`Lihat detail audit ${event.action}`} onOpen={() => setDetailEvent({ event, index })}>
+              {loading && (
+                <tr>
+                  <td className="tableStateCell" colSpan={7}>
+                    <TableState title="Memuat audit log" description="Mengambil riwayat aktivitas dari Supabase." icon={FileBarChart} />
+                  </td>
+                </tr>
+              )}
+              {!loading && errorMessage && (
+                <tr>
+                  <td className="tableStateCell" colSpan={7}>
+                    <TableState title="Gagal memuat audit" description={errorMessage} icon={AlertTriangle} tone="danger" />
+                  </td>
+                </tr>
+              )}
+              {!loading && !errorMessage && events.length === 0 && (
+                <tr>
+                  <td className="tableStateCell" colSpan={7}>
+                    <TableState title="Belum ada audit log" description="Aktivitas akan muncul setelah ada perubahan data." icon={Search} />
+                  </td>
+                </tr>
+              )}
+              {!loading && !errorMessage && events.map((event, index) => (
+                <ClickableTableRow key={event.id} label={`Lihat detail audit ${event.action}`} onOpen={() => setDetailEvent({ event, index })}>
                   <td className="tableNumberCell"><TableNumberCell value={index + 1} /></td>
                   <td><TableText primary={event.time} /></td>
                   <td><TableText primary={event.actor} /></td>
                   <td><TableText primary={event.action} /></td>
-                  <td><TableText primary={event.target} /></td>
+                  <td><TableText primary={event.targetTable} secondary={event.targetId ? formatShortId(event.targetId, "REF") : undefined} /></td>
                   <td><ModuleStatusBadge value={event.status} /></td>
                   <td className="tableActionCell">
                     <div className="rowActions">
@@ -6473,7 +6708,12 @@ function AuditLogDetailDialog({ detailEvent, onClose }: { detailEvent: { event: 
             <div className="masterDetailField"><span>Actor</span><strong>{event.actor}</strong></div>
             <div className="masterDetailField"><span>Action</span><strong>{event.action}</strong></div>
             <div className="masterDetailField"><span>Target</span><strong>{event.target}</strong></div>
+            <div className="masterDetailField"><span>Target ID</span><strong>{event.targetId ? formatShortId(event.targetId, "REF") : "-"}</strong></div>
             <div className="masterDetailField"><span>Status</span><strong>{event.status}</strong></div>
+          </div>
+          <div className="masterDetailNote">
+            <span>Metadata</span>
+            <strong>{event.metadata}</strong>
           </div>
         </div>
 
@@ -9106,11 +9346,17 @@ function FieldAttendanceDialog({
   const [faceScreenOpen, setFaceScreenOpen] = useState(false)
   const [faceCapturing, setFaceCapturing] = useState(false)
   const [faceCameraError, setFaceCameraError] = useState("")
+  const [faceScanProgress, setFaceScanProgress] = useState(0)
+  const [faceScanMessage, setFaceScanMessage] = useState("Posisikan wajah di tengah frame.")
+  const [faceDetectorReady, setFaceDetectorReady] = useState(true)
   const [notes, setNotes] = useState("")
   const [locating, setLocating] = useState(false)
   const [inlineError, setInlineError] = useState("")
   const faceVideoRef = useRef<HTMLVideoElement>(null)
   const faceStreamRef = useRef<MediaStream | null>(null)
+  const faceScanTimerRef = useRef<number | null>(null)
+  const faceScanProgressRef = useRef(0)
+  const faceCapturedRef = useRef(false)
 
   useEffect(() => {
     if (!open) return
@@ -9123,12 +9369,21 @@ function FieldAttendanceDialog({
     setFaceScreenOpen(false)
     setFaceCapturing(false)
     setFaceCameraError("")
+    setFaceScanProgress(0)
+    setFaceScanMessage("Posisikan wajah di tengah frame.")
+    setFaceDetectorReady(true)
+    faceScanProgressRef.current = 0
+    faceCapturedRef.current = false
     setNotes("")
     setInlineError("")
   }, [defaultEventType, open])
 
   useEffect(() => {
     if (!faceScreenOpen) {
+      if (faceScanTimerRef.current) {
+        window.clearTimeout(faceScanTimerRef.current)
+        faceScanTimerRef.current = null
+      }
       stopMediaStream(faceStreamRef.current)
       faceStreamRef.current = null
       return undefined
@@ -9136,6 +9391,12 @@ function FieldAttendanceDialog({
 
     let cancelled = false
     setFaceCameraError("")
+    setFaceCapturing(false)
+    setFaceScanProgress(0)
+    setFaceScanMessage("Posisikan wajah di tengah frame.")
+    setFaceDetectorReady(true)
+    faceScanProgressRef.current = 0
+    faceCapturedRef.current = false
     void startUserCamera(faceVideoRef.current)
       .then((stream) => {
         if (cancelled) {
@@ -9150,10 +9411,79 @@ function FieldAttendanceDialog({
 
     return () => {
       cancelled = true
+      if (faceScanTimerRef.current) {
+        window.clearTimeout(faceScanTimerRef.current)
+        faceScanTimerRef.current = null
+      }
       stopMediaStream(faceStreamRef.current)
       faceStreamRef.current = null
     }
   }, [faceScreenOpen])
+
+  useEffect(() => {
+    if (!faceScreenOpen || faceCameraError || !faceStreamRef.current || faceCapturedRef.current) return undefined
+
+    let cancelled = false
+    let analyzing = false
+
+    const finishCapture = (score: number) => {
+      if (faceCapturedRef.current || !faceVideoRef.current) return
+      faceCapturedRef.current = true
+      setFaceCapturing(true)
+
+      try {
+        const snapshot = captureVideoFrame(faceVideoRef.current)
+        setFaceSnapshotBase64(snapshot)
+        setFaceScore(String(Math.max(0, Math.min(100, Math.round(score)))))
+        setFaceScanProgress(100)
+        setFaceScanMessage("Snapshot wajah tersimpan.")
+        window.setTimeout(() => {
+          setFaceCapturing(false)
+          setFaceScreenOpen(false)
+        }, 520)
+      } catch (error) {
+        faceCapturedRef.current = false
+        setFaceCapturing(false)
+        setFaceCameraError(getFriendlySupabaseError(error, "Kamera belum siap untuk scan."))
+      }
+    }
+
+    const scanTick = async () => {
+      if (cancelled || analyzing || faceCapturedRef.current) return
+      analyzing = true
+      const analysis = await analyzeAttendanceFaceFrame(faceVideoRef.current).catch((error) => ({
+        supported: true,
+        ready: false,
+        score: 0,
+        message: getFriendlySupabaseError(error, "Wajah belum bisa dianalisis."),
+      }))
+      analyzing = false
+      if (cancelled || faceCapturedRef.current) return
+
+      setFaceDetectorReady(analysis.supported)
+      setFaceScanMessage(analysis.message)
+      const nextProgress = Math.max(0, Math.min(100, faceScanProgressRef.current + (analysis.ready ? 8 : -7)))
+      faceScanProgressRef.current = nextProgress
+      setFaceScanProgress(nextProgress)
+
+      if (analysis.ready && nextProgress >= 100) {
+        finishCapture(analysis.score)
+        return
+      }
+
+      faceScanTimerRef.current = window.setTimeout(scanTick, 140)
+    }
+
+    faceScanTimerRef.current = window.setTimeout(scanTick, 180)
+
+    return () => {
+      cancelled = true
+      if (faceScanTimerRef.current) {
+        window.clearTimeout(faceScanTimerRef.current)
+        faceScanTimerRef.current = null
+      }
+    }
+  }, [faceCameraError, faceScreenOpen])
 
   if (!open) return null
 
@@ -9165,7 +9495,7 @@ function FieldAttendanceDialog({
   const gpsCopy = gpsReady
     ? `Titik HP terkunci${gpsAccuracy ? ` · akurasi ${Math.round(gpsAccuracy)}m` : ""}`
     : "Ambil titik GPS dari browser/device"
-  const faceCopy = faceReady ? `${parsedFaceScore}% match · siap dikirim` : "Tap untuk buka screen verifikasi wajah"
+  const faceCopy = faceReady ? `${parsedFaceScore}% match · snapshot tersimpan` : "Tap untuk buka screen verifikasi wajah"
 
   const handleLocate = async () => {
     setLocating(true)
@@ -9179,22 +9509,6 @@ function FieldAttendanceDialog({
       setInlineError(getFriendlySupabaseError(error, "GPS browser belum bisa diambil."))
     } finally {
       setLocating(false)
-    }
-  }
-
-  const handleFaceScan = () => {
-    setFaceCapturing(true)
-    try {
-      const snapshot = captureVideoFrame(faceVideoRef.current as HTMLVideoElement)
-      setFaceSnapshotBase64(snapshot)
-      window.setTimeout(() => {
-        setFaceScore(String(Math.floor(88 + Math.random() * 10)))
-        setFaceCapturing(false)
-        setFaceScreenOpen(false)
-      }, 700)
-    } catch (error) {
-      setFaceCapturing(false)
-      setFaceCameraError(getFriendlySupabaseError(error, "Kamera belum siap untuk scan."))
     }
   }
 
@@ -9257,8 +9571,11 @@ function FieldAttendanceDialog({
             </div>
             <div className="fieldFaceCopy">
               <span className="dialogEyebrow">Face Verification</span>
-              <h3>Posisikan wajah di tengah frame</h3>
-              <p>Pastikan area terang, wajah tidak tertutup, dan kamera sejajar. Hasil match dipakai bersama GPS radius.</p>
+              <h3>{faceCapturing ? "Snapshot tersimpan" : faceScanMessage}</h3>
+              <p>{faceDetectorReady ? "Scanner otomatis membaca posisi wajah dan menyimpan bukti absensi." : "Browser ini memakai fallback kualitas frame. Gunakan Chrome/Safari terbaru untuk hasil lebih presisi."}</p>
+            </div>
+            <div className="fieldFaceProgress" aria-label={`Progress scan wajah ${faceScanProgress}%`}>
+              <span style={{ width: `${faceScanProgress}%` }} />
             </div>
             <div className="fieldFaceChecks">
               <span><ScanFace size={16} /> Wajah terdeteksi</span>
@@ -9275,9 +9592,9 @@ function FieldAttendanceDialog({
               <button className="secondaryButton" type="button" onClick={() => setFaceScreenOpen(false)} disabled={faceCapturing}>
                 Kembali
               </button>
-              <button className="primaryButton" type="button" onClick={handleFaceScan} disabled={faceCapturing}>
+              <button className="primaryButton" type="button" disabled>
                 <ScanFace size={18} />
-                {faceCapturing ? "Scanning..." : "Scan Wajah"}
+                {faceCapturing ? "Menyimpan..." : "Scanning otomatis..."}
               </button>
             </div>
           </div>
@@ -9412,7 +9729,7 @@ function ModulePage({ activeView }: { activeView: ModuleViewId }) {
               <button className="secondaryButton" type="button">Draft</button>
               <button className="primaryButton" type="button">
                 <FileCheck2 size={17} />
-                Simpan Dummy
+                Simpan Draft
               </button>
             </div>
           </form>
@@ -9459,7 +9776,7 @@ function ModulePage({ activeView }: { activeView: ModuleViewId }) {
                         ) : (
                           <TableText
                             primary={row[column]}
-                            secondary={column === config.columns[0] ? `Dummy #${String(rowIndex + 1).padStart(3, "0")}` : undefined}
+                            secondary={column === config.columns[0] ? `Draft #${String(rowIndex + 1).padStart(3, "0")}` : undefined}
                           />
                         )}
                       </td>
@@ -9974,7 +10291,9 @@ export function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const activeLabel = navItems.find((item) => item.id === activeView)?.label || "Dashboard"
   const visibleNavItems = useMemo(
-    () => accessProfile ? navItems.filter((item) => canAccessView(accessProfile, item.id)) : navItems.filter((item) => item.id === "dashboard" || item.id === "profile"),
+    () => accessProfile
+      ? navItems.filter((item) => productionReadyViews.has(item.id) && canAccessView(accessProfile, item.id))
+      : navItems.filter((item) => item.id === "dashboard" || item.id === "profile"),
     [accessProfile],
   )
 
@@ -10087,13 +10406,19 @@ export function App() {
 
   useEffect(() => {
     if (!accessProfile || accessProfile.status !== "active") return
-    if (canAccessView(accessProfile, activeView)) return
+    if (productionReadyViews.has(activeView) && canAccessView(accessProfile, activeView)) return
 
     const fallbackView = canAccessView(accessProfile, "dashboard") ? "dashboard" : "profile"
     setActiveView(fallbackView)
   }, [accessProfile, activeView])
 
   const navigate = (view: ViewId) => {
+    if (!productionReadyViews.has(view)) {
+      setActiveView(accessProfile && canAccessView(accessProfile, "dashboard") ? "dashboard" : "profile")
+      setMobileMenuOpen(false)
+      return
+    }
+
     if (accessProfile && !canAccessView(accessProfile, view)) {
       setActiveView(canAccessView(accessProfile, "dashboard") ? "dashboard" : "profile")
       setMobileMenuOpen(false)
