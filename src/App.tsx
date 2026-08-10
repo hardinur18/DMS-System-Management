@@ -3777,33 +3777,68 @@ function calculateFrameQualityScore(video: HTMLVideoElement) {
   return Math.round((brightnessScore * 0.64 + contrastScore * 0.36) * 100)
 }
 
-async function analyzeFaceEnrollmentFrame(video: HTMLVideoElement | null) {
-  if (!video || !video.videoWidth || !video.videoHeight) {
-    return { supported: true, ready: false, score: 0, message: "Preview kamera belum siap." }
-  }
+type FaceBox = { x: number; y: number; width: number; height: number }
 
+function readFaceBox(detection: unknown): FaceBox | null {
+  const candidate = detection as {
+    boundingBox?: Partial<FaceBox>
+    box?: Partial<FaceBox>
+    detection?: { box?: Partial<FaceBox> }
+  }
+  const box = candidate.boundingBox || candidate.box || candidate.detection?.box
+  if (!box) return null
+
+  const x = Number(box.x)
+  const y = Number(box.y)
+  const width = Number(box.width)
+  const height = Number(box.height)
+
+  if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return null
+  return { x, y, width, height }
+}
+
+async function detectFaceBoxes(video: HTMLVideoElement) {
   const FaceDetectorConstructor = (window as unknown as {
     FaceDetector?: new (options?: { fastMode?: boolean; maxDetectedFaces?: number }) => {
-      detect: (source: HTMLVideoElement) => Promise<Array<{ boundingBox: DOMRectReadOnly | { x: number; y: number; width: number; height: number } }>>
+      detect: (source: HTMLVideoElement) => Promise<Array<{ boundingBox: DOMRectReadOnly | FaceBox }>>
     }
   }).FaceDetector
 
-  if (!FaceDetectorConstructor) {
-    return {
-      supported: false,
-      ready: false,
-      score: 0,
-      message: "Face detector belum aktif di browser ini.",
-    }
+  if (FaceDetectorConstructor) {
+    const detector = new FaceDetectorConstructor({ fastMode: true, maxDetectedFaces: 2 })
+    const nativeFaces = await detector.detect(video)
+    return nativeFaces.map(readFaceBox).filter((box): box is FaceBox => Boolean(box))
   }
 
-  const detector = new FaceDetectorConstructor({ fastMode: true, maxDetectedFaces: 2 })
-  const faces = await detector.detect(video)
+  const faceapi = await loadFaceEmbeddingEngine()
+  const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.42 })
+  const modelFaces = await faceapi.detectAllFaces(video, options) as unknown[]
+  return modelFaces.map(readFaceBox).filter((box): box is FaceBox => Boolean(box))
+}
 
-  if (faces.length === 0) return { supported: true, ready: false, score: 0, message: "Posisikan wajah di tengah oval." }
-  if (faces.length > 1) return { supported: true, ready: false, score: 0, message: "Pastikan hanya satu wajah di kamera." }
-
-  const face = faces[0].boundingBox
+function analyzeFaceBox(
+  face: FaceBox,
+  video: HTMLVideoElement,
+  qualityScore: number,
+  options: {
+    centerToleranceX: number
+    centerToleranceY: number
+    idealHeightRatio: number
+    heightTolerance: number
+    minHeightRatio: number
+    maxHeightRatio: number
+    maxWidthRatio?: number
+    readyScore: number
+    centerMessage: string
+    readyMessage: string
+    holdMessage: string
+    closeMessage: string
+    farMessage: string
+    centerWeight: number
+    sizeWeight: number
+    qualityWeight: number
+  },
+) {
   const width = video.videoWidth
   const height = video.videoHeight
   const centerX = face.x + face.width / 2
@@ -3812,20 +3847,55 @@ async function analyzeFaceEnrollmentFrame(video: HTMLVideoElement | null) {
   const offsetY = Math.abs(centerY - height / 2) / height
   const faceWidthRatio = face.width / width
   const faceHeightRatio = face.height / height
-  const centerScore = Math.max(0, 1 - (offsetX / 0.2 + offsetY / 0.24) / 2)
-  const sizeScore = Math.max(0, 1 - Math.abs(faceHeightRatio - 0.58) / 0.34)
-  const score = Math.round((centerScore * 0.58 + sizeScore * 0.42) * 100)
+  const centerScore = Math.max(0, 1 - (offsetX / options.centerToleranceX + offsetY / options.centerToleranceY) / 2)
+  const sizeScore = Math.max(0, 1 - Math.abs(faceHeightRatio - options.idealHeightRatio) / options.heightTolerance)
+  const score = Math.round((centerScore * options.centerWeight + sizeScore * options.sizeWeight + (qualityScore / 100) * options.qualityWeight) * 100)
 
-  if (faceHeightRatio < 0.34) return { supported: true, ready: false, score, message: "Dekatkan wajah ke kamera." }
-  if (faceHeightRatio > 0.9 || faceWidthRatio > 0.86) return { supported: true, ready: false, score, message: "Wajah terlalu dekat. Mundur sedikit." }
-  if (offsetX > 0.2 || offsetY > 0.24) return { supported: true, ready: false, score, message: "Geser wajah ke tengah oval." }
+  if (faceHeightRatio < options.minHeightRatio) return { supported: true, ready: false, score, message: options.farMessage }
+  if (faceHeightRatio > options.maxHeightRatio || (options.maxWidthRatio && faceWidthRatio > options.maxWidthRatio)) {
+    return { supported: true, ready: false, score, message: options.closeMessage }
+  }
+  if (offsetX > options.centerToleranceX || offsetY > options.centerToleranceY) {
+    return { supported: true, ready: false, score, message: options.centerMessage }
+  }
 
   return {
     supported: true,
-    ready: score >= 76,
+    ready: score >= options.readyScore,
     score,
-    message: score >= 76 ? "Wajah pas. Tahan beberapa detik." : "Tahan wajah tetap sejajar.",
+    message: score >= options.readyScore ? options.readyMessage : options.holdMessage,
   }
+}
+
+async function analyzeFaceEnrollmentFrame(video: HTMLVideoElement | null) {
+  if (!video || !video.videoWidth || !video.videoHeight) {
+    return { supported: true, ready: false, score: 0, message: "Preview kamera belum siap." }
+  }
+
+  const qualityScore = calculateFrameQualityScore(video)
+  const faces = await detectFaceBoxes(video)
+
+  if (faces.length === 0) return { supported: true, ready: false, score: qualityScore, message: "Posisikan wajah di tengah oval." }
+  if (faces.length > 1) return { supported: true, ready: false, score: 0, message: "Pastikan hanya satu wajah di kamera." }
+
+  return analyzeFaceBox(faces[0], video, qualityScore, {
+    centerToleranceX: 0.2,
+    centerToleranceY: 0.24,
+    idealHeightRatio: 0.58,
+    heightTolerance: 0.34,
+    minHeightRatio: 0.34,
+    maxHeightRatio: 0.9,
+    maxWidthRatio: 0.86,
+    readyScore: 76,
+    centerMessage: "Geser wajah ke tengah oval.",
+    readyMessage: "Wajah pas. Tahan beberapa detik.",
+    holdMessage: "Tahan wajah tetap sejajar.",
+    closeMessage: "Wajah terlalu dekat. Mundur sedikit.",
+    farMessage: "Dekatkan wajah ke kamera.",
+    centerWeight: 0.52,
+    sizeWeight: 0.34,
+    qualityWeight: 0.14,
+  })
 }
 
 async function analyzeAttendanceFaceFrame(video: HTMLVideoElement | null) {
@@ -3833,51 +3903,29 @@ async function analyzeAttendanceFaceFrame(video: HTMLVideoElement | null) {
     return { supported: true, ready: false, score: 0, message: "Preview kamera belum siap." }
   }
 
-  const FaceDetectorConstructor = (window as unknown as {
-    FaceDetector?: new (options?: { fastMode?: boolean; maxDetectedFaces?: number }) => {
-      detect: (source: HTMLVideoElement) => Promise<Array<{ boundingBox: DOMRectReadOnly | { x: number; y: number; width: number; height: number } }>>
-    }
-  }).FaceDetector
-
   const qualityScore = calculateFrameQualityScore(video)
-
-  if (!FaceDetectorConstructor) {
-    return {
-      supported: false,
-      ready: qualityScore >= 72,
-      score: Math.max(60, Math.min(88, qualityScore)),
-      message: qualityScore >= 72 ? "Frame wajah cukup jelas. Tahan posisi." : "Perbaiki cahaya dan posisi wajah.",
-    }
-  }
-
-  const detector = new FaceDetectorConstructor({ fastMode: true, maxDetectedFaces: 2 })
-  const faces = await detector.detect(video)
+  const faces = await detectFaceBoxes(video)
 
   if (faces.length === 0) return { supported: true, ready: false, score: qualityScore, message: "Wajah belum terbaca." }
   if (faces.length > 1) return { supported: true, ready: false, score: qualityScore, message: "Pastikan hanya satu wajah di kamera." }
 
-  const face = faces[0].boundingBox
-  const width = video.videoWidth
-  const height = video.videoHeight
-  const centerX = face.x + face.width / 2
-  const centerY = face.y + face.height / 2
-  const offsetX = Math.abs(centerX - width / 2) / width
-  const offsetY = Math.abs(centerY - height / 2) / height
-  const faceHeightRatio = face.height / height
-  const centerScore = Math.max(0, 1 - (offsetX / 0.22 + offsetY / 0.26) / 2)
-  const sizeScore = Math.max(0, 1 - Math.abs(faceHeightRatio - 0.56) / 0.36)
-  const score = Math.round((centerScore * 0.48 + sizeScore * 0.32 + (qualityScore / 100) * 0.2) * 100)
-
-  if (faceHeightRatio < 0.3) return { supported: true, ready: false, score, message: "Dekatkan wajah sedikit." }
-  if (faceHeightRatio > 0.92) return { supported: true, ready: false, score, message: "Wajah terlalu dekat. Mundur sedikit." }
-  if (offsetX > 0.22 || offsetY > 0.26) return { supported: true, ready: false, score, message: "Geser wajah ke tengah frame." }
-
-  return {
-    supported: true,
-    ready: score >= 76,
-    score,
-    message: score >= 76 ? "Wajah terbaca. Menyimpan snapshot..." : "Tahan wajah tetap sejajar.",
-  }
+  return analyzeFaceBox(faces[0], video, qualityScore, {
+    centerToleranceX: 0.22,
+    centerToleranceY: 0.26,
+    idealHeightRatio: 0.56,
+    heightTolerance: 0.36,
+    minHeightRatio: 0.3,
+    maxHeightRatio: 0.92,
+    readyScore: 76,
+    centerMessage: "Geser wajah ke tengah frame.",
+    readyMessage: "Wajah terbaca. Menyimpan snapshot...",
+    holdMessage: "Tahan wajah tetap sejajar.",
+    closeMessage: "Wajah terlalu dekat. Mundur sedikit.",
+    farMessage: "Dekatkan wajah sedikit.",
+    centerWeight: 0.48,
+    sizeWeight: 0.32,
+    qualityWeight: 0.2,
+  })
 }
 
 async function startUserCamera(video: HTMLVideoElement | null) {
