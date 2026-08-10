@@ -3879,22 +3879,22 @@ async function analyzeFaceEnrollmentFrame(video: HTMLVideoElement | null) {
   if (faces.length > 1) return { supported: true, ready: false, score: 0, message: "Pastikan hanya satu wajah di kamera." }
 
   return analyzeFaceBox(faces[0], video, qualityScore, {
-    centerToleranceX: 0.2,
-    centerToleranceY: 0.24,
-    idealHeightRatio: 0.58,
-    heightTolerance: 0.34,
-    minHeightRatio: 0.34,
-    maxHeightRatio: 0.9,
-    maxWidthRatio: 0.86,
-    readyScore: 76,
+    centerToleranceX: 0.24,
+    centerToleranceY: 0.28,
+    idealHeightRatio: 0.6,
+    heightTolerance: 0.42,
+    minHeightRatio: 0.28,
+    maxHeightRatio: 0.96,
+    maxWidthRatio: 0.92,
+    readyScore: 62,
     centerMessage: "Geser wajah ke tengah oval.",
-    readyMessage: "Wajah pas. Tahan beberapa detik.",
-    holdMessage: "Tahan wajah tetap sejajar.",
+    readyMessage: "Wajah terbaca. Tahan sebentar.",
+    holdMessage: "Wajah hampir pas. Tahan posisi.",
     closeMessage: "Wajah terlalu dekat. Mundur sedikit.",
     farMessage: "Dekatkan wajah ke kamera.",
-    centerWeight: 0.52,
-    sizeWeight: 0.34,
-    qualityWeight: 0.14,
+    centerWeight: 0.44,
+    sizeWeight: 0.28,
+    qualityWeight: 0.28,
   })
 }
 
@@ -9446,7 +9446,7 @@ function FaceEnrollmentDialog({
     if (!open || !scanStarted || cameraError || scanComplete) return undefined
 
     clearScanTimers()
-    const sampleThresholds = [34, 68, 98]
+    const sampleThresholds = [28, 58, 88]
     let cancelled = false
     let analyzing = false
 
@@ -9481,12 +9481,13 @@ function FaceEnrollmentDialog({
       setFaceDetectorReady(analysis.supported)
       setScanMessage(analysis.message)
       const currentProgress = scanProgressRef.current
-      const nextProgress = Math.max(0, Math.min(100, currentProgress + (analysis.ready ? 5.5 : -7.5)))
+      const stableEnough = analysis.ready || analysis.score >= 52
+      const nextProgress = Math.max(0, Math.min(100, currentProgress + (analysis.ready ? 10 : stableEnough ? 4.5 : -5.5)))
       scanProgressRef.current = nextProgress
       setScanProgress(nextProgress)
 
       sampleThresholds.forEach((threshold, sampleIndex) => {
-        if (analysis.ready && nextProgress >= threshold) captureSample(sampleIndex)
+        if (stableEnough && nextProgress >= threshold) captureSample(sampleIndex)
       })
     }
 
