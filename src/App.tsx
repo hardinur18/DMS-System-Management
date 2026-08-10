@@ -10205,7 +10205,18 @@ function EmployeePwaApp({ profile, onLogout }: { profile: AppAccessProfile; onLo
   const mapUrl = employee?.workLocationLatitude && employee?.workLocationLongitude
     ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${employee.workLocationLatitude},${employee.workLocationLongitude}`)}`
     : ""
-  const salaryAmount = employee ? (employee.salaryType === "monthly" ? employee.monthlySalary : employee.dailySalary) : 0
+  const faceCanEnroll = data?.faceProfile.status !== "approved" && data?.faceProfile.status !== "pending_review"
+  const faceGateTitle = data?.faceProfile.status === "pending_review"
+    ? "Wajah sedang direview HR"
+    : data?.faceProfile.status === "rejected"
+      ? "Scan ulang wajah"
+      : "Lengkapi verifikasi wajah"
+  const faceGateCopy = data?.faceProfile.status === "pending_review"
+    ? "Data wajah sudah terkirim. Tunggu approval HR sebelum absen real aktif."
+    : data?.faceProfile.status === "rejected"
+      ? "Data wajah sebelumnya ditolak. Scan ulang dengan cahaya cukup dan wajah jelas."
+      : "Daftarkan wajah sekali agar check-in/check-out bisa divalidasi dengan GPS dan face match."
+  const cycleRemainingDays = cycle ? Math.max(0, cycle.targetWorkDays - cycle.workDaysCount) : 0
 
   return (
     <main className="employeeAppShell">
@@ -10252,17 +10263,36 @@ function EmployeePwaApp({ profile, onLogout }: { profile: AppAccessProfile; onLo
               </div>
             </div>
             <div className="employeeHeroMeta">
-              <span>{employee.shiftName}</span>
-              <span>{employeeSalaryTypeLabel[employee.salaryType]} · {formatCurrency(salaryAmount)}</span>
+              <span>{employee.shiftName || "Shift belum diatur"}</span>
+              <span>{employee.workLocationName} · {employee.radiusM ? `${employee.radiusM} meter` : "Radius belum diatur"}</span>
             </div>
           </section>
+
+          {!faceReady && (
+            <section className="employeeFaceGateCard">
+              <span className="employeeFaceGateIcon">
+                <ScanFace size={24} />
+              </span>
+              <div className="employeeFaceGateCopy">
+                <span className="dialogEyebrow">Verifikasi Wajah</span>
+                <h2>{faceGateTitle}</h2>
+                <p>{faceGateCopy}</p>
+              </div>
+              <div className="employeeFaceGateActions">
+                <button className={faceCanEnroll ? "primaryButton" : "secondaryButton"} type="button" onClick={() => setFaceEnrollmentOpen(true)} disabled={!faceCanEnroll || faceSaving}>
+                  <ScanFace size={17} />
+                  {data.faceProfile.status === "pending_review" ? "Menunggu HR" : data.faceProfile.status === "rejected" ? "Scan Ulang" : "Daftar Wajah"}
+                </button>
+              </div>
+            </section>
+          )}
 
           <section className="employeeActionCard">
             <div className="employeeActionHeader">
               <div>
                 <span className="dialogEyebrow">Absensi Hari Ini</span>
-                <h2>{todayCheckIn ? "Check-in tercatat" : "Siap check-in"}</h2>
-                <p>{todayCheckIn ? `${formatAttendanceTime(todayCheckIn.eventAt)} · ${todayCheckIn.distanceM ?? "-"}m dari lokasi` : "GPS radius dan face verification akan dicek otomatis."}</p>
+                <h2>{!faceReady ? "Verifikasi wajah dulu" : todayCheckIn ? "Check-in tercatat" : "Siap check-in"}</h2>
+                <p>{!faceReady ? "Absensi real akan terbuka setelah data wajah disetujui HR." : todayCheckIn ? `${formatAttendanceTime(todayCheckIn.eventAt)} · ${todayCheckIn.distanceM ?? "-"}m dari lokasi` : "GPS radius dan face verification akan dicek otomatis."}</p>
               </div>
               <UiStatusBadge tone={todayCheckIn?.status === "valid" ? "valid" : todayCheckIn ? "pending" : "missing"}>
                 {todayCheckIn?.status === "valid" ? "Valid" : todayCheckIn ? "Review" : "Belum absen"}
@@ -10270,22 +10300,24 @@ function EmployeePwaApp({ profile, onLogout }: { profile: AppAccessProfile; onLo
             </div>
 
             <div className="employeeActionButtons">
-              <button className="primaryButton" type="button" onClick={() => openAttendance("check_in")} disabled={!faceReady || attendanceSaving}>
-                <LocateFixed size={18} />
-                Absen Masuk
-              </button>
-              <button className="secondaryButton" type="button" onClick={() => openAttendance("check_out")} disabled={!faceReady || attendanceSaving}>
-                <CalendarCheck2 size={18} />
-                Absen Pulang
-              </button>
+              {!faceReady ? (
+                <button className="primaryButton" type="button" onClick={() => setFaceEnrollmentOpen(true)} disabled={!faceCanEnroll || faceSaving}>
+                  <ScanFace size={18} />
+                  {data.faceProfile.status === "pending_review" ? "Menunggu Approval HR" : "Lengkapi Wajah"}
+                </button>
+              ) : (
+                <>
+                  <button className="primaryButton" type="button" onClick={() => openAttendance("check_in")} disabled={attendanceSaving}>
+                    <LocateFixed size={18} />
+                    Absen Masuk
+                  </button>
+                  <button className="secondaryButton" type="button" onClick={() => openAttendance("check_out")} disabled={attendanceSaving}>
+                    <CalendarCheck2 size={18} />
+                    Absen Pulang
+                  </button>
+                </>
+              )}
             </div>
-
-            {!faceReady && (
-              <div className="employeeInlineNotice">
-                <ScanFace size={18} />
-                <span>Face profile belum approved HR. Daftar wajah dulu sebelum absensi real.</span>
-              </div>
-            )}
           </section>
 
           <section className="employeeStatusGrid">
@@ -10316,7 +10348,7 @@ function EmployeePwaApp({ profile, onLogout }: { profile: AppAccessProfile; onLo
             <div>
               <span className="dialogEyebrow">Payroll Cycle</span>
               <h2>{cycle ? `${cycle.workDaysCount} dari ${cycle.targetWorkDays} hari kerja` : "Cycle belum berjalan"}</h2>
-              <p>{cycle?.netAmount ? `${formatCurrency(cycle.netAmount)} preview payroll` : "Payroll akan terbentuk dari absensi valid."}</p>
+              <p>{cycle ? `${cycleRemainingDays} hari kerja lagi menuju cycle selesai.` : "Cycle akan terbentuk dari absensi valid."}</p>
             </div>
             <div className="employeeCycleTrack"><span style={{ width: `${cyclePercent}%` }} /></div>
           </section>
