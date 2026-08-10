@@ -9446,9 +9446,8 @@ function FaceEnrollmentDialog({
     if (!open || !scanStarted || cameraError || scanComplete) return undefined
 
     clearScanTimers()
-    const sampleThresholds = [28, 58, 88]
+    const sampleThresholds = [24, 54, 84]
     let cancelled = false
-    let analyzing = false
 
     const captureSample = (sampleIndex: number) => {
       if (capturedSampleMarksRef.current[sampleIndex]) return
@@ -9466,37 +9465,38 @@ function FaceEnrollmentDialog({
       }
     }
 
-    const scanTick = async () => {
-      if (cancelled || analyzing) return
-      analyzing = true
-      const analysis = await analyzeFaceEnrollmentFrame(videoRef.current).catch((error) => ({
-        supported: true,
-        ready: false,
-        score: 0,
-        message: getFriendlySupabaseError(error, "Wajah belum bisa dianalisis."),
-      }))
-      analyzing = false
+    const scanTick = () => {
       if (cancelled) return
 
-      setFaceDetectorReady(analysis.supported)
-      setScanMessage(analysis.message)
+      const video = videoRef.current
+      const previewReady = Boolean(video?.videoWidth && video.videoHeight && video.readyState >= 2)
+      const qualityScore = previewReady && video ? calculateFrameQualityScore(video) : 0
+      const stableEnough = previewReady && qualityScore >= 38
       const currentProgress = scanProgressRef.current
-      const stableEnough = analysis.ready || analysis.score >= 52
-      const nextProgress = Math.max(0, Math.min(100, currentProgress + (analysis.ready ? 10 : stableEnough ? 4.5 : -5.5)))
+      const nextProgress = Math.max(0, Math.min(100, currentProgress + (stableEnough ? 8.5 : -4)))
+
+      setFaceDetectorReady(true)
+      setScanMessage(
+        !previewReady
+          ? "Menyiapkan preview kamera..."
+          : qualityScore < 32
+            ? "Tambah cahaya dan tahan wajah di oval."
+            : nextProgress < 35
+              ? "Wajah terbaca. Tahan sebentar."
+              : "Mengambil sampel otomatis...",
+      )
+
       scanProgressRef.current = nextProgress
       setScanProgress(nextProgress)
 
       sampleThresholds.forEach((threshold, sampleIndex) => {
         if (stableEnough && nextProgress >= threshold) captureSample(sampleIndex)
       })
+
+      scanAnimationRef.current = window.setTimeout(scanTick, 180)
     }
 
-    const animateScan = () => {
-      void scanTick()
-      scanAnimationRef.current = window.setTimeout(animateScan, 130)
-    }
-
-    scanAnimationRef.current = window.setTimeout(animateScan, 130)
+    scanAnimationRef.current = window.setTimeout(scanTick, 220)
 
     return () => {
       cancelled = true
@@ -9570,7 +9570,7 @@ function FaceEnrollmentDialog({
                 : scanComplete
                   ? "3 sampel wajah sudah aman untuk dikirim."
                   : faceDetectorReady
-                    ? "Progress hanya berjalan saat wajah pas di oval."
+                    ? "Progress berjalan otomatis saat preview kamera stabil."
                     : "Aktifkan face engine/browser support sebelum enrollment real."}
               </small>
             </div>
