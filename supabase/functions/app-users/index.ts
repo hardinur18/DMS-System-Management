@@ -327,7 +327,7 @@ Deno.serve(async (request) => {
         employee_id: payload.employeeId || null,
         app_scope: payload.appScope || "management",
         status: payload.status || "invited",
-        two_factor_status: payload.twoFactorStatus || "pending",
+        two_factor_status: "disabled",
         invited_at: payload.status === "invited" ? new Date().toISOString() : null,
         email_verified_at: action === "update" && currentProfile && normalizeEmail(currentProfile.email || "") === email ? currentProfile.email_verified_at : null,
         notes: payload.notes?.trim() || null,

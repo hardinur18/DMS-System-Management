@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   ArrowDown,
   ArrowUp,
+  Archive,
   BadgeDollarSign,
   Bell,
   CalendarCheck2,
@@ -35,6 +36,7 @@ import {
   PanelLeftOpen,
   Pencil,
   Copy,
+  RotateCcw,
   ScanFace,
   Search,
   Settings,
@@ -371,6 +373,7 @@ type PasswordDeliveryMode = "manual" | "email"
 type EmployeeStatus = "active" | "review" | "inactive"
 type EmployeeSalaryType = "daily" | "monthly"
 type EmployeePayrollMethod = "attendance_cycle" | "calendar_month" | "custom"
+type EmployeeDirectoryTab = "all" | EmployeeStatus | "archived"
 
 interface EmployeeDirectoryRow {
   id: string
@@ -501,6 +504,8 @@ interface UserEmployeeOption {
   id: string
   code: string
   name: string
+  email: string
+  divisionId: string
   isActive: boolean
   linkedUserId: string
   linkedUserName: string
@@ -523,6 +528,7 @@ interface AppAccessProfile {
   permissions: string[]
   emailVerifiedAt: string
   forcePasswordChange: boolean
+  twoFactorStatus: TwoFactorStatus
 }
 
 interface AuditEvent {
@@ -2301,6 +2307,7 @@ function readCachedAccessProfile(session: Session | null): AppAccessProfile | nu
       permissions: profile.permissions.map(String),
       emailVerifiedAt: String(profile.emailVerifiedAt || ""),
       forcePasswordChange: profile.forcePasswordChange === true,
+      twoFactorStatus: profile.twoFactorStatus === "enabled" || profile.twoFactorStatus === "disabled" ? profile.twoFactorStatus : "pending",
     }
   } catch {
     return null
@@ -2327,7 +2334,7 @@ function writeCachedAccessProfile(profile: AppAccessProfile | null) {
 
 async function loadAppAccessProfile(session: Session): Promise<AppAccessProfile | null> {
   const userEmail = session.user.email?.trim().toLowerCase()
-  const columns = "id, user_code, auth_user_id, full_name, email, role_id, division_id, employee_id, app_scope, status, email_verified_at, force_password_change"
+  const columns = "id, user_code, auth_user_id, full_name, email, role_id, division_id, employee_id, app_scope, status, two_factor_status, email_verified_at, force_password_change"
   let row: Record<string, unknown> | null = null
 
   await invokeAppUsersFunction("claim_profile", {}).catch(() => {})
@@ -2384,6 +2391,7 @@ async function loadAppAccessProfile(session: Session): Promise<AppAccessProfile 
     permissions: (permissions.data || []).map((permission) => String(permission.permission_key)),
     emailVerifiedAt: row.email_verified_at ? String(row.email_verified_at) : "",
     forcePasswordChange: row.force_password_change === true,
+    twoFactorStatus: row.two_factor_status === "enabled" || row.two_factor_status === "disabled" ? row.two_factor_status : "pending",
   }
 }
 
@@ -2397,7 +2405,7 @@ function createEmptyUserForm(rows: UserAccessRow[] = []): UserAccessFormValues {
     employeeId: "",
     appScope: "management",
     status: "invited",
-    twoFactorStatus: "pending",
+    twoFactorStatus: "disabled",
     notes: "",
   }
 }
@@ -2452,7 +2460,7 @@ async function loadUserAccessData() {
     supabase.from("app_users").select("id, user_code, full_name, email, role_id, division_id, employee_id, app_scope, status, two_factor_status, last_login_at, invited_at, password_setup_sent_at, password_reset_sent_at, password_manual_set_at, email_verified_at, force_password_change, notes, created_at").order("created_at", { ascending: false }),
     supabase.from("roles").select("id, code, name, is_active, sort_order, level").order("sort_order", { ascending: true }).order("level", { ascending: true }),
     supabase.from("divisions").select("id, code, name, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
-    supabase.from("employees").select("id, employee_code, full_name, status, deleted_at").is("deleted_at", null).order("employee_code", { ascending: true }),
+    supabase.from("employees").select("id, employee_code, full_name, email, division_id, status, deleted_at").is("deleted_at", null).order("employee_code", { ascending: true }),
   ])
   const error = users.error || roles.error || divisions.error || employeesResult.error
 
@@ -2474,6 +2482,8 @@ async function loadUserAccessData() {
     id: String(row.id),
     code: String(row.employee_code || ""),
     name: String(row.full_name || ""),
+    email: String(row.email || ""),
+    divisionId: row.division_id ? String(row.division_id) : "",
     isActive: row.status === "active",
   }))
   const roleMap = new Map(roleOptions.map((role) => [role.id, role]))
@@ -2521,7 +2531,7 @@ function createUserAccessPayload(values: UserAccessFormValues) {
     employee_id: values.employeeId || null,
     app_scope: values.appScope,
     status: values.status,
-    two_factor_status: values.twoFactorStatus,
+    two_factor_status: "disabled",
     invited_at: values.status === "invited" ? new Date().toISOString() : null,
     notes: values.notes.trim() || null,
   }
@@ -2729,7 +2739,7 @@ async function saveUserAccess(values: UserAccessFormValues, editingRow?: UserAcc
       employeeId: values.employeeId,
       appScope: values.appScope,
       status: values.status,
-      twoFactorStatus: values.twoFactorStatus,
+      twoFactorStatus: "disabled",
       notes: values.notes,
     })
     return
@@ -2842,7 +2852,7 @@ function generateSecurePassword(length = 16) {
 }
 
 function exportUserAccessCsv(rows: UserAccessRow[]) {
-  const header = ["No", "Kode", "Nama", "Email", "Email Verified", "Role", "Divisi", "Karyawan Terkait", "Scope App", "Last Login", "2FA", "Status"]
+  const header = ["No", "Kode", "Nama", "Email", "Email Verified", "Role", "Divisi", "Karyawan Terkait", "Scope App", "Last Login", "Status"]
   const body = rows.map((row, index) => [
     index + 1,
     row.userCode,
@@ -2854,7 +2864,6 @@ function exportUserAccessCsv(rows: UserAccessRow[]) {
     row.employeeCode ? `${row.employeeCode} - ${row.employeeName}` : "",
     appScopeLabel[row.appScope],
     formatUserDateTime(row.lastLoginAt),
-    twoFactorLabel[row.twoFactorStatus],
     userStatusLabel[row.status],
   ])
   const csv = [header, ...body]
@@ -3118,7 +3127,6 @@ async function loadEmployeeData() {
     supabase
       .from("employees")
       .select("id, employee_code, full_name, photo_path, nik, phone, email, division_id, position_id, work_location_id, shift_id, salary_type, daily_salary, monthly_salary, payroll_method, prorate_enabled, join_date, payroll_cycle_days, status, notes, deleted_at, created_at")
-      .is("deleted_at", null)
       .order("employee_code", { ascending: true }),
     supabase.from("divisions").select("id, code, name, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
     supabase.from("positions").select("id, code, name, division_id, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
@@ -3308,6 +3316,18 @@ async function deleteEmployee(row: EmployeeDirectoryRow) {
   if (error) throw error
 
   if (row.photoPath) await removeEmployeePhoto(row.photoPath).catch(() => {})
+}
+
+async function restoreEmployee(row: EmployeeDirectoryRow) {
+  const { error } = await supabase
+    .from("employees")
+    .update({
+      status: "active",
+      deleted_at: null,
+    })
+    .eq("id", row.id)
+
+  if (error) throw error
 }
 
 function exportEmployeeCsv(rows: EmployeeDirectoryRow[]) {
@@ -4136,12 +4156,6 @@ const userStatusLabel: Record<UserStatus, string> = {
   locked: "Locked",
 }
 
-const twoFactorLabel: Record<TwoFactorStatus, string> = {
-  enabled: "Enabled",
-  pending: "Pending",
-  disabled: "Disabled",
-}
-
 const passwordActionCopy: Record<PasswordActionType, { action: string; confirm: string; description: string; title: string }> = {
   setup: {
     action: "Send password setup",
@@ -4164,6 +4178,7 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
   const [statusRow, setStatusRow] = useState<EmployeeDirectoryRow | null>(null)
   const [pendingStatus, setPendingStatus] = useState<EmployeeStatus>("active")
   const [deleteRow, setDeleteRow] = useState<EmployeeDirectoryRow | null>(null)
+  const [restoreRow, setRestoreRow] = useState<EmployeeDirectoryRow | null>(null)
   const [faceEnrollmentRow, setFaceEnrollmentRow] = useState<EmployeeDirectoryRow | null>(null)
   const [faceEnrollmentSubmitting, setFaceEnrollmentSubmitting] = useState(false)
   const [dialogInitialValues, setDialogInitialValues] = useState<EmployeeFormValues>(() => createEmptyEmployeeForm())
@@ -4173,6 +4188,7 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
   const [locations, setLocations] = useState<EmployeeOption[]>([])
   const [shifts, setShifts] = useState<EmployeeOption[]>([])
   const [searchTerm, setSearchTerm] = useState("")
+  const [activeTab, setActiveTab] = useState<EmployeeDirectoryTab>("all")
   const [divisionFilter, setDivisionFilter] = useState("all")
   const [statusFilter, setStatusFilter] = useState("all")
   const [page, setPage] = useState(1)
@@ -4207,10 +4223,15 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
     void fetchRows()
   }, [])
 
-  const filteredRows = rows.filter((row) => {
+  const liveRows = rows.filter((row) => !row.deletedAt)
+  const archivedRows = rows.filter((row) => row.deletedAt)
+  const visibleRows = activeTab === "archived"
+    ? archivedRows
+    : liveRows.filter((row) => activeTab === "all" || row.status === activeTab)
+  const filteredRows = visibleRows.filter((row) => {
     const normalizedTerm = searchTerm.trim().toLowerCase()
     const matchesSearch = normalizedTerm
-      ? [row.employeeCode, row.fullName, row.nik, row.phone, row.email, row.divisionName, row.positionName, row.workLocationName, row.shiftName, row.notes].join(" ").toLowerCase().includes(normalizedTerm)
+      ? [row.employeeCode, row.fullName, row.nik, row.phone, row.email, row.divisionName, row.positionName, row.workLocationName, row.shiftName, row.notes, row.deletedAt].join(" ").toLowerCase().includes(normalizedTerm)
       : true
     const matchesDivision = divisionFilter === "all" || row.divisionId === divisionFilter
     const matchesStatus = statusFilter === "all" || row.status === statusFilter
@@ -4220,15 +4241,22 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
   const pageCount = Math.max(1, Math.ceil(filteredRows.length / Math.min(pageSize, 50)))
   const currentPage = Math.min(page, pageCount)
   const paginatedRows = filteredRows.slice((currentPage - 1) * Math.min(pageSize, 50), currentPage * Math.min(pageSize, 50))
-  const activeRows = rows.filter((row) => row.status === "active").length
-  const reviewRows = rows.filter((row) => row.status === "review").length
+  const activeRows = liveRows.filter((row) => row.status === "active").length
+  const reviewRows = liveRows.filter((row) => row.status === "review").length
   const averageSalary = activeRows
-    ? Math.round(rows.filter((row) => row.status === "active").reduce((sum, row) => sum + getEmployeeSalaryAmount(row), 0) / activeRows)
+    ? Math.round(liveRows.filter((row) => row.status === "active").reduce((sum, row) => sum + getEmployeeSalaryAmount(row), 0) / activeRows)
     : 0
+  const employeeDirectoryTabs: Array<{ id: EmployeeDirectoryTab; label: string; icon: LucideIcon; count: number }> = [
+    { id: "all", label: "Semua", icon: UsersRound, count: liveRows.length },
+    { id: "active", label: "Aktif", icon: UserRoundCheck, count: activeRows },
+    { id: "review", label: "Review", icon: AlertTriangle, count: reviewRows },
+    { id: "inactive", label: "Nonaktif", icon: Lock, count: liveRows.filter((row) => row.status === "inactive").length },
+    { id: "archived", label: "Arsip", icon: Archive, count: archivedRows.length },
+  ]
 
   useEffect(() => {
     setPage(1)
-  }, [searchTerm, divisionFilter, statusFilter, pageSize])
+  }, [searchTerm, activeTab, divisionFilter, statusFilter, pageSize])
 
   const showToast = (message: Omit<ToastMessage, "id">) => {
     setToast({ ...message, id: Date.now() })
@@ -4359,6 +4387,31 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
     }
   }
 
+  const handleRestoreEmployee = async () => {
+    if (!restoreRow) return
+    setSaving(true)
+    setErrorMessage("")
+
+    try {
+      await restoreEmployee(restoreRow)
+      await writeAuditLog("Restore employee", "employees", restoreRow.id, {
+        employee_code: restoreRow.employeeCode,
+        full_name: restoreRow.fullName,
+      }).catch(() => {})
+      setRestoreRow(null)
+      const data = await fetchRows()
+      const nextRow = data?.rows.find((row) => row.id === restoreRow.id) || null
+      if (nextRow) setDetailRow(nextRow)
+      showToast({ tone: "success", title: "Karyawan dipulihkan", description: `${restoreRow.fullName} kembali ke direktori aktif.` })
+    } catch (error) {
+      const message = getFriendlySupabaseError(error, "Gagal memulihkan karyawan.")
+      setErrorMessage(message)
+      showToast({ tone: "error", title: "Gagal memulihkan", description: message })
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const handleFaceProfileAction = async (row: EmployeeDirectoryRow, action: "approve" | "reject" | "reset" | "disable") => {
     setSaving(true)
     setErrorMessage("")
@@ -4435,9 +4488,10 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
         meta={
           <InlinePageStats
             items={[
-              `${filteredRows.length} dari ${rows.length} karyawan`,
+              `${filteredRows.length} dari ${visibleRows.length} karyawan`,
               `${activeRows} aktif`,
               `${reviewRows} review`,
+              `${archivedRows.length} arsip`,
               `Gaji aktif rata-rata ${formatCurrency(averageSalary)}`,
             ]}
           />
@@ -4458,6 +4512,16 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
 
       <section className="moduleGrid">
         {errorMessage && <div className="inlineAlert">{errorMessage}</div>}
+
+        <CategoryTabs
+          activeId={activeTab}
+          ariaLabel="Filter direktori karyawan"
+          items={employeeDirectoryTabs}
+          onChange={(id) => {
+            setActiveTab(id)
+            setStatusFilter("all")
+          }}
+        />
 
         <OperationalFilterPanel className="employeeFilterPanel">
           <div className="filterField">
@@ -4539,7 +4603,11 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
                 {!loading && !errorMessage && filteredRows.length === 0 && (
                   <tr>
                     <td className="tableStateCell" colSpan={9}>
-                      <TableState title="Karyawan tidak ditemukan" description="Ubah filter atau tambah karyawan baru." icon={Search} />
+                      <TableState
+                        title={activeTab === "archived" ? "Arsip karyawan kosong" : "Karyawan tidak ditemukan"}
+                        description={activeTab === "archived" ? "Karyawan yang diarsipkan akan muncul di tab ini dan bisa dipulihkan." : "Ubah filter atau tambah karyawan baru."}
+                        icon={activeTab === "archived" ? Archive : Search}
+                      />
                     </td>
                   </tr>
                 )}
@@ -4563,26 +4631,35 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
                     <td className="tableActionCell">
                       <div className="rowActions">
                         <RowActionMenu label={`Aksi ${row.fullName}`}>
-                          <RowActionMenuItem disabled={!canManage || saving} onClick={() => openEditDialog(row)}>
-                            <Pencil size={14} />
-                            Edit
-                          </RowActionMenuItem>
-                          <RowActionMenuItem disabled={!canManage || saving || row.status === "active"} onClick={() => openStatusDialog(row, "active")}>
-                            <FileCheck2 size={14} />
-                            Aktifkan
-                          </RowActionMenuItem>
-                          <RowActionMenuItem disabled={!canManage || saving || row.status === "review"} onClick={() => openStatusDialog(row, "review")}>
-                            <AlertTriangle size={14} />
-                            Tandai Review
-                          </RowActionMenuItem>
-                          <RowActionMenuItem danger disabled={!canManage || saving || row.status === "inactive"} onClick={() => openStatusDialog(row, "inactive")}>
-                            <Trash2 size={14} />
-                            Nonaktifkan
-                          </RowActionMenuItem>
-                          <RowActionMenuItem danger disabled={!canManage || saving} onClick={() => setDeleteRow(row)}>
-                            <Trash2 size={14} />
-                            Arsipkan Data
-                          </RowActionMenuItem>
+                          {row.deletedAt ? (
+                            <RowActionMenuItem disabled={!canManage || saving} onClick={() => setRestoreRow(row)}>
+                              <RotateCcw size={14} />
+                              Pulihkan
+                            </RowActionMenuItem>
+                          ) : (
+                            <>
+                              <RowActionMenuItem disabled={!canManage || saving} onClick={() => openEditDialog(row)}>
+                                <Pencil size={14} />
+                                Edit
+                              </RowActionMenuItem>
+                              <RowActionMenuItem disabled={!canManage || saving || row.status === "active"} onClick={() => openStatusDialog(row, "active")}>
+                                <FileCheck2 size={14} />
+                                Aktifkan
+                              </RowActionMenuItem>
+                              <RowActionMenuItem disabled={!canManage || saving || row.status === "review"} onClick={() => openStatusDialog(row, "review")}>
+                                <AlertTriangle size={14} />
+                                Tandai Review
+                              </RowActionMenuItem>
+                              <RowActionMenuItem danger disabled={!canManage || saving || row.status === "inactive"} onClick={() => openStatusDialog(row, "inactive")}>
+                                <Trash2 size={14} />
+                                Nonaktifkan
+                              </RowActionMenuItem>
+                              <RowActionMenuItem danger disabled={!canManage || saving} onClick={() => setDeleteRow(row)}>
+                                <Archive size={14} />
+                                Arsipkan Data
+                              </RowActionMenuItem>
+                            </>
+                          )}
                         </RowActionMenu>
                       </div>
                     </td>
@@ -4620,6 +4697,7 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
         row={detailRow}
         onClose={() => setDetailRow(null)}
         onEdit={(row) => openEditDialog(row)}
+        onRestore={(row) => setRestoreRow(row)}
         onFaceEnroll={(row) => setFaceEnrollmentRow(row)}
         onFaceAction={handleFaceProfileAction}
         canManage={canManage}
@@ -4691,6 +4769,28 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
             <span>{deleteRow.employeeCode}</span>
             <strong>{deleteRow.fullName}</strong>
             <small>{deleteRow.divisionName} / {deleteRow.positionName}</small>
+          </div>
+        )}
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={Boolean(restoreRow)}
+        icon={RotateCcw}
+        eyebrow="Pulihkan Karyawan"
+        title={restoreRow ? `Pulihkan ${restoreRow.fullName}?` : "Pulihkan karyawan?"}
+        description="Data akan kembali muncul di direktori aktif dengan status Aktif. Foto dapat diupload ulang dari form karyawan bila sebelumnya dibersihkan saat arsip."
+        confirmLabel="Pulihkan Data"
+        cancelLabel="Batal"
+        loading={saving}
+        onClose={() => {
+          if (!saving) setRestoreRow(null)
+        }}
+        onConfirm={() => void handleRestoreEmployee()}
+      >
+        {restoreRow && (
+          <div className="confirmDialogPreview">
+            <span>{restoreRow.employeeCode}</span>
+            <strong>{restoreRow.fullName}</strong>
+            <small>Diarsipkan {formatUserDateTime(restoreRow.deletedAt, "-")}</small>
           </div>
         )}
       </ConfirmDialog>
@@ -4996,6 +5096,7 @@ function EmployeeDetailDialog({
   saving,
   onClose,
   onEdit,
+  onRestore,
   onFaceEnroll,
   onFaceAction,
 }: {
@@ -5004,6 +5105,7 @@ function EmployeeDetailDialog({
   saving: boolean
   onClose: () => void
   onEdit: (row: EmployeeDirectoryRow) => void
+  onRestore: (row: EmployeeDirectoryRow) => void
   onFaceEnroll: (row: EmployeeDirectoryRow) => void
   onFaceAction: (row: EmployeeDirectoryRow, action: "approve" | "reject" | "reset" | "disable") => Promise<void>
 }) {
@@ -5049,6 +5151,7 @@ function EmployeeDetailDialog({
               <span>Karyawan</span>
               <h2 id="employee-detail-title">{row.fullName}</h2>
               <p>Detail data karyawan yang dipakai modul absensi, app lapangan, dan payroll.</p>
+              {row.deletedAt && <em className="masterDetailArchivedFlag">Diarsipkan {formatUserDateTime(row.deletedAt, "-")}</em>}
             </div>
           </div>
           <button className="iconButton dialogClose" type="button" aria-label="Tutup detail" onClick={onClose}>
@@ -5129,19 +5232,19 @@ function EmployeeDetailDialog({
               {row.faceProfileReviewNotes && <p>{row.faceProfileReviewNotes}</p>}
             </div>
             <div className="employeeFaceActions">
-              <button className="primaryButton compactButton" type="button" disabled={!canManage || saving} onClick={() => onFaceEnroll(row)}>
+              <button className="primaryButton compactButton" type="button" disabled={!canManage || saving || Boolean(row.deletedAt)} onClick={() => onFaceEnroll(row)}>
                 <ScanFace size={15} />
                 {row.faceProfileStatus === "unenrolled" ? "Daftar Wajah" : "Scan Ulang"}
               </button>
-              <button className="secondaryButton compactButton" type="button" disabled={!canManage || saving || row.faceProfileStatus !== "pending_review"} onClick={() => void onFaceAction(row, "approve")}>
+              <button className="secondaryButton compactButton" type="button" disabled={!canManage || saving || Boolean(row.deletedAt) || row.faceProfileStatus !== "pending_review"} onClick={() => void onFaceAction(row, "approve")}>
                 <ShieldCheck size={15} />
                 Approve
               </button>
-              <button className="secondaryButton compactButton" type="button" disabled={!canManage || saving || row.faceProfileStatus === "unenrolled"} onClick={() => void onFaceAction(row, "reset")}>
+              <button className="secondaryButton compactButton" type="button" disabled={!canManage || saving || Boolean(row.deletedAt) || row.faceProfileStatus === "unenrolled"} onClick={() => void onFaceAction(row, "reset")}>
                 <ScanFace size={15} />
                 Reset
               </button>
-              <button className="secondaryButton compactButton dangerSoftButton" type="button" disabled={!canManage || saving || row.faceProfileStatus !== "pending_review"} onClick={() => void onFaceAction(row, "reject")}>
+              <button className="secondaryButton compactButton dangerSoftButton" type="button" disabled={!canManage || saving || Boolean(row.deletedAt) || row.faceProfileStatus !== "pending_review"} onClick={() => void onFaceAction(row, "reject")}>
                 <X size={15} />
                 Reject
               </button>
@@ -5163,10 +5266,17 @@ function EmployeeDetailDialog({
 
         <div className="masterDetailActions">
           <button className="secondaryButton" type="button" onClick={onClose}>Tutup</button>
-          <button className="primaryButton" type="button" disabled={!canManage} onClick={() => onEdit(row)}>
-            <Pencil size={16} />
-            Edit Karyawan
-          </button>
+          {row.deletedAt ? (
+            <button className="primaryButton" type="button" disabled={!canManage || saving} onClick={() => onRestore(row)}>
+              <RotateCcw size={16} />
+              Pulihkan Karyawan
+            </button>
+          ) : (
+            <button className="primaryButton" type="button" disabled={!canManage} onClick={() => onEdit(row)}>
+              <Pencil size={16} />
+              Edit Karyawan
+            </button>
+          )}
         </div>
       </section>
     </div>,
@@ -5229,7 +5339,7 @@ function UsersPage({ activeView, profile }: { activeView: ViewId; profile: AppAc
   const filteredRows = rows.filter((row) => {
     const normalizedTerm = searchTerm.trim().toLowerCase()
     const matchesSearch = normalizedTerm
-      ? [row.userCode, row.fullName, row.email, row.roleName, row.divisionName, row.status, row.twoFactorStatus].join(" ").toLowerCase().includes(normalizedTerm)
+      ? [row.userCode, row.fullName, row.email, row.roleName, row.divisionName, row.status, appScopeLabel[row.appScope], row.employeeName].join(" ").toLowerCase().includes(normalizedTerm)
       : true
     const matchesStatus = statusFilter === "all" || row.status === statusFilter
 
@@ -5241,7 +5351,7 @@ function UsersPage({ activeView, profile }: { activeView: ViewId; profile: AppAc
   const activeUsers = rows.filter((user) => user.status === "active").length
   const invitedUsers = rows.filter((user) => user.status === "invited").length
   const lockedUsers = rows.filter((user) => user.status === "locked").length
-  const twoFactorEnabled = rows.filter((user) => user.twoFactorStatus === "enabled").length
+  const linkedEmployeeUsers = rows.filter((user) => Boolean(user.employeeId)).length
   const statusTarget = statusRow?.status === "locked" ? "active" : "locked"
   const passwordAction = passwordActionCopy[passwordActionType]
   const passwordDialogDescription = passwordDeliveryMode === "manual"
@@ -5278,7 +5388,7 @@ function UsersPage({ activeView, profile }: { activeView: ViewId; profile: AppAc
       employeeId: row.employeeId,
       appScope: row.appScope,
       status: row.status,
-      twoFactorStatus: row.twoFactorStatus,
+      twoFactorStatus: "disabled",
       notes: row.notes,
     })
     setDialogOpen(true)
@@ -5447,7 +5557,7 @@ function UsersPage({ activeView, profile }: { activeView: ViewId; profile: AppAc
     <OperationalPageShell>
       <PageHeader
         activeView={activeView}
-        subtitle="Kelola user management app, role, status akses, 2FA, invite user, dan custom access."
+        subtitle="Kelola user management app, akses lapangan, role, status akses, invite user, dan relasi karyawan."
         meta={
           <InlinePageStats
             items={[
@@ -5475,7 +5585,7 @@ function UsersPage({ activeView, profile }: { activeView: ViewId; profile: AppAc
       <OperationalKpiGrid>
         <OperationalKpiCard label="User Aktif" value={activeUsers} detail="Bisa akses management" icon={UsersRound} tone="blue" />
         <OperationalKpiCard label="Invite Pending" value={invitedUsers} detail="Menunggu aktivasi" icon={Mail} tone="amber" />
-        <OperationalKpiCard label="2FA Enabled" value={twoFactorEnabled} detail="Admin terlindungi" icon={Lock} tone="green" />
+        <OperationalKpiCard label="Terhubung Karyawan" value={linkedEmployeeUsers} detail="Siap akses app lapangan" icon={UserRoundCheck} tone="green" />
         <OperationalKpiCard label="Locked" value={lockedUsers} detail="Akses dibekukan" icon={ShieldCheck} tone="rose" />
       </OperationalKpiGrid>
 
@@ -5524,7 +5634,6 @@ function UsersPage({ activeView, profile }: { activeView: ViewId; profile: AppAc
                 <col style={{ width: "190px" }} />
                 <col style={{ width: "170px" }} />
                 <col style={{ width: "150px" }} />
-                <col style={{ width: "120px" }} />
                 <col style={{ width: "112px" }} />
                 <col className="tableActionColumn" />
               </colgroup>
@@ -5539,7 +5648,6 @@ function UsersPage({ activeView, profile }: { activeView: ViewId; profile: AppAc
                   <th>Karyawan Terkait</th>
                   <th>Scope</th>
                   <th>Last Login</th>
-                  <th>2FA</th>
                   <th>Status</th>
                   <th className="tableActionHeader">Aksi</th>
                 </tr>
@@ -5547,21 +5655,21 @@ function UsersPage({ activeView, profile }: { activeView: ViewId; profile: AppAc
               <tbody>
                 {loading && (
                   <tr>
-                    <td className="tableStateCell" colSpan={12}>
+                    <td className="tableStateCell" colSpan={11}>
                       <TableState title="Memuat user" description="Mengambil pengguna, role, dan divisi dari Supabase." icon={UsersRound} />
                     </td>
                   </tr>
                 )}
                 {!loading && errorMessage && rows.length === 0 && (
                   <tr>
-                    <td className="tableStateCell" colSpan={12}>
+                    <td className="tableStateCell" colSpan={11}>
                       <TableState title="Gagal memuat user" description={errorMessage} icon={AlertTriangle} tone="danger" />
                     </td>
                   </tr>
                 )}
                 {!loading && !errorMessage && filteredRows.length === 0 && (
                   <tr>
-                    <td className="tableStateCell" colSpan={12}>
+                    <td className="tableStateCell" colSpan={11}>
                       <TableState title="User tidak ditemukan" description="Ubah filter atau invite user baru." icon={Search} />
                     </td>
                   </tr>
@@ -5577,7 +5685,6 @@ function UsersPage({ activeView, profile }: { activeView: ViewId; profile: AppAc
                     <td><TableText primary={user.employeeName} secondary={user.employeeCode || "Tidak dipakai app lapangan"} /></td>
                     <td><TableText primary={appScopeLabel[user.appScope]} /></td>
                     <td><TableText primary={formatUserDateTime(user.lastLoginAt)} /></td>
-                    <td><TableText primary={twoFactorLabel[user.twoFactorStatus]} /></td>
                     <td><UserStatusBadge status={user.status} /></td>
                     <td className="tableActionCell">
                       <div className="rowActions">
@@ -5826,6 +5933,18 @@ function UserAccessDialog({
   const activeRoles = roles.filter((role) => role.isActive || role.id === values.roleId)
   const activeDivisions = divisions.filter((division) => division.isActive || division.id === values.divisionId)
   const activeEmployees = employees.filter((employee) => employee.isActive || employee.id === values.employeeId)
+  const selectedEmployee = values.employeeId ? employees.find((employee) => employee.id === values.employeeId) : null
+  const handleEmployeeChange = (employeeId: string) => {
+    const employee = employees.find((item) => item.id === employeeId)
+
+    setValues((current) => ({
+      ...current,
+      employeeId,
+      fullName: employee?.name || current.fullName,
+      email: selfAccountLocked ? current.email : employee?.email || current.email,
+      divisionId: employee?.divisionId || current.divisionId,
+    }))
+  }
 
   return createPortal(
     <div className="dialogBackdrop" role="presentation" onMouseDown={onClose}>
@@ -5840,7 +5959,7 @@ function UserAccessDialog({
         <div className="dialogCompactHeader">
           <div>
             <h2 id="invite-user-title">{mode === "edit" ? "Edit User" : "Invite User"}</h2>
-            <p id="invite-user-description">Role dan divisi diambil live dari Master Data.</p>
+            <p id="invite-user-description">Pilih karyawan terkait untuk mengisi nama, email, dan divisi otomatis.</p>
           </div>
           <button className="iconButton dialogClose" type="button" aria-label="Tutup dialog" onClick={onClose}>
             <X size={18} />
@@ -5908,7 +6027,7 @@ function UserAccessDialog({
             <option value="field">Lapangan</option>
             <option value="both">Management + Lapangan</option>
           </SelectFormField>
-          <SelectFormField label="Karyawan Terkait" value={values.employeeId} onChange={(event) => setValues((current) => ({ ...current, employeeId: event.target.value }))} required={values.appScope === "field" || values.appScope === "both"}>
+          <SelectFormField label="Karyawan Terkait" value={values.employeeId} onChange={(event) => handleEmployeeChange(event.target.value)} required={values.appScope === "field" || values.appScope === "both"}>
             <option value="">Belum dikaitkan</option>
             {activeEmployees.map((employee) => {
               const linkedToOtherUser = Boolean(employee.linkedUserId && employee.linkedUserId !== currentUserId)
@@ -5921,15 +6040,19 @@ function UserAccessDialog({
               )
             })}
           </SelectFormField>
+          {selectedEmployee && (
+            <div className="linkedEmployeeAutofill">
+              <UserRoundCheck size={16} />
+              <span>
+                Data diambil dari {selectedEmployee.code} - {selectedEmployee.name}
+                {selectedEmployee.email ? `, ${selectedEmployee.email}` : ""}.
+              </span>
+            </div>
+          )}
           <SelectFormField label="Status" value={selfAccountLocked ? initialValues.status : values.status} onChange={(event) => setValues((current) => ({ ...current, status: event.target.value as UserStatus }))} disabled={selfAccountLocked} required>
             <option value="invited">Invite</option>
             <option value="active">Aktif</option>
             <option value="locked">Locked</option>
-          </SelectFormField>
-          <SelectFormField label="2FA" value={values.twoFactorStatus} onChange={(event) => setValues((current) => ({ ...current, twoFactorStatus: event.target.value as TwoFactorStatus }))} required>
-            <option value="pending">Pending</option>
-            <option value="enabled">Enabled</option>
-            <option value="disabled">Disabled</option>
           </SelectFormField>
           <TextFormField label="Catatan" value={values.notes} onChange={(event) => setValues((current) => ({ ...current, notes: event.target.value }))} placeholder="Catatan akses user" />
           <div className="dialogActions">
@@ -6020,7 +6143,6 @@ function UserAccessDetailDialog({
     { label: "Divisi", value: row.divisionName },
     { label: "Karyawan terkait", value: linkedEmployee },
     { label: "Scope app", value: appScopeLabel[row.appScope] },
-    { label: "2FA", value: twoFactorLabel[row.twoFactorStatus] },
   ]
   const securityLines = [
     { label: "Email verified", value: <EmailVerifiedBadge verifiedAt={row.emailVerifiedAt} /> },

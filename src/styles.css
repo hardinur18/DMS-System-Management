@@ -1645,6 +1645,11 @@ button {
   animation: datePickerIn 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+.datePickerPopover.portal {
+  position: fixed;
+  z-index: 1200;
+}
+
 .datePickerHeader {
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr) 34px;
@@ -2512,6 +2517,21 @@ button {
   font-size: 0.72rem;
   font-weight: 850;
   text-transform: uppercase;
+}
+
+.masterDetailArchivedFlag {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 7px;
+  padding: 5px 9px;
+  border: 1px solid rgba(245, 158, 11, 0.22);
+  border-radius: 999px;
+  color: #b45309;
+  background: rgba(255, 251, 235, 0.92);
+  font-size: 0.68rem;
+  font-style: normal;
+  font-weight: 800;
+  line-height: 1;
 }
 
 .masterDetailBody {
@@ -4285,6 +4305,32 @@ button {
 
 .inviteDialog .formField {
   gap: 6px;
+}
+
+.linkedEmployeeAutofill {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(34, 174, 202, 0.18);
+  border-radius: 16px;
+  color: var(--blue-ink);
+  background: linear-gradient(135deg, rgba(236, 253, 255, 0.9), rgba(255, 255, 255, 0.96));
+  font-size: 0.76rem;
+  font-weight: 720;
+}
+
+.linkedEmployeeAutofill svg {
+  flex: 0 0 auto;
+  color: var(--cyan);
+}
+
+.linkedEmployeeAutofill span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .inviteDialog .formField label {
