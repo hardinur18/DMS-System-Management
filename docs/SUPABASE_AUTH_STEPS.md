@@ -37,10 +37,10 @@ Set secrets di Supabase Function. Jangan simpan value secret ke repo.
 
 ```bash
 supabase secrets set SUPABASE_SERVICE_ROLE_KEY="..." --project-ref heibhxempixiiqmalyuf
-supabase secrets set APP_SITE_URL="http://127.0.0.1:5174" --project-ref heibhxempixiiqmalyuf
+supabase secrets set APP_SITE_URL="https://dms-system-management.pages.dev" --project-ref heibhxempixiiqmalyuf
 ```
 
-Saat production domain sudah ada, ganti `APP_SITE_URL` ke domain production.
+Untuk local test khusus developer, boleh sementara pakai origin local. Untuk invite/reset yang dikirim ke user asli, `APP_SITE_URL` wajib memakai domain production.
 
 ## Step 3 - Aktifkan Frontend Function Mode
 
