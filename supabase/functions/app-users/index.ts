@@ -173,9 +173,13 @@ Deno.serve(async (request) => {
 
       if (updateError) throw updateError
 
-      await adminClient.auth.admin.updateUserById(authData.user.id, {
-        user_metadata: { ...authData.user.user_metadata, dms_manual_password: false },
-      }).catch(() => {})
+      try {
+        await adminClient.auth.admin.updateUserById(authData.user.id, {
+          user_metadata: { ...authData.user.user_metadata, dms_manual_password: false },
+        })
+      } catch {
+        // Metadata cleanup should not block password completion.
+      }
 
       return jsonResponse({ ok: true, profileId: profile.id })
     }

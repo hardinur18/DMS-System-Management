@@ -82,7 +82,11 @@ Deno.serve(async (request) => {
     if (!actor.employee_id) return jsonResponse({ error: "User belum dikaitkan ke data karyawan." }, 403)
 
     const employeeId = String(actor.employee_id)
-    await adminClient.rpc("refresh_employee_payroll_cycles", { target_employee_id: employeeId }).catch(() => {})
+    try {
+      await adminClient.rpc("refresh_employee_payroll_cycles", { target_employee_id: employeeId })
+    } catch {
+      // Payroll refresh is best-effort; the portal can still show existing employee data.
+    }
 
     const [employeeResult, faceResult, payrollResult, logsResult] = await Promise.all([
       adminClient
