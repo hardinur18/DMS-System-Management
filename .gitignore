@@ -2,7 +2,10 @@
 node_modules/
 dist/
 build/
+.local-tools/
 .env
 .env.*
 !.env.example
 supabase/.temp/
+android/.gradle/
+android/local.properties

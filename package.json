@@ -11,12 +11,17 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
+    "android:init": "capacitor add android",
+    "android:sync": "npm run build && capacitor sync android",
+    "android:open": "capacitor open android",
+    "android:apk": "export JAVA_HOME=\"${JAVA_HOME:-$PWD/.local-tools/jdk/current}\"; export ANDROID_HOME=\"${ANDROID_HOME:-$PWD/.local-tools/android-sdk}\"; npm run build && capacitor sync android && cd android && ./gradlew assembleDebug",
     "db:migrate": "node scripts/run-migration.mjs",
     "supabase:functions:deploy": "supabase functions deploy app-users --project-ref heibhxempixiiqmalyuf && supabase functions deploy role-permissions --project-ref heibhxempixiiqmalyuf && supabase functions deploy attendance-review --project-ref heibhxempixiiqmalyuf && supabase functions deploy field-attendance --project-ref heibhxempixiiqmalyuf && supabase functions deploy overtime-review --project-ref heibhxempixiiqmalyuf && supabase functions deploy payroll-processing --project-ref heibhxempixiiqmalyuf && supabase functions deploy employee-face-profiles --project-ref heibhxempixiiqmalyuf"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/core": "^8.5.0",
     "@supabase/supabase-js": "^2.112.0",
-    "@vitejs/plugin-react": "^5.0.0",
     "@vladmandic/face-api": "^1.7.15",
     "clsx": "^2.1.1",
     "lucide-react": "^0.468.0",
@@ -24,8 +29,10 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^5.2.0",
     "pg": "^8.22.0",
     "typescript": "^5.6.3",
     "vite": "^5.4.11"

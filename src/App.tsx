@@ -9784,6 +9784,17 @@ function FieldAttendanceDialog({
     ? `Titik HP terkunci${gpsAccuracy ? ` · akurasi ${Math.round(gpsAccuracy)}m` : ""}`
     : "Ambil titik GPS dari browser/device"
   const faceCopy = faceReady && faceEmbedding ? `${parsedFaceScore}% quality · embedding siap` : "Tap untuk buka screen verifikasi wajah"
+  const fieldFaceScanLabel = faceReady
+    ? "Wajah berhasil dibaca. Bukti absensi siap disimpan."
+    : faceCameraError
+      ? "Kamera perlu diperiksa"
+      : faceScanMessage
+  const fieldFaceScanTone = faceCameraError || !faceDetectorReady || faceScanProgress < 36
+    ? "danger"
+    : faceScanProgress < 72
+      ? "warning"
+      : "success"
+  const fieldFaceProgressStyle = { "--face-progress": `${Math.max(0, 100 - faceScanProgress)}` } as CSSProperties
 
   const handleLocate = async () => {
     setLocating(true)
@@ -9851,27 +9862,37 @@ function FieldAttendanceDialog({
 
         {faceScreenOpen ? (
           <div className="fieldFaceScreen">
-            <div className="fieldFacePreview">
-              <video ref={faceVideoRef} playsInline muted />
-              <span className="fieldFaceScanFrame">
-                <Camera size={42} />
-                <i />
-              </span>
-              <div className="fieldFacePulse" />
+            <div className={clsx("faceEnrollmentCamera fieldFaceCamera", `tone-${fieldFaceScanTone}`, faceReady && "captured", faceCapturing && "capturing", !faceReady && !faceCameraError && "scanning")}>
+              {faceSnapshotBase64 && faceReady ? <img src={faceSnapshotBase64} alt="" /> : <video ref={faceVideoRef} playsInline muted />}
+              <span className="faceEnrollmentFrame" />
+              <svg className="faceEnrollmentOvalProgress" viewBox="0 0 100 132" aria-hidden="true">
+                <ellipse className="faceEnrollmentOvalTrack" cx="50" cy="66" rx="48" ry="64" pathLength="100" />
+                <ellipse className="faceEnrollmentOvalBar" cx="50" cy="66" rx="48" ry="64" pathLength="100" style={fieldFaceProgressStyle} />
+              </svg>
+              <span className="faceEnrollmentGuide">{fieldFaceScanLabel}</span>
             </div>
-            <div className="fieldFaceCopy">
-              <span className="dialogEyebrow">Face Verification</span>
-              <h3>{faceCapturing ? "Snapshot tersimpan" : faceScanMessage}</h3>
-              <p>{faceDetectorReady ? "Scanner otomatis membaca posisi wajah dan menyimpan bukti absensi." : "Browser ini memakai fallback kualitas frame. Gunakan Chrome/Safari terbaru untuk hasil lebih presisi."}</p>
+
+            <div className={clsx("faceEnrollmentStatusPanel fieldFaceStatusPanel", `tone-${fieldFaceScanTone}`)}>
+              <div>
+                <span className="dialogEyebrow">{faceReady ? "Siap Absensi" : faceDetectorReady ? "Scanning" : "Detector Required"}</span>
+                <strong>{faceCapturing ? "Snapshot tersimpan" : fieldFaceScanLabel}</strong>
+                <small>
+                  {faceReady
+                    ? `${parsedFaceScore}% quality · embedding dan snapshot siap.`
+                    : faceDetectorReady
+                      ? "Progress berjalan otomatis saat wajah stabil di oval."
+                      : "Browser memakai fallback kualitas frame. Gunakan Chrome Android/Safari terbaru untuk hasil lebih presisi."}
+                </small>
+              </div>
+              <span className="faceEnrollmentCounter">{faceReady ? "1/1" : `${Math.round(faceScanProgress)}%`}</span>
             </div>
-            <div className="fieldFaceProgress" aria-label={`Progress scan wajah ${faceScanProgress}%`}>
-              <span style={{ width: `${faceScanProgress}%` }} />
+
+            <div className="faceEnrollmentChecklist fieldFaceChecklist">
+              <span className={clsx(faceDetectorReady && "active", faceReady && "done")}><ScanFace size={16} /> Wajah terbaca</span>
+              <span className={clsx(faceScanProgress >= 55 && "active", faceReady && "done")}><ShieldCheck size={16} /> Anti titip absen</span>
+              <span className={clsx(gpsReady && "done")}><LocateFixed size={16} /> GPS siap</span>
             </div>
-            <div className="fieldFaceChecks">
-              <span><ScanFace size={16} /> Wajah terdeteksi</span>
-              <span><ShieldCheck size={16} /> Anti titip absen</span>
-              <span><LocateFixed size={16} /> Terhubung GPS</span>
-            </div>
+
             {faceCameraError && (
               <div className="dialogInlineAlert fieldAttendanceAlert">
                 <AlertTriangle size={17} />

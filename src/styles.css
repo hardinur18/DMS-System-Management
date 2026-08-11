@@ -3065,10 +3065,25 @@ button {
 
 .fieldFaceScreen {
   display: grid;
-  gap: 16px;
+  gap: 14px;
   overflow-y: auto;
-  padding: 22px 24px 24px;
+  padding: 20px 24px 24px;
   -webkit-overflow-scrolling: touch;
+}
+
+.fieldFaceCamera {
+  width: min(330px, 76vw);
+  margin: 0 auto 2px;
+}
+
+.fieldFaceStatusPanel {
+  width: min(520px, 100%);
+  justify-self: center;
+}
+
+.fieldFaceChecklist {
+  width: min(520px, 100%);
+  justify-self: center;
 }
 
 .fieldFacePreview {

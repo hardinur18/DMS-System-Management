@@ -1,0 +1,25 @@
+{
+  "name": "DMS Management",
+  "short_name": "DMS Lapangan",
+  "description": "DMS Management dan app lapangan untuk absensi GPS + face verification.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#eef7fb",
+  "theme_color": "#07184a",
+  "icons": [
+    {
+      "src": "/icons/dms-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/dms-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
