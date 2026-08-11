@@ -9630,6 +9630,7 @@ function FieldAttendanceDialog({
   const [faceSnapshotBase64, setFaceSnapshotBase64] = useState("")
   const [faceScreenOpen, setFaceScreenOpen] = useState(false)
   const [faceCapturing, setFaceCapturing] = useState(false)
+  const [faceCameraReady, setFaceCameraReady] = useState(false)
   const [faceCameraError, setFaceCameraError] = useState("")
   const [faceScanProgress, setFaceScanProgress] = useState(0)
   const [faceScanMessage, setFaceScanMessage] = useState("Posisikan wajah di tengah frame.")
@@ -9654,6 +9655,7 @@ function FieldAttendanceDialog({
     setFaceSnapshotBase64("")
     setFaceScreenOpen(false)
     setFaceCapturing(false)
+    setFaceCameraReady(false)
     setFaceCameraError("")
     setFaceScanProgress(0)
     setFaceScanMessage("Posisikan wajah di tengah frame.")
@@ -9672,16 +9674,19 @@ function FieldAttendanceDialog({
       }
       stopMediaStream(faceStreamRef.current)
       faceStreamRef.current = null
+      setFaceCameraReady(false)
       return undefined
     }
 
     let cancelled = false
+    let warmupTimer: number | null = null
     setFaceCameraError("")
     setFaceCapturing(false)
-    setFaceScanProgress(0)
-    setFaceScanMessage("Posisikan wajah di tengah frame.")
+    setFaceCameraReady(false)
+    setFaceScanProgress(6)
+    setFaceScanMessage("Menyiapkan kamera...")
     setFaceDetectorReady(true)
-    faceScanProgressRef.current = 0
+    faceScanProgressRef.current = 6
     faceCapturedRef.current = false
     void startUserCamera(faceVideoRef.current)
       .then((stream) => {
@@ -9690,24 +9695,64 @@ function FieldAttendanceDialog({
           return
         }
         faceStreamRef.current = stream
+        setFaceCameraReady(true)
+        faceScanProgressRef.current = Math.max(faceScanProgressRef.current, 10)
+        setFaceScanProgress(faceScanProgressRef.current)
+        setFaceScanMessage("Kamera aktif. Menyiapkan face engine...")
+
+        warmupTimer = window.setInterval(() => {
+          if (cancelled || faceCapturedRef.current) return
+          const nextProgress = Math.min(28, faceScanProgressRef.current + 2)
+          if (nextProgress !== faceScanProgressRef.current) {
+            faceScanProgressRef.current = nextProgress
+            setFaceScanProgress(nextProgress)
+          }
+        }, 420)
+
+        void loadFaceEmbeddingEngine()
+          .then(() => {
+            if (cancelled || faceCapturedRef.current) return
+            if (warmupTimer) {
+              window.clearInterval(warmupTimer)
+              warmupTimer = null
+            }
+            faceScanProgressRef.current = Math.max(faceScanProgressRef.current, 30)
+            setFaceScanProgress(faceScanProgressRef.current)
+            setFaceScanMessage("Face engine siap. Posisikan wajah di oval.")
+          })
+          .catch((error) => {
+            if (cancelled) return
+            if (warmupTimer) {
+              window.clearInterval(warmupTimer)
+              warmupTimer = null
+            }
+            setFaceDetectorReady(false)
+            setFaceScanMessage(getFriendlySupabaseError(error, "Face detector belum bisa dimuat di browser ini."))
+          })
       })
       .catch((error) => {
         setFaceCameraError(getFriendlySupabaseError(error, "Kamera belum bisa dibuka."))
+        setFaceCameraReady(false)
       })
 
     return () => {
       cancelled = true
+      if (warmupTimer) {
+        window.clearInterval(warmupTimer)
+        warmupTimer = null
+      }
       if (faceScanTimerRef.current) {
         window.clearTimeout(faceScanTimerRef.current)
         faceScanTimerRef.current = null
       }
       stopMediaStream(faceStreamRef.current)
       faceStreamRef.current = null
+      setFaceCameraReady(false)
     }
   }, [faceScreenOpen])
 
   useEffect(() => {
-    if (!faceScreenOpen || faceCameraError || !faceStreamRef.current || faceCapturedRef.current) return undefined
+    if (!faceScreenOpen || !faceCameraReady || faceCameraError || !faceStreamRef.current || faceCapturedRef.current) return undefined
 
     let cancelled = false
     let analyzing = false
@@ -9739,18 +9784,31 @@ function FieldAttendanceDialog({
     const scanTick = async () => {
       if (cancelled || analyzing || faceCapturedRef.current) return
       analyzing = true
+      const video = faceVideoRef.current
+      const previewReady = Boolean(video?.videoWidth && video.videoHeight && video.readyState >= 2)
+      const loadingNotice = window.setTimeout(() => {
+        if (cancelled || faceCapturedRef.current) return
+        const nextProgress = Math.max(faceScanProgressRef.current, previewReady ? 24 : 12)
+        faceScanProgressRef.current = nextProgress
+        setFaceScanProgress(nextProgress)
+        setFaceScanMessage(previewReady ? "Face engine sedang membaca wajah..." : "Menunggu preview kamera stabil...")
+      }, 480)
       const analysis = await analyzeAttendanceFaceFrame(faceVideoRef.current).catch((error) => ({
         supported: true,
         ready: false,
         score: 0,
         message: getFriendlySupabaseError(error, "Wajah belum bisa dianalisis."),
       }))
+      window.clearTimeout(loadingNotice)
       analyzing = false
       if (cancelled || faceCapturedRef.current) return
 
       setFaceDetectorReady(analysis.supported)
       setFaceScanMessage(analysis.message)
-      const nextProgress = Math.max(0, Math.min(100, faceScanProgressRef.current + (analysis.ready ? 8 : -7)))
+      const progressFloor = previewReady ? 18 : 6
+      const nextProgress = analysis.ready
+        ? Math.min(100, Math.max(faceScanProgressRef.current, 34) + 12)
+        : Math.max(progressFloor, faceScanProgressRef.current - 2)
       faceScanProgressRef.current = nextProgress
       setFaceScanProgress(nextProgress)
 
@@ -9771,7 +9829,7 @@ function FieldAttendanceDialog({
         faceScanTimerRef.current = null
       }
     }
-  }, [faceCameraError, faceScreenOpen])
+  }, [faceCameraError, faceCameraReady, faceScreenOpen])
 
   if (!open) return null
 
