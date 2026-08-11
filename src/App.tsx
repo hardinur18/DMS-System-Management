@@ -2356,7 +2356,6 @@ function AttendanceTimelineCell({ row }: { row: AttendanceMonitorRow }) {
       value: row.checkInAt ? formatAttendanceTime(row.checkInAt) : "Belum",
       meta: row.checkInStatus === "missing" ? formatEmployeeDate(row.attendanceDate) : row.checkInStatus,
       tone: checkInTone,
-      icon: LogIn,
     },
     {
       key: "check-out",
@@ -2364,7 +2363,6 @@ function AttendanceTimelineCell({ row }: { row: AttendanceMonitorRow }) {
       value: row.checkOutAt ? formatAttendanceTime(row.checkOutAt) : "Belum",
       meta: row.checkOutStatus === "missing" ? "Menunggu" : row.checkOutStatus,
       tone: checkOutTone,
-      icon: LogOut,
     },
     {
       key: "duration",
@@ -2372,28 +2370,21 @@ function AttendanceTimelineCell({ row }: { row: AttendanceMonitorRow }) {
       value: row.workDurationLabel,
       meta: row.checkOutAt ? "Final" : row.checkInAt ? "Sementara" : "Belum mulai",
       tone: durationTone,
-      icon: CalendarCheck2,
     },
   ] as const
 
   return (
     <div className="attendanceTimelineCell">
-      {events.map((event) => {
-        const Icon = event.icon
-
-        return (
-          <span className={clsx("attendanceTimelineStep", `tone-${event.tone}`)} key={event.key}>
-            <span className="attendanceTimelineIcon">
-              <Icon size={14} />
-            </span>
-            <span className="attendanceTimelineCopy">
-              <span>{event.label}</span>
-              <strong>{event.value}</strong>
-              <small>{event.meta}</small>
-            </span>
+      {events.map((event) => (
+        <span className={clsx("attendanceTimelineStep", `tone-${event.tone}`)} key={event.key}>
+          <span className="attendanceTimelineDot" />
+          <span className="attendanceTimelineCopy">
+            <span>{event.label}</span>
+            <strong>{event.value}</strong>
+            <small>{event.meta}</small>
           </span>
-        )
-      })}
+        </span>
+      ))}
     </div>
   )
 }
@@ -2406,21 +2397,21 @@ function AttendanceValidationCell({ row }: { row: AttendanceMonitorRow }) {
 
   return (
     <div className="attendanceValidationCell">
-      <span className={clsx("attendanceValidationPill", `tone-${gpsTone}`)}>
+      <span className="attendanceValidationLine location">
         <LocateFixed size={15} />
         <span>
           <strong>{row.workLocationName || "-"}</strong>
           <small>{row.distanceM === null ? "Belum ada GPS" : `${row.distanceM}m dari radius ${row.radiusM || "-"}m`}</small>
         </span>
       </span>
-      <span className={clsx("attendanceValidationPill", `tone-${gpsTone}`)}>
-        <AlertCircle size={15} />
+      <span className={clsx("attendanceValidationLine", `tone-${gpsTone}`)}>
+        <span className="attendanceValidationDot" />
         <span>
           <strong>{gpsLabel}</strong>
           <small>GPS radius</small>
         </span>
       </span>
-      <span className={clsx("attendanceValidationPill", `tone-${faceTone}`)}>
+      <span className={clsx("attendanceValidationLine", `tone-${faceTone}`)}>
         <ScanFace size={15} />
         <span>
           <strong>{faceLabel}</strong>
