@@ -3790,7 +3790,6 @@ async function loadOperationsFoundationData(): Promise<OperationsFoundationData>
 
   const employeesById = new Map(((employeeResult.data || []) as Array<Record<string, unknown>>).map((employee) => [String(employee.id), employee]))
   const reviewRows: AttendanceReviewRow[] = logs
-    .filter((log) => log.event_type === "check_in")
     .filter((log) => log.status === "review")
     .slice(0, 50)
     .map((log) => {
@@ -4182,7 +4181,7 @@ async function submitFieldAttendance(payload: FieldAttendanceSubmitPayload): Pro
     body: payload,
   })
 
-  if (error) throw error
+  if (error) throw new Error(await getFunctionInvokeError(error, "Absensi lapangan belum bisa disimpan."))
   if (data?.error) throw new Error(String(data.error))
 
   return data as FieldAttendanceResult
@@ -10734,7 +10733,7 @@ function EmployeePwaApp({ profile, onLogout }: { profile: AppAccessProfile; onLo
   const faceReady = data?.faceProfile.status === "approved" || data?.faceProfile.status === "disabled" || data?.faceProfile.verificationRequired === false
   const locationReady = Boolean(employee?.workLocationLatitude && employee?.workLocationLongitude && employee?.radiusM)
   const canCheckIn = Boolean(faceReady && locationReady && !todayCheckIn)
-  const canCheckOut = Boolean(faceReady && locationReady && todayCheckIn?.status === "valid" && todayCheckIn.workdayCounted && !todayCheckOut)
+  const canCheckOut = Boolean(faceReady && locationReady && todayCheckIn && todayCheckIn.status !== "rejected" && !todayCheckOut)
   const cycle = data?.payrollCycle
   const cyclePercent = cycle ? Math.min(100, Math.round((cycle.workDaysCount / Math.max(1, cycle.targetWorkDays)) * 100)) : 0
   const mapUrl = employee?.workLocationLatitude && employee?.workLocationLongitude
@@ -10782,7 +10781,7 @@ function EmployeePwaApp({ profile, onLogout }: { profile: AppAccessProfile; onLo
     }
 
     if (!todayCheckIn) return "Check-in dulu sebelum absen pulang."
-    if (todayCheckIn.status !== "valid" || !todayCheckIn.workdayCounted) return "Check-out menunggu check-in valid atau di-approve HR."
+    if (todayCheckIn.status === "rejected") return "Check-in hari ini ditolak HR. Hubungi HR sebelum absen pulang."
     if (todayCheckOut) return "Check-out hari ini sudah tercatat."
     return ""
   }
@@ -10888,7 +10887,7 @@ function EmployeePwaApp({ profile, onLogout }: { profile: AppAccessProfile; onLo
                       : todayCheckIn
                         ? todayCheckIn.status === "valid"
                           ? `${formatAttendanceTime(todayCheckIn.eventAt)} · ${todayCheckIn.distanceM ?? "-"}m dari lokasi. Check-out sudah bisa dilakukan.`
-                          : "Check-in masih review HR. Check-out aktif setelah check-in valid."
+                          : "Check-in tersimpan dan menunggu review HR. Kamu tetap bisa absen pulang."
                         : "GPS radius dan face verification akan dicek otomatis."}
                 </p>
               </div>
@@ -10906,9 +10905,9 @@ function EmployeePwaApp({ profile, onLogout }: { profile: AppAccessProfile; onLo
                 <LocateFixed size={15} />
                 {locationReady ? "Lokasi kerja siap" : "Lokasi/radius belum lengkap"}
               </span>
-              <span className={clsx(todayCheckOut ? "ready" : todayCheckIn ? todayCheckIn.status === "valid" ? "ready" : "waiting" : "ready")}>
+              <span className={clsx(todayCheckOut ? "ready" : todayCheckIn ? todayCheckIn.status === "rejected" ? "blocked" : "waiting" : "ready")}>
                 <CalendarCheck2 size={15} />
-                {todayCheckOut ? "Hari ini selesai" : todayCheckIn ? todayCheckIn.status === "valid" ? "Siap check-out" : "Menunggu review HR" : "Belum check-in"}
+                {todayCheckOut ? "Hari ini selesai" : todayCheckIn ? todayCheckIn.status === "rejected" ? "Check-in ditolak" : "Siap check-out" : "Belum check-in"}
               </span>
             </div>
 
@@ -10933,7 +10932,7 @@ function EmployeePwaApp({ profile, onLogout }: { profile: AppAccessProfile; onLo
                   </button>
                   <button className={clsx("secondaryButton", !canCheckOut && "isDisabled")} type="button" onClick={() => openAttendance("check_out")} disabled={attendanceSaving} aria-disabled={!canCheckOut}>
                     <CalendarCheck2 size={18} />
-                    {todayCheckOut ? "Pulang Tercatat" : !todayCheckIn ? "Check-in Dulu" : todayCheckIn.status !== "valid" ? "Menunggu Review HR" : !locationReady ? "Lokasi Belum Siap" : "Absen Pulang"}
+                    {todayCheckOut ? "Pulang Tercatat" : !todayCheckIn ? "Check-in Dulu" : todayCheckIn.status === "rejected" ? "Check-in Ditolak" : !locationReady ? "Lokasi Belum Siap" : "Absen Pulang"}
                   </button>
                 </>
               )}

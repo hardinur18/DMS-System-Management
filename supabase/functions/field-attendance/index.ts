@@ -290,8 +290,8 @@ Deno.serve(async (request) => {
         return jsonResponse({ error: "Check-out belum bisa dilakukan karena check-in hari ini belum ada." }, 409)
       }
 
-      if (todayCheckIn.status !== "valid" || todayCheckIn.workday_counted !== true) {
-        return jsonResponse({ error: "Check-out menunggu check-in valid/approved HR dulu." }, 409)
+      if (todayCheckIn.status === "rejected") {
+        return jsonResponse({ error: "Check-out tidak bisa dilakukan karena check-in hari ini ditolak HR." }, 409)
       }
 
       if (todayCheckOut) {
@@ -345,6 +345,19 @@ Deno.serve(async (request) => {
       .single()
 
     if (logError) throw logError
+
+    if (eventType === "check_out" && todayCheckIn) {
+      const shouldCountCheckIn = todayCheckIn.status === "valid" && status === "valid"
+      const { error: checkInUpdateError } = await adminClient
+        .from("attendance_logs")
+        .update({
+          workday_counted: shouldCountCheckIn,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", todayCheckIn.id)
+
+      if (checkInUpdateError) throw checkInUpdateError
+    }
 
     const { error: refreshError } = await adminClient.rpc("refresh_employee_payroll_cycles", { target_employee_id: employee.id })
     if (refreshError) throw refreshError

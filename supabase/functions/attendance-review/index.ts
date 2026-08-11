@@ -152,7 +152,20 @@ Deno.serve(async (request) => {
     if (attendanceError) throw attendanceError
     if (!attendance) return jsonResponse({ error: "Data absensi tidak ditemukan." }, 404)
 
+    const { data: dayLogs, error: dayLogsError } = await adminClient
+      .from("attendance_logs")
+      .select("id, event_type, status, workday_counted")
+      .eq("employee_id", attendance.employee_id)
+      .eq("attendance_date", attendance.attendance_date)
+
+    if (dayLogsError) throw dayLogsError
+
     const approved = action === "approve"
+    const pairedCheckOut = dayLogs?.find((log) => log.event_type === "check_out" && log.id !== attendance.id)
+    const nextWorkdayCounted = approved
+      && attendance.event_type === "check_in"
+      && (!pairedCheckOut || pairedCheckOut.status === "valid")
+
     const reviewNote = payload.notes?.trim()
     const nextNotes = [
       attendance.notes,
@@ -163,7 +176,7 @@ Deno.serve(async (request) => {
       .from("attendance_logs")
       .update({
         status: approved ? "valid" : "rejected",
-        workday_counted: approved && attendance.event_type === "check_in",
+        workday_counted: nextWorkdayCounted,
         notes: nextNotes,
         updated_at: new Date().toISOString(),
       })
@@ -172,6 +185,21 @@ Deno.serve(async (request) => {
       .single()
 
     if (updateError) throw updateError
+
+    if (attendance.event_type === "check_out") {
+      const pairedCheckIn = dayLogs?.find((log) => log.event_type === "check_in")
+      if (pairedCheckIn) {
+        const { error: checkInUpdateError } = await adminClient
+          .from("attendance_logs")
+          .update({
+            workday_counted: approved && pairedCheckIn.status === "valid",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", pairedCheckIn.id)
+
+        if (checkInUpdateError) throw checkInUpdateError
+      }
+    }
 
     const { error: refreshError } = await adminClient.rpc("refresh_employee_payroll_cycles", { target_employee_id: attendance.employee_id })
     if (refreshError) throw refreshError
@@ -188,7 +216,7 @@ Deno.serve(async (request) => {
         event_type: attendance.event_type,
         previous_status: attendance.status,
         next_status: approved ? "valid" : "rejected",
-        workday_counted: approved && attendance.event_type === "check_in",
+        workday_counted: attendance.event_type === "check_in" ? nextWorkdayCounted : undefined,
         source: "edge-function",
       },
     })
