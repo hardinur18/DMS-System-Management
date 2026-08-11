@@ -71,8 +71,14 @@ export function RowActionButton({
   label?: string
   onClick?: () => void
 }) {
+  const handleClick = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    onClick?.()
+  }
+
   return (
-    <button className="rowActionButton" type="button" aria-label={label} onClick={onClick}>
+    <button className="rowActionButton" type="button" aria-label={label} data-row-action="true" onClick={handleClick}>
       <MoreVertical size={16} />
     </button>
   )
@@ -88,6 +94,16 @@ export function RowActionMenu({
   const [open, setOpen] = useState(false)
   const [position, setPosition] = useState<CSSProperties>({})
   const buttonRef = useRef<HTMLButtonElement | null>(null)
+
+  const stopRowEvent = (event: ReactMouseEvent<HTMLElement>) => {
+    event.stopPropagation()
+  }
+
+  const toggleMenu = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    setOpen((value) => !value)
+  }
 
   const syncPosition = () => {
     const button = buttonRef.current
@@ -135,14 +151,20 @@ export function RowActionMenu({
   }, [open])
 
   return (
-    <span className="rowActionMenu">
-      <button ref={buttonRef} className="rowActionButton" type="button" aria-label={label} aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+    <span className="rowActionMenu" data-row-action="true" onClick={stopRowEvent}>
+      <button ref={buttonRef} className="rowActionButton" type="button" aria-label={label} aria-expanded={open} data-row-action="true" onClick={toggleMenu}>
         <MoreVertical size={16} />
       </button>
       {open && createPortal(
         <>
-          <span className="rowActionMenuScrim" onClick={() => setOpen(false)} />
-          <span className="rowActionMenuPanel floating" style={position} data-row-action="true" onClick={() => setOpen(false)}>
+          <span className="rowActionMenuScrim" data-row-action="true" onClick={(event) => {
+            event.stopPropagation()
+            setOpen(false)
+          }} />
+          <span className="rowActionMenuPanel floating" style={position} data-row-action="true" onClick={(event) => {
+            event.stopPropagation()
+            setOpen(false)
+          }}>
             {children}
           </span>
         </>,
@@ -163,8 +185,13 @@ export function RowActionMenuItem({
   disabled?: boolean
   onClick?: () => void
 }) {
+  const handleClick = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    onClick?.()
+  }
+
   return (
-    <button className={danger ? "danger" : undefined} type="button" disabled={disabled} onClick={onClick}>
+    <button className={danger ? "danger" : undefined} type="button" disabled={disabled} data-row-action="true" onClick={handleClick}>
       {children}
     </button>
   )
