@@ -42,6 +42,15 @@ function mapAttendanceLog(row: Record<string, unknown>) {
   }
 }
 
+function getJakartaDateKey(date = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date)
+}
+
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders })
   if (request.method !== "POST") return jsonResponse({ error: "Method not allowed" }, 405)
@@ -141,7 +150,7 @@ Deno.serve(async (request) => {
 
     const location = (locationResult.data || {}) as Record<string, unknown>
     const logs = ((logsResult.data || []) as Array<Record<string, unknown>>).map(mapAttendanceLog)
-    const todayKey = new Date().toISOString().slice(0, 10)
+    const todayKey = getJakartaDateKey()
     const payroll = payrollResult.data as Record<string, unknown> | null
     const face = faceResult.data as Record<string, unknown> | null
 

@@ -9033,6 +9033,11 @@ function AttendanceReviewDialog({
   const hasGps = Boolean(row.latitude && row.longitude)
   const insideRadius = row.gpsStatus === "valid"
   const hasFaceSnapshot = Boolean(row.faceSnapshotUrl)
+  const eventLabel = row.eventType === "check_out" ? "Absen Pulang" : "Absen Masuk"
+  const eventTone = row.eventType === "check_out" ? "checkout" : "checkin"
+  const eventDescription = row.eventType === "check_out"
+    ? "Review ini hanya untuk log pulang. Check-in tetap menjadi event terpisah."
+    : "Review ini hanya untuk log masuk. Check-out tetap menjadi event terpisah."
   const distanceRatio = row.distanceM !== null && row.radiusM ? Math.min(1.45, row.distanceM / row.radiusM) : 0
   const userOffset = hasGps ? Math.min(32, Math.max(7, distanceRatio * 24)) : 0
   const mapStyle = {
@@ -9057,8 +9062,12 @@ function AttendanceReviewDialog({
           <div>
             <span>Attendance Review</span>
             <h2 id="attendance-review-title">{row.fullName}</h2>
-            <p id="attendance-review-description">{row.employeeCode} · {row.divisionName} · {formatEmployeeDate(row.attendanceDate)} {formatAttendanceTime(row.eventAt)}</p>
+            <p id="attendance-review-description">{row.employeeCode} · {row.divisionName} · {eventLabel} · {formatEmployeeDate(row.attendanceDate)} {formatAttendanceTime(row.eventAt)}</p>
           </div>
+          <span className={clsx("attendanceReviewEventBadge", eventTone)}>
+            {row.eventType === "check_out" ? <LogOut size={15} /> : <LogIn size={15} />}
+            {eventLabel}
+          </span>
           <button className="iconButton dialogClose" type="button" aria-label="Tutup detail absensi" onClick={onClose} disabled={saving}>
             <X size={18} />
           </button>
@@ -9099,6 +9108,11 @@ function AttendanceReviewDialog({
 
           <div className="attendanceReviewSummary">
             <div>
+              <span>Jenis Review</span>
+              <strong>{eventLabel}</strong>
+              <small>{eventDescription}</small>
+            </div>
+            <div>
               <span>Issue</span>
               <strong>{row.issueLabel}</strong>
               <small>{row.workdayCounted ? "Sudah masuk hitungan payroll" : "Belum dihitung payroll"}</small>
@@ -9128,7 +9142,7 @@ function AttendanceReviewDialog({
           </button>
           <button className="primaryButton" type="button" onClick={() => void onSubmit("approve", notes)} disabled={saving}>
             <FileCheck2 size={16} />
-            {saving ? "Memproses..." : "Approve Absensi"}
+            {saving ? "Memproses..." : `Approve ${eventLabel}`}
           </button>
         </div>
       </section>
