@@ -230,14 +230,16 @@ Deno.serve(async (request) => {
     if (verificationRequired && referenceEmbeddings.length === 0) {
       return jsonResponse({ error: "Profil wajah belum punya embedding. Daftarkan ulang wajah sebelum absensi." }, 422)
     }
-    if (verificationRequired && faceEmbedding.length !== 128) {
-      return jsonResponse({ error: "Embedding wajah absensi belum valid. Scan wajah ulang." }, 422)
+    if (verificationRequired && faceEmbedding.length !== 128 && !faceSnapshotBase64) {
+      return jsonResponse({ error: "Bukti wajah absensi belum valid. Scan wajah ulang." }, 422)
     }
 
     const faceStatus = !verificationRequired
       ? "not_required"
       : effectiveFaceScore === null
         ? "review"
+        : faceEmbedding.length !== 128
+          ? "review"
         : effectiveFaceScore >= faceThreshold
           ? "verified"
           : effectiveFaceScore >= Math.max(0, faceThreshold - 15)

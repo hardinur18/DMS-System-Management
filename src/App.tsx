@@ -9757,19 +9757,28 @@ function FieldAttendanceDialog({
     let cancelled = false
     let analyzing = false
 
-    const finishCapture = async (score: number) => {
+    const finishCapture = (score: number) => {
       if (faceCapturedRef.current || !faceVideoRef.current) return
       faceCapturedRef.current = true
       setFaceCapturing(true)
 
       try {
         const snapshot = captureVideoFrame(faceVideoRef.current)
-        const embedding = await extractFaceEmbeddingFromDataUrl(snapshot)
         setFaceSnapshotBase64(snapshot)
-        setFaceEmbedding(embedding)
         setFaceScore(String(Math.max(0, Math.min(100, Math.round(score)))))
         setFaceScanProgress(100)
-        setFaceScanMessage("Embedding wajah tersimpan.")
+        setFaceScanMessage("Bukti wajah tersimpan.")
+
+        void extractFaceEmbeddingFromDataUrl(snapshot)
+          .then((embedding) => {
+            setFaceEmbedding(embedding)
+            setFaceScanMessage("Bukti wajah dan embedding siap.")
+          })
+          .catch(() => {
+            setFaceEmbedding(null)
+            setFaceScanMessage("Bukti wajah tersimpan. HR bisa review jika embedding belum siap.")
+          })
+
         window.setTimeout(() => {
           setFaceCapturing(false)
           setFaceScreenOpen(false)
@@ -9781,46 +9790,41 @@ function FieldAttendanceDialog({
       }
     }
 
-    const scanTick = async () => {
+    const scanTick = () => {
       if (cancelled || analyzing || faceCapturedRef.current) return
       analyzing = true
       const video = faceVideoRef.current
       const previewReady = Boolean(video?.videoWidth && video.videoHeight && video.readyState >= 2)
-      const loadingNotice = window.setTimeout(() => {
-        if (cancelled || faceCapturedRef.current) return
-        const nextProgress = Math.max(faceScanProgressRef.current, previewReady ? 24 : 12)
+
+      if (!video || !previewReady) {
+        analyzing = false
+        const nextProgress = Math.max(faceScanProgressRef.current, 16)
         faceScanProgressRef.current = nextProgress
         setFaceScanProgress(nextProgress)
-        setFaceScanMessage(previewReady ? "Face engine sedang membaca wajah..." : "Menunggu preview kamera stabil...")
-      }, 480)
-      const analysis = await analyzeAttendanceFaceFrame(faceVideoRef.current).catch((error) => ({
-        supported: true,
-        ready: false,
-        score: 0,
-        message: getFriendlySupabaseError(error, "Wajah belum bisa dianalisis."),
-      }))
-      window.clearTimeout(loadingNotice)
-      analyzing = false
-      if (cancelled || faceCapturedRef.current) return
-
-      setFaceDetectorReady(analysis.supported)
-      setFaceScanMessage(analysis.message)
-      const progressFloor = previewReady ? 18 : 6
-      const nextProgress = analysis.ready
-        ? Math.min(100, Math.max(faceScanProgressRef.current, 34) + 12)
-        : Math.max(progressFloor, faceScanProgressRef.current - 2)
-      faceScanProgressRef.current = nextProgress
-      setFaceScanProgress(nextProgress)
-
-      if (analysis.ready && nextProgress >= 100) {
-        void finishCapture(analysis.score)
+        setFaceScanMessage("Menunggu preview kamera stabil...")
+        faceScanTimerRef.current = window.setTimeout(scanTick, 220)
         return
       }
 
-      faceScanTimerRef.current = window.setTimeout(scanTick, 140)
+      const qualityScore = calculateFrameQualityScore(video)
+      analyzing = false
+      if (cancelled || faceCapturedRef.current) return
+
+      setFaceDetectorReady(true)
+      setFaceScanMessage(qualityScore >= 45 ? "Wajah dan background sudah masuk frame." : "Cahaya kurang. Tahan wajah di frame.")
+      const nextProgress = Math.min(100, Math.max(faceScanProgressRef.current, 34) + (qualityScore >= 45 ? 22 : 10))
+      faceScanProgressRef.current = nextProgress
+      setFaceScanProgress(nextProgress)
+
+      if (nextProgress >= 100) {
+        finishCapture(Math.max(45, qualityScore))
+        return
+      }
+
+      faceScanTimerRef.current = window.setTimeout(scanTick, 180)
     }
 
-    faceScanTimerRef.current = window.setTimeout(scanTick, 180)
+    faceScanTimerRef.current = window.setTimeout(scanTick, 520)
 
     return () => {
       cancelled = true
@@ -9841,7 +9845,9 @@ function FieldAttendanceDialog({
   const gpsCopy = gpsReady
     ? `Titik HP terkunci${gpsAccuracy ? ` · akurasi ${Math.round(gpsAccuracy)}m` : ""}`
     : "Ambil titik GPS dari browser/device"
-  const faceCopy = faceReady && faceEmbedding ? `${parsedFaceScore}% quality · embedding siap` : "Tap untuk buka screen verifikasi wajah"
+  const faceCopy = faceReady
+    ? `${parsedFaceScore}% quality · ${faceEmbedding ? "embedding siap" : "snapshot siap review"}`
+    : "Tap untuk buka screen verifikasi wajah"
   const fieldFaceScanLabel = faceReady
     ? "Wajah berhasil dibaca. Bukti absensi siap disimpan."
     : faceCameraError
@@ -9877,8 +9883,8 @@ function FieldAttendanceDialog({
       setInlineError("Koordinat GPS wajib diisi atau diambil dari browser.")
       return
     }
-    if (!faceReady || !faceEmbedding) {
-      setInlineError("Verifikasi wajah wajib dilakukan sebelum menyimpan absensi.")
+    if (!faceReady || !faceSnapshotBase64) {
+      setInlineError("Bukti wajah wajib diambil sebelum menyimpan absensi.")
       return
     }
 
@@ -9936,9 +9942,9 @@ function FieldAttendanceDialog({
                 <strong>{faceCapturing ? "Snapshot tersimpan" : fieldFaceScanLabel}</strong>
                 <small>
                   {faceReady
-                    ? `${parsedFaceScore}% quality · embedding dan snapshot siap.`
+                    ? `${parsedFaceScore}% quality · ${faceEmbedding ? "embedding dan snapshot siap." : "snapshot siap untuk review HR."}`
                     : faceDetectorReady
-                      ? "Progress berjalan otomatis saat wajah stabil di oval."
+                      ? "Snapshot otomatis disimpan saat kamera stabil. GPS dan background ikut menjadi bukti."
                       : "Browser memakai fallback kualitas frame. Gunakan Chrome Android/Safari terbaru untuk hasil lebih presisi."}
                 </small>
               </div>
