@@ -2327,22 +2327,35 @@ function EmployeeIdentityCell({
 }
 
 function AttendanceTimelineCell({ row }: { row: AttendanceMonitorRow }) {
+  const checkInTone = row.checkInStatus === "valid" ? "valid" : row.checkInStatus === "missing" ? "missing" : row.checkInStatus === "rejected" ? "failed" : "pending"
+  const checkOutTone = row.checkOutAt ? row.checkOutStatus === "valid" ? "valid" : row.checkOutStatus === "rejected" ? "failed" : "pending" : "missing"
+  const durationTone = row.checkOutAt ? "valid" : row.checkInAt ? "pending" : "missing"
+
   return (
     <div className="attendanceTimelineCell">
-      <div>
-        <span>Masuk</span>
-        <strong>{row.checkInAt ? formatAttendanceTime(row.checkInAt) : "Belum masuk"}</strong>
-        <small>{row.checkInStatus === "missing" ? formatEmployeeDate(row.attendanceDate) : row.checkInStatus}</small>
+      <div className={clsx("attendanceTimelineStep", `tone-${checkInTone}`)}>
+        <span className="attendanceTimelineDot" />
+        <div>
+          <span>Masuk</span>
+          <strong>{row.checkInAt ? formatAttendanceTime(row.checkInAt) : "Belum masuk"}</strong>
+          <small>{row.checkInStatus === "missing" ? formatEmployeeDate(row.attendanceDate) : row.checkInStatus}</small>
+        </div>
       </div>
-      <div>
-        <span>Pulang</span>
-        <strong>{row.checkOutAt ? formatAttendanceTime(row.checkOutAt) : "Belum pulang"}</strong>
-        <small>{row.checkOutStatus === "missing" ? "Menunggu masuk valid" : row.checkOutStatus}</small>
+      <div className={clsx("attendanceTimelineStep", `tone-${checkOutTone}`)}>
+        <span className="attendanceTimelineDot" />
+        <div>
+          <span>Pulang</span>
+          <strong>{row.checkOutAt ? formatAttendanceTime(row.checkOutAt) : "Belum pulang"}</strong>
+          <small>{row.checkOutStatus === "missing" ? "Menunggu masuk valid" : row.checkOutStatus}</small>
+        </div>
       </div>
-      <div>
-        <span>Jam kerja</span>
-        <strong>{row.workDurationLabel}</strong>
-        <small>{row.checkOutAt ? "Final" : row.checkInAt ? "Sementara" : "Belum mulai"}</small>
+      <div className={clsx("attendanceTimelineStep", `tone-${durationTone}`)}>
+        <span className="attendanceTimelineDot" />
+        <div>
+          <span>Jam kerja</span>
+          <strong>{row.workDurationLabel}</strong>
+          <small>{row.checkOutAt ? "Final" : row.checkInAt ? "Sementara" : "Belum mulai"}</small>
+        </div>
       </div>
     </div>
   )

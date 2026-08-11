@@ -5130,12 +5130,75 @@ button {
   min-width: 0;
 }
 
-.attendanceTimelineCell > div {
+.attendanceTimelineStep {
+  position: relative;
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  gap: 8px;
+  align-items: flex-start;
   min-width: 0;
   padding: 9px 10px;
   border: 1px solid rgba(15, 23, 42, 0.06);
   border-radius: 14px;
   background: rgba(248, 251, 255, 0.86);
+}
+
+.attendanceTimelineStep::before {
+  position: absolute;
+  top: 16px;
+  left: 15px;
+  width: 1px;
+  height: calc(100% - 26px);
+  border-radius: 999px;
+  background: rgba(115, 129, 151, 0.2);
+  content: "";
+}
+
+.attendanceTimelineDot {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 10px;
+  height: 10px;
+  margin-top: 4px;
+  border: 2px solid #ffffff;
+  border-radius: 999px;
+  background: #94a3b8;
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.16);
+}
+
+.attendanceTimelineStep.tone-valid {
+  border-color: rgba(31, 196, 106, 0.18);
+  background: linear-gradient(135deg, rgba(236, 253, 244, 0.92), rgba(255, 255, 255, 0.94));
+}
+
+.attendanceTimelineStep.tone-valid .attendanceTimelineDot {
+  background: #1fc46a;
+  box-shadow: 0 0 0 3px rgba(31, 196, 106, 0.18);
+}
+
+.attendanceTimelineStep.tone-pending {
+  border-color: rgba(255, 184, 63, 0.24);
+  background: linear-gradient(135deg, rgba(255, 248, 232, 0.94), rgba(255, 255, 255, 0.94));
+}
+
+.attendanceTimelineStep.tone-pending .attendanceTimelineDot {
+  background: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.18);
+}
+
+.attendanceTimelineStep.tone-failed {
+  border-color: rgba(255, 59, 99, 0.18);
+  background: linear-gradient(135deg, rgba(255, 245, 247, 0.95), rgba(255, 255, 255, 0.94));
+}
+
+.attendanceTimelineStep.tone-failed .attendanceTimelineDot {
+  background: #ff3b63;
+  box-shadow: 0 0 0 3px rgba(255, 59, 99, 0.16);
+}
+
+.attendanceTimelineStep.tone-missing {
+  background: rgba(248, 251, 255, 0.72);
 }
 
 .attendanceTimelineCell span,
