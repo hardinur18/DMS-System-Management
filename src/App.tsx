@@ -123,6 +123,22 @@ interface AttendanceMonitorRow {
   workLocationName: string
   attendanceDate: string
   eventAt: string
+  checkInId: string
+  checkInAt: string
+  checkInStatus: AttendanceLogStatus | "missing"
+  checkInGpsStatus: AttendanceGpsStatus | "missing"
+  checkInFaceStatus: AttendanceFaceStatus
+  checkInFaceScore: number | null
+  checkInDistanceM: number | null
+  checkInNotes: string
+  checkOutId: string
+  checkOutAt: string
+  checkOutStatus: AttendanceLogStatus | "missing"
+  checkOutGpsStatus: AttendanceGpsStatus | "missing"
+  checkOutFaceStatus: AttendanceFaceStatus
+  checkOutFaceScore: number | null
+  checkOutDistanceM: number | null
+  checkOutNotes: string
   attendanceStatus: AttendanceStatus
   logStatus: AttendanceLogStatus | "missing"
   gpsStatus: AttendanceGpsStatus | "missing"
@@ -3567,11 +3583,15 @@ async function loadOperationsFoundationData(): Promise<OperationsFoundationData>
     if (employeeId && !payrollByEmployee.has(employeeId)) payrollByEmployee.set(employeeId, row)
   })
 
-  const todayLogsByEmployee = new Map<string, Record<string, unknown>>()
+  const todayLogsByEmployee = new Map<string, { checkIn?: Record<string, unknown>; checkOut?: Record<string, unknown> }>()
   logs.forEach((row) => {
     const employeeId = String(row.employee_id || "")
-    if (!employeeId || todayLogsByEmployee.has(employeeId)) return
-    if (row.attendance_date === today && row.event_type === "check_in") todayLogsByEmployee.set(employeeId, row)
+    if (!employeeId || row.attendance_date !== today) return
+
+    const entry = todayLogsByEmployee.get(employeeId) || {}
+    if (row.event_type === "check_in" && !entry.checkIn) entry.checkIn = row
+    if (row.event_type === "check_out" && !entry.checkOut) entry.checkOut = row
+    todayLogsByEmployee.set(employeeId, entry)
   })
 
   const rows: AttendanceMonitorRow[] = ((employeeResult.data || []) as Array<Record<string, unknown>>)
@@ -3579,7 +3599,9 @@ async function loadOperationsFoundationData(): Promise<OperationsFoundationData>
     .map((employee) => {
       const employeeId = String(employee.id)
       const location = locationMap.get(String(employee.work_location_id || ""))
-      const attendance = todayLogsByEmployee.get(employeeId)
+      const todayAttendance = todayLogsByEmployee.get(employeeId)
+      const attendance = todayAttendance?.checkIn
+      const checkOut = todayAttendance?.checkOut
       const payroll = payrollByEmployee.get(employeeId)
       const cycleDays = Number(payroll?.work_days_count ?? employee.payroll_cycle_days ?? 0)
       const targetDays = Number(payroll?.target_work_days ?? 26)
@@ -3600,6 +3622,22 @@ async function loadOperationsFoundationData(): Promise<OperationsFoundationData>
         workLocationName: String(location?.name || "Belum pilih lokasi"),
         attendanceDate: attendance ? String(attendance.attendance_date || "") : today,
         eventAt: attendance ? String(attendance.event_at || "") : "",
+        checkInId: attendance ? String(attendance.id || "") : "",
+        checkInAt: attendance ? String(attendance.event_at || "") : "",
+        checkInStatus: attendance ? (attendance.status === "valid" || attendance.status === "rejected" ? attendance.status : "review") : "missing",
+        checkInGpsStatus: attendance ? (attendance.gps_status === "valid" || attendance.gps_status === "out_of_radius" ? attendance.gps_status : "missing") : "missing",
+        checkInFaceStatus: attendance ? (attendance.face_status === "verified" || attendance.face_status === "failed" || attendance.face_status === "review" ? attendance.face_status : "not_required") : "not_required",
+        checkInFaceScore: attendance?.face_score === null || attendance?.face_score === undefined ? null : Number(attendance.face_score),
+        checkInDistanceM: attendance?.distance_m === null || attendance?.distance_m === undefined ? null : Number(attendance.distance_m),
+        checkInNotes: String(attendance?.notes || ""),
+        checkOutId: checkOut ? String(checkOut.id || "") : "",
+        checkOutAt: checkOut ? String(checkOut.event_at || "") : "",
+        checkOutStatus: checkOut ? (checkOut.status === "valid" || checkOut.status === "rejected" ? checkOut.status : "review") : "missing",
+        checkOutGpsStatus: checkOut ? (checkOut.gps_status === "valid" || checkOut.gps_status === "out_of_radius" ? checkOut.gps_status : "missing") : "missing",
+        checkOutFaceStatus: checkOut ? (checkOut.face_status === "verified" || checkOut.face_status === "failed" || checkOut.face_status === "review" ? checkOut.face_status : "not_required") : "not_required",
+        checkOutFaceScore: checkOut?.face_score === null || checkOut?.face_score === undefined ? null : Number(checkOut.face_score),
+        checkOutDistanceM: checkOut?.distance_m === null || checkOut?.distance_m === undefined ? null : Number(checkOut.distance_m),
+        checkOutNotes: String(checkOut?.notes || ""),
         attendanceStatus,
         logStatus: attendance ? (attendance.status === "valid" || attendance.status === "rejected" ? attendance.status : "review") : "missing",
         gpsStatus: attendance ? (attendance.gps_status === "valid" || attendance.gps_status === "out_of_radius" ? attendance.gps_status : "missing") : "missing",
@@ -8071,25 +8109,50 @@ function EmployeeTable({ rows, loading, errorMessage }: { rows: AttendanceMonito
 function AttendanceMonitorDetailDialog({ row, onClose }: { row: AttendanceMonitorRow | null; onClose: () => void }) {
   if (!row) return null
 
-  const gpsLabel = row.gpsStatus === "valid" ? "Dalam radius" : row.gpsStatus === "out_of_radius" ? "Luar radius" : "GPS belum masuk"
-  const faceLabel = row.faceScore === null ? "Belum ada skor wajah" : `${row.faceScore}% · ${row.faceStatus}`
-  const fields = [
-    { label: "Kode", value: row.employeeCode },
-    { label: "Divisi", value: row.divisionName || "-" },
-    { label: "Lokasi Kerja", value: row.workLocationName || "-" },
-    { label: "Absensi", value: statusLabel[row.attendanceStatus] },
-    { label: "Waktu", value: row.eventAt ? `${formatEmployeeDate(row.attendanceDate)} · ${formatAttendanceTime(row.eventAt)}` : "Belum absen" },
-    { label: "GPS Radius", value: row.distanceM === null ? gpsLabel : `${gpsLabel} · ${row.distanceM}m / ${row.radiusM || "-"}m` },
-    { label: "Face Verification", value: faceLabel },
-    { label: "Payroll Cycle", value: row.payrollCycleNumber ? `Cycle ${row.payrollCycleNumber} · ${row.cycleDays}/${row.targetDays} hari` : `${row.cycleDays}/${row.targetDays} hari` },
+  const logStatusLabel: Record<AttendanceLogStatus | "missing", string> = {
+    valid: "Valid",
+    review: "Menunggu review",
+    rejected: "Ditolak",
+    missing: "Belum ada data",
+  }
+  const gpsLogLabel: Record<AttendanceGpsStatus | "missing", string> = {
+    valid: "Dalam radius",
+    out_of_radius: "Di luar radius",
+    missing: "GPS belum masuk",
+  }
+  const faceLogLabel: Record<AttendanceFaceStatus, string> = {
+    verified: "Wajah cocok",
+    review: "Perlu review",
+    failed: "Wajah tidak cocok",
+    not_required: "Tidak wajib",
+  }
+  const eventRows = [
+    {
+      label: "Check-in",
+      time: row.checkInAt ? formatAttendanceTime(row.checkInAt) : "Belum masuk",
+      status: logStatusLabel[row.checkInStatus],
+      gps: row.checkInDistanceM === null ? gpsLogLabel[row.checkInGpsStatus] : `${gpsLogLabel[row.checkInGpsStatus]} · ${row.checkInDistanceM}m / ${row.radiusM || "-"}m`,
+      face: row.checkInFaceScore === null ? faceLogLabel[row.checkInFaceStatus] : `${row.checkInFaceScore}% · ${faceLogLabel[row.checkInFaceStatus]}`,
+      notes: row.checkInNotes,
+      tone: row.checkInStatus === "valid" ? "valid" : row.checkInStatus === "rejected" ? "failed" : row.checkInStatus === "missing" ? "missing" : "pending",
+    },
+    {
+      label: "Check-out",
+      time: row.checkOutAt ? formatAttendanceTime(row.checkOutAt) : "Belum pulang",
+      status: logStatusLabel[row.checkOutStatus],
+      gps: row.checkOutDistanceM === null ? gpsLogLabel[row.checkOutGpsStatus] : `${gpsLogLabel[row.checkOutGpsStatus]} · ${row.checkOutDistanceM}m / ${row.radiusM || "-"}m`,
+      face: row.checkOutFaceScore === null ? faceLogLabel[row.checkOutFaceStatus] : `${row.checkOutFaceScore}% · ${faceLogLabel[row.checkOutFaceStatus]}`,
+      notes: row.checkOutNotes,
+      tone: row.checkOutStatus === "valid" ? "valid" : row.checkOutStatus === "rejected" ? "failed" : row.checkOutStatus === "missing" ? "missing" : "pending",
+    },
+  ]
+  const summaryRows = [
+    { label: "Karyawan", value: `${row.employeeCode} · ${row.divisionName || "-"}` },
+    { label: "Lokasi kerja", value: `${row.workLocationName || "-"} · radius ${row.radiusM || "-"}m` },
+    { label: "Payroll cycle", value: row.payrollCycleNumber ? `Cycle ${row.payrollCycleNumber} · ${row.cycleDays}/${row.targetDays} hari` : `${row.cycleDays}/${row.targetDays} hari` },
     { label: "Periode", value: formatPayrollPeriod(row) },
-    { label: "Tipe Gaji", value: employeeSalaryTypeLabel[row.salaryType] },
-    { label: "Gaji Pokok", value: row.basePayrollAmount ? formatCurrency(row.basePayrollAmount) : "-" },
-    { label: "Lembur Approved", value: row.overtimeAmount ? formatCurrency(row.overtimeAmount) : "-" },
-    { label: "Total Payroll", value: row.payrollAmount ? formatCurrency(row.payrollAmount) : "-" },
-    { label: "Status Payroll", value: payrollLabel[row.payrollStatus] },
-    { label: "Dikunci", value: row.payrollLockedAt ? formatPayrollDate(row.payrollLockedAt) : "-" },
-    { label: "Dibayar", value: row.payrollPaidAt ? formatPayrollDate(row.payrollPaidAt) : "-" },
+    { label: "Tipe gaji", value: `${employeeSalaryTypeLabel[row.salaryType]} · ${row.basePayrollAmount ? formatCurrency(row.basePayrollAmount) : "-"}` },
+    { label: "Total payroll", value: `${row.payrollAmount ? formatCurrency(row.payrollAmount) : "-"} · ${payrollLabel[row.payrollStatus]}` },
   ]
 
   return createPortal(
@@ -8118,46 +8181,33 @@ function AttendanceMonitorDetailDialog({ row, onClose }: { row: AttendanceMonito
         </div>
 
         <div className="masterDetailBody">
-          <div className="attendanceMonitorSnapshot">
-            <div className="attendanceMonitorSnapshotItem">
-              <span className={clsx("attendanceMonitorIcon", row.gpsStatus)}>
-                <LocateFixed size={20} />
-              </span>
-              <div>
-                <small>GPS Radius</small>
-                <strong>{row.distanceM === null ? "Belum kebaca" : `${row.distanceM}m dari radius ${row.radiusM || "-"}m`}</strong>
-                <p>{gpsLabel}</p>
-              </div>
+          <div className="attendanceDetailStory">
+            <div className="attendanceDetailTimeline">
+              {eventRows.map((event) => (
+                <div className="attendanceDetailEvent" key={event.label}>
+                  <span className={clsx("attendanceDetailDot", event.tone)} />
+                  <div className="attendanceDetailEventMain">
+                    <div>
+                      <small>{event.label}</small>
+                      <strong>{event.time}</strong>
+                    </div>
+                    <UiStatusBadge tone={event.tone as AttendanceStatus}>{event.status}</UiStatusBadge>
+                  </div>
+                  <p><LocateFixed size={15} />{event.gps}</p>
+                  <p><ScanFace size={15} />{event.face}</p>
+                  {event.notes && <em>{event.notes}</em>}
+                </div>
+              ))}
             </div>
-            <div className="attendanceMonitorSnapshotItem">
-              <span className={clsx("attendanceMonitorIcon", row.faceStatus)}>
-                <ScanFace size={20} />
-              </span>
-              <div>
-                <small>Face Verification</small>
-                <strong>{row.faceScore === null ? "Belum ada data" : `${row.faceScore}% match`}</strong>
-                <p>{row.faceStatus}</p>
-              </div>
-            </div>
-            <div className="attendanceMonitorSnapshotItem">
-              <span className="attendanceMonitorIcon cycle">
-                <ProgressRing value={row.cycleDays} />
-              </span>
-              <div>
-                <small>Payroll Cycle</small>
-                <strong>{row.cycleDays}/{row.targetDays} hari</strong>
-                <p>{payrollLabel[row.payrollStatus]}</p>
-              </div>
-            </div>
-          </div>
 
-          <div className="masterDetailGrid">
-            {fields.map((field) => (
-              <div className="masterDetailField" key={field.label}>
-                <span>{field.label}</span>
-                <strong>{field.value}</strong>
-              </div>
-            ))}
+            <dl className="attendanceDetailList">
+              {summaryRows.map((item) => (
+                <div key={item.label}>
+                  <dt>{item.label}</dt>
+                  <dd>{item.value}</dd>
+                </div>
+              ))}
+            </dl>
           </div>
 
           {row.notes && (
@@ -8567,7 +8617,7 @@ function LiveAttendanceTable({ rows, loading, errorMessage }: { rows: Attendance
         <div className="tableHeader">
           <div>
             <h2>Realtime Attendance Feed</h2>
-            <p>Data check-in hari ini dari GPS radius, face verification, dan workday counted.</p>
+            <p>Data check-in dan check-out hari ini dari GPS radius, face verification, dan workday counted.</p>
           </div>
         </div>
         <div className="tableScroller uiDataTableScroller uiDataTableHasColumns">
@@ -8576,7 +8626,8 @@ function LiveAttendanceTable({ rows, loading, errorMessage }: { rows: Attendance
               <tr>
                 <th>No</th>
                 <th>Karyawan</th>
-                <th>Waktu</th>
+                <th>Masuk</th>
+                <th>Pulang</th>
                 <th>Lokasi / Radius</th>
                 <th>GPS</th>
                 <th>Face</th>
@@ -8585,13 +8636,14 @@ function LiveAttendanceTable({ rows, loading, errorMessage }: { rows: Attendance
               </tr>
             </thead>
             <tbody>
-              {loading && <tr><td className="tableStateCell" colSpan={8}><TableState title="Memuat absensi" description="Mengambil live feed absensi." icon={Megaphone} /></td></tr>}
-              {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={8}><TableState title="Gagal memuat" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
+              {loading && <tr><td className="tableStateCell" colSpan={9}><TableState title="Memuat absensi" description="Mengambil live feed absensi." icon={Megaphone} /></td></tr>}
+              {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={9}><TableState title="Gagal memuat" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
               {!loading && !errorMessage && rows.map((row, index) => (
                 <ClickableTableRow key={row.id} label={`Lihat detail absensi ${row.fullName}`} onOpen={() => setDetailRow(row)}>
                   <td><TableNumberCell value={index + 1} /></td>
                   <td><EmployeeIdentityCell fullName={row.fullName} code={row.employeeCode} photoUrl={row.employeePhotoUrl} /></td>
-                  <td><TableText primary={formatAttendanceTime(row.eventAt)} secondary={formatEmployeeDate(row.attendanceDate)} /></td>
+                  <td><TableText primary={row.checkInAt ? formatAttendanceTime(row.checkInAt) : "Belum masuk"} secondary={row.checkInStatus === "missing" ? formatEmployeeDate(row.attendanceDate) : row.checkInStatus} /></td>
+                  <td><TableText primary={row.checkOutAt ? formatAttendanceTime(row.checkOutAt) : "Belum pulang"} secondary={row.checkOutStatus === "missing" ? "Menunggu check-in valid" : row.checkOutStatus} /></td>
                   <td><TableText primary={row.workLocationName} secondary={row.distanceM === null ? "Belum ada GPS" : `${row.distanceM}m dari radius ${row.radiusM || "-"}m`} /></td>
                   <td><TableText primary={row.gpsStatus === "valid" ? "Dalam radius" : row.gpsStatus === "out_of_radius" ? "Luar radius" : "GPS kosong"} /></td>
                   <td><TableText primary={row.faceScore === null ? "-" : `${row.faceScore}%`} secondary={row.faceStatus} /></td>
@@ -8599,7 +8651,7 @@ function LiveAttendanceTable({ rows, loading, errorMessage }: { rows: Attendance
                   <td><StatusBadge status={row.attendanceStatus} /></td>
                 </ClickableTableRow>
               ))}
-              {!loading && !errorMessage && rows.length === 0 && <tr><td className="tableStateCell" colSpan={8}><TableState title="Tidak ada data" description="Belum ada feed sesuai filter." icon={Search} /></td></tr>}
+              {!loading && !errorMessage && rows.length === 0 && <tr><td className="tableStateCell" colSpan={9}><TableState title="Tidak ada data" description="Belum ada feed sesuai filter." icon={Search} /></td></tr>}
             </tbody>
           </table>
         </div>
@@ -10397,7 +10449,10 @@ function EmployeePwaApp({ profile, onLogout }: { profile: AppAccessProfile; onLo
 
   const employee = data?.employee
   const todayCheckIn = data?.todayLogs.find((log) => log.eventType === "check_in")
+  const todayCheckOut = data?.todayLogs.find((log) => log.eventType === "check_out")
   const faceReady = data?.faceProfile.status === "approved" || data?.faceProfile.status === "disabled" || data?.faceProfile.verificationRequired === false
+  const canCheckIn = faceReady && !todayCheckIn
+  const canCheckOut = faceReady && Boolean(todayCheckIn?.status === "valid" && todayCheckIn.workdayCounted && !todayCheckOut)
   const cycle = data?.payrollCycle
   const cyclePercent = cycle ? Math.min(100, Math.round((cycle.workDaysCount / Math.max(1, cycle.targetWorkDays)) * 100)) : 0
   const mapUrl = employee?.workLocationLatitude && employee?.workLocationLongitude
@@ -10489,11 +10544,21 @@ function EmployeePwaApp({ profile, onLogout }: { profile: AppAccessProfile; onLo
             <div className="employeeActionHeader">
               <div>
                 <span className="dialogEyebrow">Absensi Hari Ini</span>
-                <h2>{!faceReady ? "Verifikasi wajah dulu" : todayCheckIn ? "Check-in tercatat" : "Siap check-in"}</h2>
-                <p>{!faceReady ? "Absensi real akan terbuka setelah data wajah disetujui HR." : todayCheckIn ? `${formatAttendanceTime(todayCheckIn.eventAt)} · ${todayCheckIn.distanceM ?? "-"}m dari lokasi` : "GPS radius dan face verification akan dicek otomatis."}</p>
+                <h2>{!faceReady ? "Verifikasi wajah dulu" : todayCheckOut ? "Absensi hari ini selesai" : todayCheckIn ? "Check-in tercatat" : "Siap check-in"}</h2>
+                <p>
+                  {!faceReady
+                    ? "Absensi real akan terbuka setelah data wajah disetujui HR."
+                    : todayCheckOut
+                      ? `Pulang ${formatAttendanceTime(todayCheckOut.eventAt)} · masuk ${formatAttendanceTime(todayCheckIn?.eventAt)}`
+                      : todayCheckIn
+                        ? todayCheckIn.status === "valid"
+                          ? `${formatAttendanceTime(todayCheckIn.eventAt)} · ${todayCheckIn.distanceM ?? "-"}m dari lokasi. Check-out sudah bisa dilakukan.`
+                          : "Check-in masih review HR. Check-out aktif setelah check-in valid."
+                        : "GPS radius dan face verification akan dicek otomatis."}
+                </p>
               </div>
-              <UiStatusBadge tone={todayCheckIn?.status === "valid" ? "valid" : todayCheckIn ? "pending" : "missing"}>
-                {todayCheckIn?.status === "valid" ? "Valid" : todayCheckIn ? "Review" : "Belum absen"}
+              <UiStatusBadge tone={todayCheckOut ? "valid" : todayCheckIn?.status === "valid" ? "valid" : todayCheckIn ? "pending" : "missing"}>
+                {todayCheckOut ? "Selesai" : todayCheckIn?.status === "valid" ? "Masuk valid" : todayCheckIn ? "Review HR" : "Belum absen"}
               </UiStatusBadge>
             </div>
 
@@ -10505,13 +10570,13 @@ function EmployeePwaApp({ profile, onLogout }: { profile: AppAccessProfile; onLo
                 </button>
               ) : (
                 <>
-                  <button className="primaryButton" type="button" onClick={() => openAttendance("check_in")} disabled={attendanceSaving}>
+                  <button className="primaryButton" type="button" onClick={() => openAttendance("check_in")} disabled={attendanceSaving || !canCheckIn}>
                     <LocateFixed size={18} />
-                    Absen Masuk
+                    {todayCheckIn ? "Masuk Tercatat" : "Absen Masuk"}
                   </button>
-                  <button className="secondaryButton" type="button" onClick={() => openAttendance("check_out")} disabled={attendanceSaving}>
+                  <button className="secondaryButton" type="button" onClick={() => openAttendance("check_out")} disabled={attendanceSaving || !canCheckOut}>
                     <CalendarCheck2 size={18} />
-                    Absen Pulang
+                    {todayCheckOut ? "Pulang Tercatat" : todayCheckIn && todayCheckIn.status !== "valid" ? "Menunggu Review HR" : "Absen Pulang"}
                   </button>
                 </>
               )}

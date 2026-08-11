@@ -67,6 +67,18 @@ function getImageExtension(contentType: string) {
   return "jpg"
 }
 
+function getJakartaDateKey(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date)
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+
+  return `${values.year}-${values.month}-${values.day}`
+}
+
 function normalizeEmbedding(value: unknown) {
   if (!Array.isArray(value)) return []
   const vector = value.map((item) => Number(item))
@@ -247,7 +259,36 @@ Deno.serve(async (request) => {
             : "failed"
     const status = gpsStatus === "valid" && (faceStatus === "verified" || faceStatus === "not_required") ? "valid" : "review"
     const workdayCounted = eventType === "check_in" && status === "valid"
-    const eventDateKey = new Date().toISOString().slice(0, 10)
+    const eventDateKey = getJakartaDateKey()
+
+    const { data: todayLogs, error: todayLogsError } = await adminClient
+      .from("attendance_logs")
+      .select("id, event_type, status, workday_counted, event_at")
+      .eq("employee_id", employee.id)
+      .eq("attendance_date", eventDateKey)
+
+    if (todayLogsError) throw todayLogsError
+
+    const todayCheckIn = todayLogs?.find((log) => log.event_type === "check_in")
+    const todayCheckOut = todayLogs?.find((log) => log.event_type === "check_out")
+
+    if (eventType === "check_in" && todayCheckIn) {
+      return jsonResponse({ error: "Check-in hari ini sudah tercatat. Data awal tidak boleh ditimpa." }, 409)
+    }
+
+    if (eventType === "check_out") {
+      if (!todayCheckIn) {
+        return jsonResponse({ error: "Check-out belum bisa dilakukan karena check-in hari ini belum ada." }, 409)
+      }
+
+      if (todayCheckIn.status !== "valid" || todayCheckIn.workday_counted !== true) {
+        return jsonResponse({ error: "Check-out menunggu check-in valid/approved HR dulu." }, 409)
+      }
+
+      if (todayCheckOut) {
+        return jsonResponse({ error: "Check-out hari ini sudah tercatat. Data awal tidak boleh ditimpa." }, 409)
+      }
+    }
 
     if (faceSnapshotBase64) {
       const bytes = decodeBase64Image(faceSnapshotBase64)
@@ -268,6 +309,7 @@ Deno.serve(async (request) => {
       employee_id: employee.id,
       app_user_id: actor.id,
       work_location_id: location.id,
+      attendance_date: eventDateKey,
       event_type: eventType,
       latitude,
       longitude,
@@ -289,7 +331,7 @@ Deno.serve(async (request) => {
 
     const { data: log, error: logError } = await adminClient
       .from("attendance_logs")
-      .upsert(logPayload, { onConflict: "employee_id,attendance_date,event_type" })
+      .insert(logPayload)
       .select("id, attendance_date, event_type, status, gps_status, face_status, distance_m, radius_m, face_score, face_match_distance, face_snapshot_path")
       .single()
 
