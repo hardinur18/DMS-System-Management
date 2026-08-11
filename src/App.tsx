@@ -1145,6 +1145,15 @@ function generateMasterCode(categoryId: Exclude<MasterCategoryId, "all">, name: 
   return `${masterCodePrefixes[categoryId]}-${createCodeSlug(name)}`
 }
 
+function normalizeNumericInput(value: string) {
+  return value.trim().replace(",", ".")
+}
+
+function parseOptionalNumberInput(value: string) {
+  const normalized = normalizeNumericInput(value)
+  return normalized ? Number(normalized) : null
+}
+
 function createEmptyMasterForm(categoryId: Exclude<MasterCategoryId, "all">): MasterDataFormValues {
   return {
     categoryId,
@@ -1243,8 +1252,8 @@ async function loadMasterDataRows() {
   ]
 }
 
-function createMasterPayload(values: MasterDataFormValues) {
-  const generatedCode = values.code.trim() || generateMasterCode(values.categoryId, values.name)
+function createMasterPayload(values: MasterDataFormValues, codeOverride?: string) {
+  const generatedCode = codeOverride || values.code.trim() || generateMasterCode(values.categoryId, values.name)
   const basePayload = {
     code: generatedCode.toUpperCase(),
     name: values.name.trim(),
@@ -1258,9 +1267,9 @@ function createMasterPayload(values: MasterDataFormValues) {
       code: basePayload.code,
       name: basePayload.name,
       address: values.address.trim() || null,
-      latitude: values.latitude ? Number(values.latitude) : null,
-      longitude: values.longitude ? Number(values.longitude) : null,
-      radius_m: Number(values.radiusM || 100),
+      latitude: parseOptionalNumberInput(values.latitude),
+      longitude: parseOptionalNumberInput(values.longitude),
+      radius_m: Number(normalizeNumericInput(values.radiusM) || 100),
       is_active: basePayload.is_active,
       sort_order: basePayload.sort_order,
     }
@@ -1310,9 +1319,43 @@ function getMasterTableName(categoryId: Exclude<MasterCategoryId, "all">) {
   return tableMap[categoryId]
 }
 
+async function getAvailableMasterCode(
+  tableName: string,
+  categoryId: Exclude<MasterCategoryId, "all">,
+  name: string,
+  editingRow?: MasterDataRow | null,
+) {
+  const currentCode = editingRow?.code || ""
+  const baseCode = (currentCode || generateMasterCode(categoryId, name)).toUpperCase()
+
+  if (editingRow || currentCode) return baseCode
+
+  const { data, error } = await supabase
+    .from(tableName)
+    .select("id, code")
+    .ilike("code", `${baseCode}%`)
+
+  if (error) throw error
+
+  const usedCodes = new Set(
+    (data || [])
+      .map((row) => String(row.code || "").toUpperCase()),
+  )
+
+  if (!usedCodes.has(baseCode)) return baseCode
+
+  for (let index = 2; index <= 99; index += 1) {
+    const candidate = `${baseCode}-${index}`
+    if (!usedCodes.has(candidate)) return candidate
+  }
+
+  return `${baseCode}-${Date.now().toString(36).toUpperCase()}`
+}
+
 async function saveMasterData(values: MasterDataFormValues, editingRow?: MasterDataRow | null) {
   const tableName = getMasterTableName(values.categoryId)
-  const payload = createMasterPayload(values)
+  const code = await getAvailableMasterCode(tableName, values.categoryId, values.name, editingRow)
+  const payload = createMasterPayload(values, code)
   const query = editingRow
     ? supabase.from(tableName).update(payload as Record<string, unknown>).eq("id", editingRow.id)
     : supabase.from(tableName).insert(payload as Record<string, unknown>)
@@ -1382,19 +1425,40 @@ async function writeAuditLog(action: string, targetTable: string, targetId: stri
 }
 
 function getFriendlySupabaseError(error: unknown, fallback: string) {
-  if (!(error instanceof Error)) return fallback
-  const message = error.message.toLowerCase()
-  const code = "code" in error ? String((error as { code?: unknown }).code || "") : ""
+  const errorObject = error && typeof error === "object" ? error as { code?: unknown; message?: unknown; details?: unknown; hint?: unknown } : null
+  const rawMessage = error instanceof Error ? error.message : String(errorObject?.message || "")
+  const rawDetails = String(errorObject?.details || "")
+  const rawHint = String(errorObject?.hint || "")
+  const message = `${rawMessage} ${rawDetails} ${rawHint}`.toLowerCase()
+  const code = String(errorObject?.code || "")
+
+  if (!rawMessage && !message.trim()) return fallback
+
+  if (code === "42501" || message.includes("row-level security") || message.includes("permission denied")) {
+    return "Akses user belum punya izin Kelola Master Data. Cek Role & Permission untuk permission master_data.manage."
+  }
 
   if (code === "23505" || message.includes("duplicate key") || message.includes("already exists")) {
-    return "Kode atau nama data sudah dipakai. Gunakan nama lain agar kode otomatis tidak bentrok."
+    return "Kode atau nama data sudah dipakai. Gunakan nama lokasi yang belum ada."
+  }
+
+  if (message.includes("work_locations_latitude") || message.includes("latitude")) {
+    return "Latitude lokasi harus berada di rentang -90 sampai 90."
+  }
+
+  if (message.includes("work_locations_longitude") || message.includes("longitude")) {
+    return "Longitude lokasi harus berada di rentang -180 sampai 180."
+  }
+
+  if (message.includes("work_locations_radius") || message.includes("radius")) {
+    return "Radius lokasi harus angka 1 sampai 10.000 meter."
   }
 
   if (message.includes("violates check constraint")) {
     return "Data belum sesuai aturan database. Periksa kembali angka, status, radius, atau koordinat."
   }
 
-  return error.message || fallback
+  return rawMessage || fallback
 }
 
 async function countTableRows(tableName: string, columnName: string, value: string) {
@@ -1447,10 +1511,10 @@ function validateMasterForm(values: MasterDataFormValues) {
   const errors: string[] = []
   const name = values.name.trim()
   const level = Number(values.level)
-  const radius = Number(values.radiusM)
+  const radius = Number(normalizeNumericInput(values.radiusM))
   const sortOrder = Number(values.sortOrder)
-  const latitude = values.latitude === "" ? null : Number(values.latitude)
-  const longitude = values.longitude === "" ? null : Number(values.longitude)
+  const latitude = parseOptionalNumberInput(values.latitude)
+  const longitude = parseOptionalNumberInput(values.longitude)
 
   if (!name) errors.push("Nama data wajib diisi.")
   if (name.length > 90) errors.push("Nama data maksimal 90 karakter.")
