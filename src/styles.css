@@ -5119,6 +5119,84 @@ button {
   background: #f8fbff;
 }
 
+.liveAttendanceTableScroller {
+  --table-min-width: 1354px;
+}
+
+.attendanceTimelineCell {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.attendanceTimelineCell > div {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 14px;
+  background: rgba(248, 251, 255, 0.86);
+}
+
+.attendanceTimelineCell span,
+.attendanceTimelineCell strong,
+.attendanceTimelineCell small,
+.attendanceValidationCell strong,
+.attendanceValidationCell small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attendanceTimelineCell span {
+  color: #738197;
+  font-size: 0.66rem;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.attendanceTimelineCell strong {
+  margin-top: 3px;
+  color: var(--ops-ink);
+  font-size: 0.84rem;
+  font-weight: 500;
+}
+
+.attendanceTimelineCell small,
+.attendanceValidationCell small {
+  margin-top: 3px;
+  color: #738197;
+  font-size: 0.71rem;
+  font-weight: 500;
+}
+
+.attendanceValidationCell {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.attendanceValidationCell > div {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 8px;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.attendanceValidationCell svg {
+  margin-top: 1px;
+  color: #0789a0;
+}
+
+.attendanceValidationCell strong {
+  color: var(--ops-ink);
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+
 .clickableTableRow {
   cursor: pointer;
   outline: 0;

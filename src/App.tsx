@@ -2326,6 +2326,59 @@ function EmployeeIdentityCell({
   )
 }
 
+function AttendanceTimelineCell({ row }: { row: AttendanceMonitorRow }) {
+  return (
+    <div className="attendanceTimelineCell">
+      <div>
+        <span>Masuk</span>
+        <strong>{row.checkInAt ? formatAttendanceTime(row.checkInAt) : "Belum masuk"}</strong>
+        <small>{row.checkInStatus === "missing" ? formatEmployeeDate(row.attendanceDate) : row.checkInStatus}</small>
+      </div>
+      <div>
+        <span>Pulang</span>
+        <strong>{row.checkOutAt ? formatAttendanceTime(row.checkOutAt) : "Belum pulang"}</strong>
+        <small>{row.checkOutStatus === "missing" ? "Menunggu masuk valid" : row.checkOutStatus}</small>
+      </div>
+      <div>
+        <span>Jam kerja</span>
+        <strong>{row.workDurationLabel}</strong>
+        <small>{row.checkOutAt ? "Final" : row.checkInAt ? "Sementara" : "Belum mulai"}</small>
+      </div>
+    </div>
+  )
+}
+
+function AttendanceValidationCell({ row }: { row: AttendanceMonitorRow }) {
+  const gpsLabel = row.gpsStatus === "valid" ? "Dalam radius" : row.gpsStatus === "out_of_radius" ? "Luar radius" : "GPS kosong"
+  const faceLabel = row.faceScore === null ? "-" : `${row.faceScore}%`
+
+  return (
+    <div className="attendanceValidationCell">
+      <div>
+        <LocateFixed size={15} />
+        <span>
+          <strong>{row.workLocationName || "-"}</strong>
+          <small>{row.distanceM === null ? "Belum ada GPS" : `${row.distanceM}m dari radius ${row.radiusM || "-"}m`}</small>
+        </span>
+      </div>
+      <div>
+        <AlertCircle size={15} />
+        <span>
+          <strong>{gpsLabel}</strong>
+          <small>GPS</small>
+        </span>
+      </div>
+      <div>
+        <ScanFace size={15} />
+        <span>
+          <strong>{faceLabel}</strong>
+          <small>{row.faceStatus}</small>
+        </span>
+      </div>
+    </div>
+  )
+}
+
 function formatUserDateTime(value?: string | null, fallback = "Belum login") {
   if (!value) return fallback
   return new Intl.DateTimeFormat("id-ID", {
@@ -8654,40 +8707,40 @@ function LiveAttendanceTable({ rows, loading, errorMessage }: { rows: Attendance
             <p>Data check-in dan check-out hari ini dari GPS radius, face verification, dan workday counted.</p>
           </div>
         </div>
-        <div className="tableScroller uiDataTableScroller uiDataTableHasColumns">
+        <div className="tableScroller uiDataTableScroller uiDataTableHasColumns liveAttendanceTableScroller">
           <table>
+            <colgroup>
+              <col className="tableNumberColumn" />
+              <col style={{ width: "270px" }} />
+              <col style={{ width: "390px" }} />
+              <col style={{ width: "330px" }} />
+              <col style={{ width: "150px" }} />
+              <col style={{ width: "150px" }} />
+            </colgroup>
             <thead>
               <tr>
                 <th>No</th>
                 <th>Karyawan</th>
-                <th>Masuk</th>
-                <th>Pulang</th>
-                <th>Jam Kerja</th>
-                <th>Lokasi / Radius</th>
-                <th>GPS</th>
-                <th>Face</th>
+                <th>Aktivitas Hari Ini</th>
+                <th>Validasi Lapangan</th>
                 <th>Cycle</th>
                 <th>Status</th>
               </tr>
             </thead>
             <tbody>
-              {loading && <tr><td className="tableStateCell" colSpan={10}><TableState title="Memuat absensi" description="Mengambil live feed absensi." icon={Megaphone} /></td></tr>}
-              {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={10}><TableState title="Gagal memuat" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
+              {loading && <tr><td className="tableStateCell" colSpan={6}><TableState title="Memuat absensi" description="Mengambil live feed absensi." icon={Megaphone} /></td></tr>}
+              {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={6}><TableState title="Gagal memuat" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
               {!loading && !errorMessage && rows.map((row, index) => (
                 <ClickableTableRow key={row.id} label={`Lihat detail absensi ${row.fullName}`} onOpen={() => setDetailRow(row)}>
                   <td><TableNumberCell value={index + 1} /></td>
                   <td><EmployeeIdentityCell fullName={row.fullName} code={row.employeeCode} photoUrl={row.employeePhotoUrl} /></td>
-                  <td><TableText primary={row.checkInAt ? formatAttendanceTime(row.checkInAt) : "Belum masuk"} secondary={row.checkInStatus === "missing" ? formatEmployeeDate(row.attendanceDate) : row.checkInStatus} /></td>
-                  <td><TableText primary={row.checkOutAt ? formatAttendanceTime(row.checkOutAt) : "Belum pulang"} secondary={row.checkOutStatus === "missing" ? "Menunggu check-in valid" : row.checkOutStatus} /></td>
-                  <td><TableText primary={row.workDurationLabel} secondary={row.checkOutAt ? "Final" : row.checkInAt ? "Sementara" : "Belum mulai"} /></td>
-                  <td><TableText primary={row.workLocationName} secondary={row.distanceM === null ? "Belum ada GPS" : `${row.distanceM}m dari radius ${row.radiusM || "-"}m`} /></td>
-                  <td><TableText primary={row.gpsStatus === "valid" ? "Dalam radius" : row.gpsStatus === "out_of_radius" ? "Luar radius" : "GPS kosong"} /></td>
-                  <td><TableText primary={row.faceScore === null ? "-" : `${row.faceScore}%`} secondary={row.faceStatus} /></td>
+                  <td><AttendanceTimelineCell row={row} /></td>
+                  <td><AttendanceValidationCell row={row} /></td>
                   <td><span className="cycleCell"><ProgressRing value={row.cycleDays} /><span>{row.cycleDays}/{row.targetDays}</span></span></td>
                   <td><StatusBadge status={row.attendanceStatus} /></td>
                 </ClickableTableRow>
               ))}
-              {!loading && !errorMessage && rows.length === 0 && <tr><td className="tableStateCell" colSpan={10}><TableState title="Tidak ada data" description="Belum ada feed sesuai filter." icon={Search} /></td></tr>}
+              {!loading && !errorMessage && rows.length === 0 && <tr><td className="tableStateCell" colSpan={6}><TableState title="Tidak ada data" description="Belum ada feed sesuai filter." icon={Search} /></td></tr>}
             </tbody>
           </table>
         </div>
