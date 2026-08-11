@@ -2983,6 +2983,11 @@ button {
   background: linear-gradient(135deg, rgba(240, 253, 244, 0.96), rgba(244, 252, 255, 0.86));
 }
 
+.fieldAttendanceSignalCard.blocked {
+  border-color: rgba(244, 63, 94, 0.26);
+  background: linear-gradient(135deg, rgba(255, 241, 242, 0.98), rgba(255, 255, 255, 0.9));
+}
+
 .fieldAttendanceMeta {
   display: block;
   grid-column: 2 / -1;
@@ -3000,6 +3005,14 @@ button {
 .fieldAttendanceMeta span + span::before {
   color: rgba(138, 152, 173, 0.72);
   content: " · ";
+}
+
+.fieldAttendanceMeta .valid {
+  color: #079669;
+}
+
+.fieldAttendanceMeta .failed {
+  color: #e11d48;
 }
 
 .fieldAttendanceCardIcon {

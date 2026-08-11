@@ -212,6 +212,15 @@ Deno.serve(async (request) => {
 
     const distanceM = haversineDistanceMeters(latitude, longitude, locationLat, locationLon)
     const gpsStatus = distanceM <= radiusM ? "valid" : "out_of_radius"
+    if (gpsStatus !== "valid") {
+      return jsonResponse({
+        error: `Absensi ditolak. Posisi berada ${distanceM}m dari ${location.name}, melebihi radius ${radiusM}m.`,
+        code: "OUT_OF_RADIUS",
+        distance_m: distanceM,
+        radius_m: radiusM,
+        location_name: location.name,
+      }, 422)
+    }
 
     const { data: faceProfile, error: faceProfileError } = await adminClient
       .from("employee_face_profiles")

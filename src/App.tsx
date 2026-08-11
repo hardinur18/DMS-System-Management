@@ -281,6 +281,13 @@ interface FieldAttendanceResult {
   }
 }
 
+interface AttendanceWorkLocationGate {
+  name: string
+  latitude: string | number
+  longitude: string | number
+  radiusM: number
+}
+
 interface EmployeePortalAttendanceLog {
   id: string
   attendanceDate: string
@@ -2303,6 +2310,18 @@ function ProgressRing({ value }: { value: number }) {
       <span>{safeValue}</span>
     </span>
   )
+}
+
+function calculateDistanceMeters(fromLatitude: number, fromLongitude: number, toLatitude: number, toLongitude: number) {
+  const earthRadiusM = 6371000
+  const toRad = (value: number) => (value * Math.PI) / 180
+  const lat1 = toRad(fromLatitude)
+  const lat2 = toRad(toLatitude)
+  const deltaLat = toRad(toLatitude - fromLatitude)
+  const deltaLon = toRad(toLongitude - fromLongitude)
+  const a = Math.sin(deltaLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLon / 2) ** 2
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  return Math.round(earthRadiusM * c)
 }
 
 function EmployeeIdentityCell({
@@ -9833,12 +9852,14 @@ function FieldAttendanceDialog({
   open,
   saving,
   defaultEventType = "check_in",
+  workLocation,
   onClose,
   onSubmit,
 }: {
   open: boolean
   saving: boolean
   defaultEventType?: "check_in" | "check_out"
+  workLocation?: AttendanceWorkLocationGate
   onClose: () => void
   onSubmit: (payload: FieldAttendanceSubmitPayload) => Promise<void>
 }) {
@@ -10062,10 +10083,30 @@ function FieldAttendanceDialog({
   const parsedLongitude = Number(longitude)
   const parsedFaceScore = faceScore.trim() ? Number(faceScore) : null
   const gpsReady = Number.isFinite(parsedLatitude) && Number.isFinite(parsedLongitude)
+  const workLocationLatitude = Number(workLocation?.latitude)
+  const workLocationLongitude = Number(workLocation?.longitude)
+  const workLocationRadius = Number(workLocation?.radiusM || 0)
+  const hasWorkLocationRadar = Boolean(
+    workLocation
+      && Number.isFinite(workLocationLatitude)
+      && Number.isFinite(workLocationLongitude)
+      && workLocationRadius > 0,
+  )
+  const gpsDistanceM = gpsReady && hasWorkLocationRadar
+    ? calculateDistanceMeters(parsedLatitude, parsedLongitude, workLocationLatitude, workLocationLongitude)
+    : null
+  const gpsInsideRadius = !hasWorkLocationRadar || (gpsDistanceM !== null && gpsDistanceM <= workLocationRadius)
+  const gpsCanSubmit = gpsReady && gpsInsideRadius
   const faceReady = parsedFaceScore !== null && Number.isFinite(parsedFaceScore) && parsedFaceScore >= 0 && parsedFaceScore <= 100
   const gpsCopy = gpsReady
-    ? `Titik HP terkunci${gpsAccuracy ? ` · akurasi ${Math.round(gpsAccuracy)}m` : ""}`
-    : "Ambil titik GPS dari browser/device"
+    ? hasWorkLocationRadar
+      ? gpsInsideRadius
+        ? `${gpsDistanceM}m dari ${workLocation?.name || "lokasi kerja"} · dalam radius ${workLocationRadius}m`
+        : `${gpsDistanceM}m dari ${workLocation?.name || "lokasi kerja"} · di luar radius ${workLocationRadius}m`
+      : `Titik HP terkunci${gpsAccuracy ? ` · akurasi ${Math.round(gpsAccuracy)}m` : ""}`
+    : hasWorkLocationRadar
+      ? `Ambil GPS untuk cek radius ${workLocationRadius}m di ${workLocation?.name}`
+      : "Ambil titik GPS dari browser/device"
   const faceCopy = faceReady
     ? `${parsedFaceScore}% quality · ${faceEmbedding ? "embedding siap" : "snapshot siap review"}`
     : "Tap untuk buka screen verifikasi wajah"
@@ -10102,6 +10143,10 @@ function FieldAttendanceDialog({
 
     if (!gpsReady) {
       setInlineError("Koordinat GPS wajib diisi atau diambil dari browser.")
+      return
+    }
+    if (!gpsInsideRadius) {
+      setInlineError("Posisi di luar radius lokasi kerja. Dekati area kerja atau hubungi HR untuk pengecualian.")
       return
     }
     if (!faceReady || !faceSnapshotBase64) {
@@ -10207,7 +10252,7 @@ function FieldAttendanceDialog({
             required
           />
 
-          <section className={clsx("fieldAttendanceCard fieldAttendanceSignalCard", gpsReady && "ready")}>
+          <section className={clsx("fieldAttendanceCard fieldAttendanceSignalCard", gpsReady && gpsInsideRadius && "ready", gpsReady && !gpsInsideRadius && "blocked")}>
             <div className="fieldAttendanceCardIcon">
               <LocateFixed size={20} />
             </div>
@@ -10221,8 +10266,13 @@ function FieldAttendanceDialog({
             </button>
             {gpsReady && (
               <div className="fieldAttendanceMeta">
-                <span>Lat {latitude}</span>
-                <span>Lng {longitude}</span>
+                {hasWorkLocationRadar && (
+                  <span className={clsx(gpsInsideRadius ? "valid" : "failed")}>
+                    {gpsInsideRadius ? "Dalam radius" : "Di luar radius"} · {gpsDistanceM}m / {workLocationRadius}m
+                  </span>
+                )}
+                <span>Akurasi {gpsAccuracy ? `${Math.round(gpsAccuracy)}m` : "-"}</span>
+                <span>Koordinat {latitude}, {longitude}</span>
               </div>
             )}
           </section>
@@ -10250,13 +10300,20 @@ function FieldAttendanceDialog({
             </div>
           )}
 
+          {gpsReady && !gpsInsideRadius && (
+            <div className="dialogInlineAlert fieldAttendanceAlert">
+              <AlertTriangle size={17} />
+              <span>Posisi di luar radius lokasi kerja. Absensi real tidak bisa dikirim dari titik ini.</span>
+            </div>
+          )}
+
           <div className="dialogActions">
             <button className="secondaryButton" type="button" onClick={onClose} disabled={saving}>
               Batal
             </button>
-            <button className="primaryButton" type="submit" disabled={saving || locating || !gpsReady || !faceReady || !faceSnapshotBase64}>
+            <button className="primaryButton" type="submit" disabled={saving || locating || !gpsCanSubmit || !faceReady || !faceSnapshotBase64}>
               <FileCheck2 size={18} />
-              {!gpsReady ? "Ambil GPS dulu" : !faceReady || !faceSnapshotBase64 ? "Verifikasi wajah dulu" : saving ? "Menyimpan..." : "Simpan Absensi"}
+              {!gpsReady ? "Ambil GPS dulu" : !gpsInsideRadius ? "Di luar radius" : !faceReady || !faceSnapshotBase64 ? "Verifikasi wajah dulu" : saving ? "Menyimpan..." : "Simpan Absensi"}
             </button>
           </div>
         </form>
@@ -10846,6 +10903,12 @@ function EmployeePwaApp({ profile, onLogout }: { profile: AppAccessProfile; onLo
         open={attendanceOpen}
         saving={attendanceSaving}
         defaultEventType={attendanceEventType}
+        workLocation={employee ? {
+          name: employee.workLocationName,
+          latitude: employee.workLocationLatitude,
+          longitude: employee.workLocationLongitude,
+          radiusM: employee.radiusM,
+        } : undefined}
         onClose={() => setAttendanceOpen(false)}
         onSubmit={handleAttendanceSubmit}
       />
