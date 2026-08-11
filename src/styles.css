@@ -6766,6 +6766,67 @@ button {
   margin-top: 14px;
 }
 
+.employeeActionButtons .isDisabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+  filter: grayscale(0.1);
+}
+
+.employeeReadinessList {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin-top: 13px;
+}
+
+.employeeReadinessList span {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 11px;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  border-radius: 15px;
+  color: #65748c;
+  background: rgba(248, 251, 255, 0.86);
+  font-size: 0.73rem;
+  font-weight: 820;
+  line-height: 1.25;
+}
+
+.employeeReadinessList span.ready {
+  border-color: rgba(31, 196, 106, 0.22);
+  color: #078045;
+  background: rgba(236, 253, 244, 0.92);
+}
+
+.employeeReadinessList span.waiting {
+  border-color: rgba(255, 184, 63, 0.3);
+  color: #8a5b00;
+  background: rgba(255, 248, 232, 0.92);
+}
+
+.employeeReadinessList span.blocked {
+  border-color: rgba(255, 59, 99, 0.18);
+  color: #a21b3f;
+  background: rgba(255, 245, 247, 0.9);
+}
+
+.employeeActionHint {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 184, 63, 0.24);
+  border-radius: 16px;
+  color: #8a5b00;
+  background: rgba(255, 248, 232, 0.92);
+  font-size: 0.73rem;
+  font-weight: 820;
+  line-height: 1.35;
+}
+
 .employeeInlineNotice {
   display: flex;
   align-items: center;
@@ -6845,6 +6906,65 @@ button {
   margin-top: 12px;
 }
 
+.employeeDailyRecapList {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.employeeDailyRecapItem {
+  padding: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  border-radius: 19px;
+  background: rgba(248, 251, 255, 0.88);
+}
+
+.employeeDailyRecapTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.employeeDailyRecapTop strong,
+.employeeDailyRecapTop small,
+.employeeDailyRecapGrid strong,
+.employeeDailyRecapGrid small {
+  display: block;
+}
+
+.employeeDailyRecapTop strong,
+.employeeDailyRecapGrid strong {
+  color: #07182e;
+  font-size: 0.84rem;
+  font-weight: 880;
+  line-height: 1.2;
+}
+
+.employeeDailyRecapTop small,
+.employeeDailyRecapGrid small {
+  margin-top: 3px;
+  color: #65748c;
+  font-size: 0.69rem;
+  font-weight: 760;
+  line-height: 1.25;
+}
+
+.employeeDailyRecapGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.employeeDailyRecapGrid span {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 14px;
+  background: #ffffff;
+}
+
 .employeeHistoryItem {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -6894,6 +7014,12 @@ button {
   font-size: 0.76rem;
   font-weight: 760;
   line-height: 1.45;
+}
+
+@media (max-width: 430px) {
+  .employeeDailyRecapGrid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (min-width: 1024px) {
