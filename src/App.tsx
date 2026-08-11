@@ -3791,7 +3791,7 @@ async function loadOperationsFoundationData(): Promise<OperationsFoundationData>
   const employeesById = new Map(((employeeResult.data || []) as Array<Record<string, unknown>>).map((employee) => [String(employee.id), employee]))
   const reviewRows: AttendanceReviewRow[] = logs
     .filter((log) => log.event_type === "check_in")
-    .filter((log) => log.status !== "valid" || log.gps_status !== "valid" || (log.face_status !== "verified" && log.face_status !== "not_required"))
+    .filter((log) => log.status === "review")
     .slice(0, 50)
     .map((log) => {
       const employee = employeesById.get(String(log.employee_id || ""))
