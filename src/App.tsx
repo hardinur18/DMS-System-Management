@@ -2349,33 +2349,51 @@ function AttendanceTimelineCell({ row }: { row: AttendanceMonitorRow }) {
   const checkInTone = row.checkInStatus === "valid" ? "valid" : row.checkInStatus === "missing" ? "missing" : row.checkInStatus === "rejected" ? "failed" : "pending"
   const checkOutTone = row.checkOutAt ? row.checkOutStatus === "valid" ? "valid" : row.checkOutStatus === "rejected" ? "failed" : "pending" : "missing"
   const durationTone = row.checkOutAt ? "valid" : row.checkInAt ? "pending" : "missing"
+  const events = [
+    {
+      key: "check-in",
+      label: "Masuk",
+      value: row.checkInAt ? formatAttendanceTime(row.checkInAt) : "Belum",
+      meta: row.checkInStatus === "missing" ? formatEmployeeDate(row.attendanceDate) : row.checkInStatus,
+      tone: checkInTone,
+      icon: LogIn,
+    },
+    {
+      key: "check-out",
+      label: "Pulang",
+      value: row.checkOutAt ? formatAttendanceTime(row.checkOutAt) : "Belum",
+      meta: row.checkOutStatus === "missing" ? "Menunggu" : row.checkOutStatus,
+      tone: checkOutTone,
+      icon: LogOut,
+    },
+    {
+      key: "duration",
+      label: "Jam kerja",
+      value: row.workDurationLabel,
+      meta: row.checkOutAt ? "Final" : row.checkInAt ? "Sementara" : "Belum mulai",
+      tone: durationTone,
+      icon: CalendarCheck2,
+    },
+  ] as const
 
   return (
     <div className="attendanceTimelineCell">
-      <div className={clsx("attendanceTimelineStep", `tone-${checkInTone}`)}>
-        <span className="attendanceTimelineDot" />
-        <div>
-          <span>Masuk</span>
-          <strong>{row.checkInAt ? formatAttendanceTime(row.checkInAt) : "Belum masuk"}</strong>
-          <small>{row.checkInStatus === "missing" ? formatEmployeeDate(row.attendanceDate) : row.checkInStatus}</small>
-        </div>
-      </div>
-      <div className={clsx("attendanceTimelineStep", `tone-${checkOutTone}`)}>
-        <span className="attendanceTimelineDot" />
-        <div>
-          <span>Pulang</span>
-          <strong>{row.checkOutAt ? formatAttendanceTime(row.checkOutAt) : "Belum pulang"}</strong>
-          <small>{row.checkOutStatus === "missing" ? "Menunggu masuk valid" : row.checkOutStatus}</small>
-        </div>
-      </div>
-      <div className={clsx("attendanceTimelineStep", `tone-${durationTone}`)}>
-        <span className="attendanceTimelineDot" />
-        <div>
-          <span>Jam kerja</span>
-          <strong>{row.workDurationLabel}</strong>
-          <small>{row.checkOutAt ? "Final" : row.checkInAt ? "Sementara" : "Belum mulai"}</small>
-        </div>
-      </div>
+      {events.map((event) => {
+        const Icon = event.icon
+
+        return (
+          <span className={clsx("attendanceTimelineStep", `tone-${event.tone}`)} key={event.key}>
+            <span className="attendanceTimelineIcon">
+              <Icon size={14} />
+            </span>
+            <span className="attendanceTimelineCopy">
+              <span>{event.label}</span>
+              <strong>{event.value}</strong>
+              <small>{event.meta}</small>
+            </span>
+          </span>
+        )
+      })}
     </div>
   )
 }
@@ -2383,30 +2401,32 @@ function AttendanceTimelineCell({ row }: { row: AttendanceMonitorRow }) {
 function AttendanceValidationCell({ row }: { row: AttendanceMonitorRow }) {
   const gpsLabel = row.gpsStatus === "valid" ? "Dalam radius" : row.gpsStatus === "out_of_radius" ? "Luar radius" : "GPS kosong"
   const faceLabel = row.faceScore === null ? "-" : `${row.faceScore}%`
+  const gpsTone = row.gpsStatus === "valid" ? "valid" : row.gpsStatus === "out_of_radius" ? "failed" : "missing"
+  const faceTone = row.faceStatus === "verified" ? "valid" : row.faceStatus === "review" ? "pending" : row.faceStatus === "failed" ? "failed" : "missing"
 
   return (
     <div className="attendanceValidationCell">
-      <div>
+      <span className={clsx("attendanceValidationPill", `tone-${gpsTone}`)}>
         <LocateFixed size={15} />
         <span>
           <strong>{row.workLocationName || "-"}</strong>
           <small>{row.distanceM === null ? "Belum ada GPS" : `${row.distanceM}m dari radius ${row.radiusM || "-"}m`}</small>
         </span>
-      </div>
-      <div>
+      </span>
+      <span className={clsx("attendanceValidationPill", `tone-${gpsTone}`)}>
         <AlertCircle size={15} />
         <span>
           <strong>{gpsLabel}</strong>
-          <small>GPS</small>
+          <small>GPS radius</small>
         </span>
-      </div>
-      <div>
+      </span>
+      <span className={clsx("attendanceValidationPill", `tone-${faceTone}`)}>
         <ScanFace size={15} />
         <span>
           <strong>{faceLabel}</strong>
           <small>{row.faceStatus}</small>
         </span>
-      </div>
+      </span>
     </div>
   )
 }
@@ -4349,6 +4369,24 @@ async function reviewAttendanceLog(id: string, decision: "approve" | "reject", n
 
     throw error
   }
+  if (data?.error) throw new Error(String(data.error))
+
+  return data
+}
+
+async function resetAttendanceDay(employeeId: string, attendanceDate: string, notes: string) {
+  const { data, error } = await supabase.functions.invoke("attendance-review", {
+    body: {
+      action: "reset_day",
+      payload: {
+        employeeId,
+        attendanceDate,
+        notes,
+      },
+    },
+  })
+
+  if (error) throw new Error(await getFunctionInvokeError(error, "Reset absensi belum bisa diproses."))
   if (data?.error) throw new Error(String(data.error))
 
   return data
@@ -8224,7 +8262,15 @@ function EmployeeTable({ rows, loading, errorMessage }: { rows: AttendanceMonito
   )
 }
 
-function AttendanceMonitorDetailDialog({ row, onClose }: { row: AttendanceMonitorRow | null; onClose: () => void }) {
+function AttendanceMonitorDetailDialog({
+  row,
+  onClose,
+  onResetDay,
+}: {
+  row: AttendanceMonitorRow | null
+  onClose: () => void
+  onResetDay?: (row: AttendanceMonitorRow) => void
+}) {
   if (!row) return null
 
   const logStatusLabel: Record<AttendanceLogStatus | "missing", string> = {
@@ -8273,6 +8319,7 @@ function AttendanceMonitorDetailDialog({ row, onClose }: { row: AttendanceMonito
     { label: "Tipe gaji", value: `${employeeSalaryTypeLabel[row.salaryType]} · ${row.basePayrollAmount ? formatCurrency(row.basePayrollAmount) : "-"}` },
     { label: "Total payroll", value: `${row.payrollAmount ? formatCurrency(row.payrollAmount) : "-"} · ${payrollLabel[row.payrollStatus]}` },
   ]
+  const hasAttendance = Boolean(row.checkInId || row.checkOutId)
 
   return createPortal(
     <div className="dialogBackdrop" role="presentation" onMouseDown={onClose}>
@@ -8343,6 +8390,15 @@ function AttendanceMonitorDetailDialog({ row, onClose }: { row: AttendanceMonito
         </div>
 
         <div className="masterDetailActions">
+          {hasAttendance && onResetDay && (
+            <button className="secondaryButton dangerSoftButton" type="button" onClick={() => {
+              onClose()
+              onResetDay(row)
+            }}>
+              <RotateCcw size={17} />
+              Reset Absensi Hari Ini
+            </button>
+          )}
           <button className="secondaryButton" type="button" onClick={onClose}>Tutup</button>
         </div>
       </section>
@@ -8368,6 +8424,8 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
   const [payrollTarget, setPayrollTarget] = useState<AttendanceMonitorRow | null>(null)
   const [payrollAction, setPayrollAction] = useState<PayrollProcessAction>("lock")
   const [payrollSubmitting, setPayrollSubmitting] = useState(false)
+  const [resetAttendanceRow, setResetAttendanceRow] = useState<AttendanceMonitorRow | null>(null)
+  const [resetAttendanceSubmitting, setResetAttendanceSubmitting] = useState(false)
   const [toast, setToast] = useState<ToastMessage | null>(null)
 
   const showToast = (message: Omit<ToastMessage, "id">) => {
@@ -8549,6 +8607,34 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
     }
   }
 
+  const handleResetAttendanceSubmit = async () => {
+    if (!resetAttendanceRow) return
+
+    setResetAttendanceSubmitting(true)
+    try {
+      await resetAttendanceDay(
+        resetAttendanceRow.employeeId,
+        resetAttendanceRow.attendanceDate,
+        "Reset data testing dari Live Absensi management.",
+      )
+      showToast({
+        tone: "success",
+        title: "Absensi direset",
+        description: `${resetAttendanceRow.fullName} bisa test ulang check-in dan check-out untuk ${formatEmployeeDate(resetAttendanceRow.attendanceDate)}.`,
+      })
+      setResetAttendanceRow(null)
+      await refreshData()
+    } catch (error) {
+      showToast({
+        tone: "error",
+        title: "Gagal reset absensi",
+        description: getFriendlySupabaseError(error, "Data absensi belum bisa direset."),
+      })
+    } finally {
+      setResetAttendanceSubmitting(false)
+    }
+  }
+
   const normalizedSearch = searchTerm.trim().toLowerCase()
   const filteredRows = data.rows.filter((row) => {
     const matchesSearch = normalizedSearch
@@ -8688,7 +8774,7 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
           <OvertimeReviewTable rows={filteredOvertimeRows} loading={loading} errorMessage={errorMessage} onReview={setOvertimeTarget} />
         </>
       ) : (
-        <LiveAttendanceTable rows={filteredRows} loading={loading} errorMessage={errorMessage} />
+        <LiveAttendanceTable rows={filteredRows} loading={loading} errorMessage={errorMessage} onResetDay={setResetAttendanceRow} />
       )}
 
       <FieldAttendanceDialog
@@ -8722,12 +8808,45 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
         onClose={() => setPayrollTarget(null)}
         onSubmit={handlePayrollProcessSubmit}
       />
+      <ConfirmDialog
+        open={Boolean(resetAttendanceRow)}
+        tone="danger"
+        icon={RotateCcw}
+        eyebrow="Reset Testing"
+        title={resetAttendanceRow ? `Reset absensi ${resetAttendanceRow.fullName}?` : "Reset absensi hari ini?"}
+        description="Check-in, check-out, dan snapshot wajah di tanggal ini akan dihapus agar karyawan bisa testing ulang dari app lapangan."
+        confirmLabel="Reset Absensi"
+        cancelLabel="Batal"
+        loading={resetAttendanceSubmitting}
+        onClose={() => {
+          if (!resetAttendanceSubmitting) setResetAttendanceRow(null)
+        }}
+        onConfirm={() => void handleResetAttendanceSubmit()}
+      >
+        {resetAttendanceRow && (
+          <div className="confirmDialogPreview">
+            <span>{resetAttendanceRow.employeeCode} · {formatEmployeeDate(resetAttendanceRow.attendanceDate)}</span>
+            <strong>{resetAttendanceRow.fullName}</strong>
+            <small>{resetAttendanceRow.checkInAt ? `Masuk ${formatAttendanceTime(resetAttendanceRow.checkInAt)}` : "Belum check-in"} · {resetAttendanceRow.checkOutAt ? `Pulang ${formatAttendanceTime(resetAttendanceRow.checkOutAt)}` : "Belum check-out"}</small>
+          </div>
+        )}
+      </ConfirmDialog>
       <ToastViewport toast={toast} onClose={() => setToast(null)} />
     </OperationalPageShell>
   )
 }
 
-function LiveAttendanceTable({ rows, loading, errorMessage }: { rows: AttendanceMonitorRow[]; loading: boolean; errorMessage: string }) {
+function LiveAttendanceTable({
+  rows,
+  loading,
+  errorMessage,
+  onResetDay,
+}: {
+  rows: AttendanceMonitorRow[]
+  loading: boolean
+  errorMessage: string
+  onResetDay: (row: AttendanceMonitorRow) => void
+}) {
   const [detailRow, setDetailRow] = useState<AttendanceMonitorRow | null>(null)
 
   return (
@@ -8748,6 +8867,7 @@ function LiveAttendanceTable({ rows, loading, errorMessage }: { rows: Attendance
               <col style={{ width: "330px" }} />
               <col style={{ width: "150px" }} />
               <col style={{ width: "150px" }} />
+              <col style={{ width: "86px" }} />
             </colgroup>
             <thead>
               <tr>
@@ -8757,11 +8877,12 @@ function LiveAttendanceTable({ rows, loading, errorMessage }: { rows: Attendance
                 <th>Validasi Lapangan</th>
                 <th>Cycle</th>
                 <th>Status</th>
+                <th>Aksi</th>
               </tr>
             </thead>
             <tbody>
-              {loading && <tr><td className="tableStateCell" colSpan={6}><TableState title="Memuat absensi" description="Mengambil live feed absensi." icon={Megaphone} /></td></tr>}
-              {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={6}><TableState title="Gagal memuat" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
+              {loading && <tr><td className="tableStateCell" colSpan={7}><TableState title="Memuat absensi" description="Mengambil live feed absensi." icon={Megaphone} /></td></tr>}
+              {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={7}><TableState title="Gagal memuat" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
               {!loading && !errorMessage && rows.map((row, index) => (
                 <ClickableTableRow key={row.id} label={`Lihat detail absensi ${row.fullName}`} onOpen={() => setDetailRow(row)}>
                   <td><TableNumberCell value={index + 1} /></td>
@@ -8770,14 +8891,26 @@ function LiveAttendanceTable({ rows, loading, errorMessage }: { rows: Attendance
                   <td><AttendanceValidationCell row={row} /></td>
                   <td><span className="cycleCell"><ProgressRing value={row.cycleDays} /><span>{row.cycleDays}/{row.targetDays}</span></span></td>
                   <td><StatusBadge status={row.attendanceStatus} /></td>
+                  <td>
+                    <RowActionMenu label={`Aksi absensi ${row.fullName}`}>
+                      <RowActionMenuItem onClick={() => setDetailRow(row)}>
+                        <Eye size={15} />
+                        Detail
+                      </RowActionMenuItem>
+                      <RowActionMenuItem danger disabled={!row.checkInId && !row.checkOutId} onClick={() => onResetDay(row)}>
+                        <RotateCcw size={15} />
+                        Reset Hari Ini
+                      </RowActionMenuItem>
+                    </RowActionMenu>
+                  </td>
                 </ClickableTableRow>
               ))}
-              {!loading && !errorMessage && rows.length === 0 && <tr><td className="tableStateCell" colSpan={6}><TableState title="Tidak ada data" description="Belum ada feed sesuai filter." icon={Search} /></td></tr>}
+              {!loading && !errorMessage && rows.length === 0 && <tr><td className="tableStateCell" colSpan={7}><TableState title="Tidak ada data" description="Belum ada feed sesuai filter." icon={Search} /></td></tr>}
             </tbody>
           </table>
         </div>
       </OperationalTableCard>
-      <AttendanceMonitorDetailDialog row={detailRow} onClose={() => setDetailRow(null)} />
+      <AttendanceMonitorDetailDialog row={detailRow} onClose={() => setDetailRow(null)} onResetDay={onResetDay} />
     </>
   )
 }

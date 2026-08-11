@@ -1,9 +1,11 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0"
 
-type AttendanceReviewAction = "approve" | "reject"
+type AttendanceReviewAction = "approve" | "reject" | "reset_day"
 
 interface AttendanceReviewPayload {
   id?: string
+  employeeId?: string
+  attendanceDate?: string
   notes?: string
 }
 
@@ -52,8 +54,7 @@ Deno.serve(async (request) => {
     const action = body.action
     const payload = body.payload || {}
 
-    assertPayload(action === "approve" || action === "reject", "Action review tidak valid.")
-    assertPayload(payload.id, "ID absensi wajib ada.")
+    assertPayload(action === "approve" || action === "reject" || action === "reset_day", "Action review tidak valid.")
 
     const token = authorization.replace(/^Bearer\s+/i, "")
     const { data: authData, error: authError } = await userClient.auth.getUser(token)
@@ -78,6 +79,69 @@ Deno.serve(async (request) => {
 
     if (permissionError) throw permissionError
     if (!permission) return jsonResponse({ error: "Role tidak punya permission Review Absensi." }, 403)
+
+    if (action === "reset_day") {
+      assertPayload(payload.employeeId, "ID karyawan wajib ada.")
+      assertPayload(payload.attendanceDate && /^\d{4}-\d{2}-\d{2}$/.test(payload.attendanceDate), "Tanggal absensi wajib format YYYY-MM-DD.")
+      const employeeId = payload.employeeId as string
+      const attendanceDate = payload.attendanceDate as string
+
+      const { data: logs, error: logsError } = await adminClient
+        .from("attendance_logs")
+        .select("id, employee_id, attendance_date, event_type, face_snapshot_path, status")
+        .eq("employee_id", employeeId)
+        .eq("attendance_date", attendanceDate)
+
+      if (logsError) throw logsError
+      if (!logs || logs.length === 0) return jsonResponse({ error: "Tidak ada data absensi untuk direset." }, 404)
+
+      const snapshotPaths = logs
+        .map((log) => String(log.face_snapshot_path || ""))
+        .filter(Boolean)
+
+      if (snapshotPaths.length > 0) {
+        const { error: storageError } = await adminClient.storage.from("attendance-faces").remove(snapshotPaths)
+        if (storageError) throw storageError
+      }
+
+      const { error: deleteError } = await adminClient
+        .from("attendance_logs")
+        .delete()
+        .eq("employee_id", employeeId)
+        .eq("attendance_date", attendanceDate)
+
+      if (deleteError) throw deleteError
+
+      const { error: refreshError } = await adminClient.rpc("refresh_employee_payroll_cycles", { target_employee_id: employeeId })
+      if (refreshError) throw refreshError
+
+      await adminClient.from("audit_logs").insert({
+        actor_user_id: actor.id,
+        actor_name: actor.full_name,
+        action: "Reset attendance day",
+        target_table: "attendance_logs",
+        target_id: `${employeeId}:${attendanceDate}`,
+        status: "success",
+        metadata: {
+          attendance_date: attendanceDate,
+          employee_id: employeeId,
+          deleted_count: logs.length,
+          deleted_ids: logs.map((log) => log.id),
+          snapshot_paths: snapshotPaths,
+          notes: payload.notes?.trim() || "",
+          source: "edge-function",
+        },
+      })
+
+      return jsonResponse({
+        ok: true,
+        employee_id: employeeId,
+        attendance_date: attendanceDate,
+        deleted_count: logs.length,
+      })
+    }
+
+    assertPayload(payload.id, "ID absensi wajib ada.")
 
     const { data: attendance, error: attendanceError } = await adminClient
       .from("attendance_logs")

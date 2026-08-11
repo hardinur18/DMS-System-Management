@@ -5133,51 +5133,42 @@ button {
 }
 
 .liveAttendanceTableScroller {
-  --table-min-width: 1354px;
+  --table-min-width: 1460px;
+}
+
+.liveAttendanceTableScroller tbody tr:hover {
+  background: linear-gradient(90deg, rgba(236, 253, 255, 0.7), rgba(255, 255, 255, 0.98) 34%, rgba(248, 251, 255, 0.92));
 }
 
 .attendanceTimelineCell {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  gap: 7px;
   min-width: 0;
 }
 
 .attendanceTimelineStep {
-  position: relative;
-  display: grid;
-  grid-template-columns: 12px minmax(0, 1fr);
-  gap: 8px;
-  align-items: flex-start;
+  display: inline-grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 9px;
+  align-items: center;
   min-width: 0;
-  padding: 9px 10px;
+  min-height: 58px;
+  padding: 8px 10px;
   border: 1px solid rgba(15, 23, 42, 0.06);
-  border-radius: 14px;
-  background: rgba(248, 251, 255, 0.86);
+  border-radius: 18px;
+  background: rgba(248, 251, 255, 0.82);
+  box-shadow: 0 12px 26px -24px rgba(7, 24, 74, 0.48);
 }
 
-.attendanceTimelineStep::before {
-  position: absolute;
-  top: 16px;
-  left: 15px;
-  width: 1px;
-  height: calc(100% - 26px);
+.attendanceTimelineIcon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
   border-radius: 999px;
-  background: rgba(115, 129, 151, 0.2);
-  content: "";
-}
-
-.attendanceTimelineDot {
-  position: relative;
-  z-index: 1;
-  display: block;
-  width: 10px;
-  height: 10px;
-  margin-top: 4px;
-  border: 2px solid #ffffff;
-  border-radius: 999px;
-  background: #94a3b8;
-  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.16);
+  color: #64748b;
+  background: #eef4fb;
 }
 
 .attendanceTimelineStep.tone-valid {
@@ -5185,9 +5176,9 @@ button {
   background: linear-gradient(135deg, rgba(236, 253, 244, 0.92), rgba(255, 255, 255, 0.94));
 }
 
-.attendanceTimelineStep.tone-valid .attendanceTimelineDot {
-  background: #1fc46a;
-  box-shadow: 0 0 0 3px rgba(31, 196, 106, 0.18);
+.attendanceTimelineStep.tone-valid .attendanceTimelineIcon {
+  color: #059669;
+  background: rgba(209, 250, 229, 0.92);
 }
 
 .attendanceTimelineStep.tone-pending {
@@ -5195,9 +5186,9 @@ button {
   background: linear-gradient(135deg, rgba(255, 248, 232, 0.94), rgba(255, 255, 255, 0.94));
 }
 
-.attendanceTimelineStep.tone-pending .attendanceTimelineDot {
-  background: #f59e0b;
-  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.18);
+.attendanceTimelineStep.tone-pending .attendanceTimelineIcon {
+  color: #c47a00;
+  background: rgba(255, 237, 213, 0.92);
 }
 
 .attendanceTimelineStep.tone-failed {
@@ -5205,16 +5196,17 @@ button {
   background: linear-gradient(135deg, rgba(255, 245, 247, 0.95), rgba(255, 255, 255, 0.94));
 }
 
-.attendanceTimelineStep.tone-failed .attendanceTimelineDot {
-  background: #ff3b63;
-  box-shadow: 0 0 0 3px rgba(255, 59, 99, 0.16);
+.attendanceTimelineStep.tone-failed .attendanceTimelineIcon {
+  color: #e11d48;
+  background: rgba(255, 228, 230, 0.92);
 }
 
 .attendanceTimelineStep.tone-missing {
   background: rgba(248, 251, 255, 0.72);
 }
 
-.attendanceTimelineCell span,
+.attendanceTimelineCopy,
+.attendanceTimelineCopy span,
 .attendanceTimelineCell strong,
 .attendanceTimelineCell small,
 .attendanceValidationCell strong,
@@ -5226,45 +5218,82 @@ button {
   white-space: nowrap;
 }
 
-.attendanceTimelineCell span {
+.attendanceTimelineCopy span {
   color: #738197;
-  font-size: 0.66rem;
+  font-size: 0.62rem;
   font-weight: 760;
   text-transform: uppercase;
 }
 
 .attendanceTimelineCell strong {
-  margin-top: 3px;
+  margin-top: 1px;
   color: var(--ops-ink);
-  font-size: 0.84rem;
+  font-size: 0.86rem;
   font-weight: 500;
 }
 
 .attendanceTimelineCell small,
 .attendanceValidationCell small {
-  margin-top: 3px;
+  margin-top: 1px;
   color: #738197;
-  font-size: 0.71rem;
+  font-size: 0.68rem;
   font-weight: 500;
 }
 
 .attendanceValidationCell {
   display: grid;
+  grid-template-columns: minmax(0, 1.18fr) minmax(0, 0.92fr) minmax(0, 0.76fr);
   gap: 7px;
   min-width: 0;
 }
 
-.attendanceValidationCell > div {
+.attendanceValidationPill {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
+  grid-template-columns: 28px minmax(0, 1fr);
   gap: 8px;
-  align-items: flex-start;
+  align-items: center;
   min-width: 0;
+  min-height: 58px;
+  padding: 8px 10px;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 18px;
+  background: rgba(248, 251, 255, 0.82);
 }
 
-.attendanceValidationCell svg {
+.attendanceValidationPill > svg {
   margin-top: 1px;
   color: #0789a0;
+}
+
+.attendanceValidationPill.tone-valid {
+  border-color: rgba(31, 196, 106, 0.16);
+  background: rgba(236, 253, 244, 0.86);
+}
+
+.attendanceValidationPill.tone-pending {
+  border-color: rgba(245, 158, 11, 0.2);
+  background: rgba(255, 248, 232, 0.9);
+}
+
+.attendanceValidationPill.tone-failed {
+  border-color: rgba(244, 63, 94, 0.18);
+  background: rgba(255, 241, 242, 0.9);
+}
+
+.attendanceValidationPill.tone-missing {
+  background: rgba(248, 251, 255, 0.72);
+}
+
+.attendanceValidationPill.tone-valid > svg {
+  color: #059669;
+}
+
+.attendanceValidationPill.tone-pending > svg {
+  color: #c47a00;
+}
+
+.attendanceValidationPill.tone-failed > svg {
+  color: #e11d48;
 }
 
 .attendanceValidationCell strong {
