@@ -912,8 +912,8 @@ button {
 
 .filterPanel,
 .uiFilterCard {
-  display: grid;
-  grid-template-columns: minmax(320px, 1fr) minmax(190px, 260px) auto;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   padding: 18px 20px;
@@ -921,8 +921,13 @@ button {
 
 .filterField {
   display: grid;
+  flex: 1 1 260px;
   min-width: 0;
   gap: 0;
+}
+
+.filterField.dateFilterField {
+  flex: 0 1 430px;
 }
 
 .filterField label {
@@ -938,7 +943,52 @@ button {
 .filterPanel > .secondaryButton,
 .uiFilterCard > .secondaryButton {
   min-width: 148px;
+  flex: 0 0 auto;
   align-self: center;
+}
+
+.dateFilterControl {
+  display: grid;
+  grid-template-columns: auto auto minmax(148px, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.dateQuickButton,
+.uiDateInput {
+  min-height: var(--ops-control-h);
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: var(--ops-radius-sm);
+  background: #ffffff;
+  color: var(--ink);
+  font-size: var(--font-ui);
+  font-weight: 780;
+}
+
+.dateQuickButton {
+  padding: 0 16px;
+  white-space: nowrap;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
+  cursor: pointer;
+  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease, color 160ms ease;
+}
+
+.dateQuickButton:hover {
+  transform: translateY(-1px);
+  border-color: rgba(34, 174, 202, 0.42);
+  color: var(--blue-ink);
+}
+
+.dateQuickButton.active {
+  border-color: rgba(34, 174, 202, 0.44);
+  background: #eefcff;
+  color: var(--blue-ink);
+  box-shadow: inset 0 0 0 1px rgba(34, 174, 202, 0.2), 0 16px 30px rgba(34, 174, 202, 0.08);
+}
+
+.uiDateInput {
+  padding: 0 14px;
+  color-scheme: light;
 }
 
 .employeeFilterPanel {
@@ -5156,27 +5206,96 @@ button {
 }
 
 .liveAttendanceTableScroller {
-  --table-min-width: 1420px;
+  --table-min-width: 1320px;
 }
 
 .liveAttendanceTableScroller tbody tr:hover {
   background: linear-gradient(90deg, rgba(236, 253, 255, 0.7), rgba(255, 255, 255, 0.98) 34%, rgba(248, 251, 255, 0.92));
 }
 
-.attendanceTimelineCell {
-  display: flex;
-  align-items: center;
-  gap: 18px;
+.attendanceLiveRecap {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(96px, 1fr));
+  gap: 10px;
+  padding: 0 20px 18px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.07);
+}
+
+.attendanceLiveRecapItem {
+  position: relative;
+  display: grid;
+  gap: 4px;
   min-width: 0;
+  padding: 12px 13px 12px 15px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 18px;
+  background: linear-gradient(135deg, #ffffff, #f9fbff);
+  overflow: hidden;
+}
+
+.attendanceLiveRecapItem::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 12px;
+  bottom: 12px;
+  width: 3px;
+  border-radius: 999px;
+  background: #cbd5e1;
+}
+
+.attendanceLiveRecapItem.tone-valid::before { background: #1fc46a; }
+.attendanceLiveRecapItem.tone-pending::before { background: #f59e0b; }
+.attendanceLiveRecapItem.tone-failed::before { background: #ff3b63; }
+.attendanceLiveRecapItem.tone-missing::before { background: #94a3b8; }
+
+.attendanceLiveRecapItem small,
+.attendanceLiveRecapItem strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attendanceLiveRecapItem small {
+  color: #738197;
+  font-size: 0.65rem;
+  font-weight: 790;
+  text-transform: uppercase;
+}
+
+.attendanceLiveRecapItem strong {
+  color: var(--ops-ink);
+  font-size: 0.98rem;
+  font-weight: 760;
+}
+
+.attendanceTimelineCell {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(74px, 1fr));
+  align-items: start;
+  gap: 12px;
+  min-width: 0;
+  max-width: 360px;
+}
+
+.attendanceTimelineRail {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  top: 9px;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(31, 196, 106, 0.18), rgba(34, 174, 202, 0.12), rgba(148, 163, 184, 0.18));
 }
 
 .attendanceTimelineStep {
   position: relative;
   display: grid;
-  grid-template-columns: 9px minmax(0, 1fr);
-  gap: 10px;
-  align-items: center;
-  min-width: 92px;
+  grid-template-columns: 12px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  min-width: 0;
   padding: 0;
   border: 0;
   background: transparent;
@@ -5189,6 +5308,7 @@ button {
   border-radius: 999px;
   background: #cbd5e1;
   box-shadow: 0 0 0 4px rgba(148, 163, 184, 0.12);
+  margin-top: 5px;
 }
 
 .attendanceTimelineStep.tone-valid .attendanceTimelineDot {
@@ -5209,16 +5329,6 @@ button {
 .attendanceTimelineStep.tone-missing .attendanceTimelineDot {
   background: #cbd5e1;
   box-shadow: 0 0 0 4px rgba(148, 163, 184, 0.12);
-}
-
-.attendanceTimelineStep:not(:last-child)::after {
-  content: "";
-  position: absolute;
-  left: calc(100% + 4px);
-  top: 50%;
-  width: 10px;
-  height: 1px;
-  background: rgba(148, 163, 184, 0.24);
 }
 
 .attendanceTimelineCopy,
@@ -5245,7 +5355,7 @@ button {
 .attendanceTimelineCell strong {
   margin-top: 1px;
   color: var(--ops-ink);
-  font-size: 0.86rem;
+  font-size: 0.84rem;
   font-weight: 500;
 }
 
@@ -5259,15 +5369,15 @@ button {
 
 .attendanceValidationCell {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.82fr) minmax(0, 0.68fr);
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.75fr) minmax(0, 0.62fr);
   align-items: center;
-  gap: 16px;
+  gap: 12px;
   min-width: 0;
 }
 
 .attendanceValidationLine {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
+  grid-template-columns: 17px minmax(0, 1fr);
   gap: 8px;
   align-items: center;
   min-width: 0;
@@ -7309,6 +7419,24 @@ button {
 
   .filterPanel {
     grid-template-columns: 1fr;
+  }
+
+  .filterField,
+  .filterField.dateFilterField {
+    flex-basis: 100%;
+  }
+
+  .dateFilterControl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .uiDateInput {
+    grid-column: 1 / -1;
+  }
+
+  .attendanceLiveRecap {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding-inline: 14px;
   }
 
   .rolePermissionSummary {

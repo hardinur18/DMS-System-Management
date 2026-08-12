@@ -2375,6 +2375,7 @@ function AttendanceTimelineCell({ row }: { row: AttendanceMonitorRow }) {
 
   return (
     <div className="attendanceTimelineCell">
+      <span className="attendanceTimelineRail" aria-hidden="true" />
       {events.map((event) => (
         <span className={clsx("attendanceTimelineStep", `tone-${event.tone}`)} key={event.key}>
           <span className="attendanceTimelineDot" />
@@ -2408,7 +2409,7 @@ function AttendanceValidationCell({ row }: { row: AttendanceMonitorRow }) {
         <span className="attendanceValidationDot" />
         <span>
           <strong>{gpsLabel}</strong>
-          <small>GPS radius</small>
+          <small>GPS</small>
         </span>
       </span>
       <span className={clsx("attendanceValidationLine", `tone-${faceTone}`)}>
@@ -3580,6 +3581,12 @@ function getLocalDateKey(date = new Date()) {
   return `${year}-${month}-${day}`
 }
 
+function shiftDateKey(value: string, offsetDays: number) {
+  const base = value ? new Date(`${value}T00:00:00+07:00`) : new Date()
+  base.setDate(base.getDate() + offsetDays)
+  return getLocalDateKey(base)
+}
+
 function formatAttendanceTime(value?: string | null) {
   if (!value) return "Belum absen"
   return new Intl.DateTimeFormat("id-ID", {
@@ -3635,6 +3642,13 @@ function getAttendanceMonitorStatus(row?: Record<string, unknown>): AttendanceSt
   return "pending"
 }
 
+function getDailyAttendanceMonitorStatus(checkIn?: Record<string, unknown>, checkOut?: Record<string, unknown>): AttendanceStatus {
+  if (!checkIn) return "missing"
+  if (checkIn.status === "rejected" || checkOut?.status === "rejected" || checkIn.face_status === "failed" || checkOut?.face_status === "failed") return "failed"
+  if (checkIn.status === "review" || checkOut?.status === "review" || checkIn.gps_status === "out_of_radius" || checkOut?.gps_status === "out_of_radius" || checkIn.face_status === "review" || checkOut?.face_status === "review") return "pending"
+  return "valid"
+}
+
 function getAttendanceReviewIssue(row: Record<string, unknown>) {
   if (row.status === "rejected") return "Ditolak HR"
   if (row.gps_status === "out_of_radius") return "Di luar radius"
@@ -3645,12 +3659,12 @@ function getAttendanceReviewIssue(row: Record<string, unknown>) {
   return "Valid"
 }
 
-async function loadOperationsFoundationData(): Promise<OperationsFoundationData> {
+async function loadOperationsFoundationData(targetDate = getLocalDateKey()): Promise<OperationsFoundationData> {
   await supabase.rpc("refresh_all_employee_payroll_cycles")
   await supabase.rpc("detect_all_overtime_requests")
   await supabase.rpc("refresh_all_employee_payroll_cycles")
 
-  const today = getLocalDateKey()
+  const selectedDate = targetDate || getLocalDateKey()
   const [employeeResult, divisionResult, locationResult, attendanceResult, payrollResult, overtimeResult, payrollComponentResult] = await Promise.all([
     supabase
       .from("employees")
@@ -3695,7 +3709,7 @@ async function loadOperationsFoundationData(): Promise<OperationsFoundationData>
     if (employeeId && !payrollByEmployee.has(employeeId)) payrollByEmployee.set(employeeId, row)
   })
 
-  const todayLogsByEmployee = new Map<string, { checkIn?: Record<string, unknown>; checkOut?: Record<string, unknown> }>()
+  const selectedLogsByEmployee = new Map<string, { checkIn?: Record<string, unknown>; checkOut?: Record<string, unknown> }>()
   const logsByEmployeeDate = new Map<string, { checkIn?: Record<string, unknown>; checkOut?: Record<string, unknown> }>()
   logs.forEach((row) => {
     const employeeId = String(row.employee_id || "")
@@ -3710,12 +3724,12 @@ async function loadOperationsFoundationData(): Promise<OperationsFoundationData>
       logsByEmployeeDate.set(key, dateEntry)
     }
 
-    if (row.attendance_date !== today) return
+    if (row.attendance_date !== selectedDate) return
 
-    const entry = todayLogsByEmployee.get(employeeId) || {}
+    const entry = selectedLogsByEmployee.get(employeeId) || {}
     if (row.event_type === "check_in" && !entry.checkIn) entry.checkIn = row
     if (row.event_type === "check_out" && !entry.checkOut) entry.checkOut = row
-    todayLogsByEmployee.set(employeeId, entry)
+    selectedLogsByEmployee.set(employeeId, entry)
   })
 
   const rows: AttendanceMonitorRow[] = ((employeeResult.data || []) as Array<Record<string, unknown>>)
@@ -3723,9 +3737,9 @@ async function loadOperationsFoundationData(): Promise<OperationsFoundationData>
     .map((employee) => {
       const employeeId = String(employee.id)
       const location = locationMap.get(String(employee.work_location_id || ""))
-      const todayAttendance = todayLogsByEmployee.get(employeeId)
-      const attendance = todayAttendance?.checkIn
-      const checkOut = todayAttendance?.checkOut
+      const selectedAttendance = selectedLogsByEmployee.get(employeeId)
+      const attendance = selectedAttendance?.checkIn
+      const checkOut = selectedAttendance?.checkOut
       const payroll = payrollByEmployee.get(employeeId)
       const cycleDays = Number(payroll?.work_days_count ?? employee.payroll_cycle_days ?? 0)
       const targetDays = Number(payroll?.target_work_days ?? 26)
@@ -3733,7 +3747,7 @@ async function loadOperationsFoundationData(): Promise<OperationsFoundationData>
       const basePayrollAmount = Number(payroll?.gross_amount || 0)
       const overtimeAmount = Number(payroll?.overtime_amount || 0)
       const payrollAmount = Number(payroll?.net_amount || 0) || basePayrollAmount + overtimeAmount
-      const attendanceStatus = getAttendanceMonitorStatus(attendance)
+      const attendanceStatus = getDailyAttendanceMonitorStatus(attendance, checkOut)
 
       return {
         id: attendance ? String(attendance.id) : `missing-${employeeId}`,
@@ -3744,7 +3758,7 @@ async function loadOperationsFoundationData(): Promise<OperationsFoundationData>
         employeePhotoUrl: getEmployeePhotoPublicUrl(String(employee.photo_path || "")),
         divisionName: divisionMap.get(String(employee.division_id || "")) || "Belum pilih divisi",
         workLocationName: String(location?.name || "Belum pilih lokasi"),
-        attendanceDate: attendance ? String(attendance.attendance_date || "") : today,
+        attendanceDate: attendance ? String(attendance.attendance_date || "") : selectedDate,
         eventAt: attendance ? String(attendance.event_at || "") : "",
         checkInId: attendance ? String(attendance.id || "") : "",
         checkInAt: attendance ? String(attendance.event_at || "") : "",
@@ -3862,7 +3876,7 @@ async function loadOperationsFoundationData(): Promise<OperationsFoundationData>
   const locations: FieldLocationSummary[] = locationRows.map((location) => {
     const locationId = String(location.id)
     const employeeCount = rows.filter((row) => row.workLocationName === String(location.name || "")).length
-    const locationTodayLogs = logs.filter((log) => log.attendance_date === today && String(log.work_location_id || "") === locationId)
+    const locationTodayLogs = logs.filter((log) => log.attendance_date === selectedDate && String(log.work_location_id || "") === locationId)
 
     return {
       id: locationId,
@@ -8401,6 +8415,7 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
   const [data, setData] = useState<OperationsFoundationData>({ rows: [], locations: [], reviews: [], overtime: [] })
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
+  const [selectedDate, setSelectedDate] = useState(getLocalDateKey())
   const [loading, setLoading] = useState(true)
   const [errorMessage, setErrorMessage] = useState("")
   const [fieldDialogOpen, setFieldDialogOpen] = useState(false)
@@ -8427,21 +8442,21 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
     setErrorMessage("")
 
     try {
-      const nextData = await loadOperationsFoundationData()
+      const nextData = await loadOperationsFoundationData(selectedDate)
       setData(nextData)
     } catch (error) {
       setErrorMessage(getFriendlySupabaseError(error, "Gagal mengambil foundation absensi dan payroll."))
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [selectedDate])
 
   useEffect(() => {
     let active = true
 
     setLoading(true)
     setErrorMessage("")
-    void loadOperationsFoundationData()
+    void loadOperationsFoundationData(selectedDate)
       .then((nextData) => {
         if (active) setData(nextData)
       })
@@ -8455,7 +8470,7 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
     return () => {
       active = false
     }
-  }, [])
+  }, [selectedDate])
 
   const handleFieldAttendanceSubmit = async (payload: FieldAttendanceSubmitPayload) => {
     setFieldSubmitting(true)
@@ -8665,6 +8680,9 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
   })
   const pendingOvertimeRows = data.overtime.filter((row) => row.status === "pending")
   const approvedOvertimeTotal = data.overtime.reduce((sum, row) => sum + (row.status === "approved" ? row.totalAmount : 0), 0)
+  const todayDate = getLocalDateKey()
+  const yesterdayDate = shiftDateKey(todayDate, -1)
+  const isTodayView = selectedDate === todayDate
   const pageSubtitle = activeView === "payroll"
     ? "Preview payroll otomatis dari 26 hari kerja valid, lembur approved, tipe gaji, dan cycle berjalan."
     : activeView === "attendance-review"
@@ -8711,13 +8729,28 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
       />
 
       <OperationalKpiGrid>
-        <OperationalKpiCard label="Absen Valid" value={data.rows.filter((row) => row.attendanceStatus === "valid").length} detail="Hari ini" icon={UserRoundCheck} tone="green" />
+        <OperationalKpiCard label="Absen Valid" value={data.rows.filter((row) => row.attendanceStatus === "valid").length} detail={isTodayView ? "Hari ini" : formatWorkDate(selectedDate)} icon={UserRoundCheck} tone="green" />
         <OperationalKpiCard label="Butuh Review" value={reviewRows.length} detail="GPS/face/perlu approval" icon={AlertTriangle} tone="amber" />
         <OperationalKpiCard label="Lokasi GPS" value={`${gpsReadyLocations.length}/${data.locations.length}`} detail="Koordinat + radius siap" icon={LocateFixed} tone="blue" />
         <OperationalKpiCard label="Preview Payroll" value={formatCurrency(payrollPreviewTotal)} detail="Pokok + lembur approved" icon={BadgeDollarSign} tone="violet" />
       </OperationalKpiGrid>
 
       <OperationalFilterPanel>
+        {activeView === "attendance-live" && (
+          <div className="filterField dateFilterField">
+            <label>Tanggal</label>
+            <div className="dateFilterControl">
+              <button className={clsx("dateQuickButton", isTodayView && "active")} type="button" onClick={() => setSelectedDate(todayDate)}>Hari ini</button>
+              <button className={clsx("dateQuickButton", selectedDate === yesterdayDate && "active")} type="button" onClick={() => setSelectedDate(yesterdayDate)}>Kemarin</button>
+              <input
+                className="uiDateInput"
+                type="date"
+                value={selectedDate}
+                onChange={(event) => setSelectedDate(event.target.value || todayDate)}
+              />
+            </div>
+          </div>
+        )}
         <div className="filterField">
           <label>Search</label>
           <div className="uiInput inputWithIcon compact">
@@ -8764,7 +8797,7 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
           <OvertimeReviewTable rows={filteredOvertimeRows} loading={loading} errorMessage={errorMessage} onReview={setOvertimeTarget} />
         </>
       ) : (
-        <LiveAttendanceTable rows={filteredRows} loading={loading} errorMessage={errorMessage} onResetDay={setResetAttendanceRow} />
+        <LiveAttendanceTable rows={filteredRows} loading={loading} errorMessage={errorMessage} selectedDate={selectedDate} onResetDay={setResetAttendanceRow} />
       )}
 
       <FieldAttendanceDialog
@@ -8830,11 +8863,13 @@ function LiveAttendanceTable({
   rows,
   loading,
   errorMessage,
+  selectedDate,
   onResetDay,
 }: {
   rows: AttendanceMonitorRow[]
   loading: boolean
   errorMessage: string
+  selectedDate: string
   onResetDay: (row: AttendanceMonitorRow) => void
 }) {
   const [detailRow, setDetailRow] = useState<AttendanceMonitorRow | null>(null)
@@ -8845,9 +8880,10 @@ function LiveAttendanceTable({
         <div className="tableHeader">
           <div>
             <h2>Realtime Attendance Feed</h2>
-            <p>Data check-in dan check-out hari ini dari GPS radius, face verification, dan workday counted.</p>
+            <p>Data check-in dan check-out {formatWorkDate(selectedDate)} dari GPS radius, face verification, dan workday counted.</p>
           </div>
         </div>
+        <AttendanceLiveRecap rows={rows} selectedDate={selectedDate} />
         <div className="tableScroller uiDataTableScroller uiDataTableHasColumns liveAttendanceTableScroller">
           <table>
             <colgroup>
@@ -8889,7 +8925,7 @@ function LiveAttendanceTable({
                       </RowActionMenuItem>
                       <RowActionMenuItem danger disabled={!row.checkInId && !row.checkOutId} onClick={() => onResetDay(row)}>
                         <RotateCcw size={15} />
-                        Reset Hari Ini
+                        Reset Tanggal Ini
                       </RowActionMenuItem>
                     </RowActionMenu>
                   </td>
@@ -8902,6 +8938,37 @@ function LiveAttendanceTable({
       </OperationalTableCard>
       <AttendanceMonitorDetailDialog row={detailRow} onClose={() => setDetailRow(null)} onResetDay={onResetDay} />
     </>
+  )
+}
+
+function AttendanceLiveRecap({ rows, selectedDate }: { rows: AttendanceMonitorRow[]; selectedDate: string }) {
+  const checkedIn = rows.filter((row) => row.checkInId).length
+  const checkedOut = rows.filter((row) => row.checkOutId).length
+  const review = rows.filter((row) => row.attendanceStatus === "pending").length
+  const failed = rows.filter((row) => row.attendanceStatus === "failed").length
+  const missing = rows.filter((row) => !row.checkInId).length
+  const missingCheckout = rows.filter((row) => row.checkInId && !row.checkOutId).length
+  const workdayCounted = rows.filter((row) => row.attendanceStatus === "valid" && row.checkInId).length
+  const items = [
+    { label: "Tanggal", value: formatWorkDate(selectedDate), tone: "neutral" },
+    { label: "Masuk", value: checkedIn, tone: "valid" },
+    { label: "Pulang", value: checkedOut, tone: "valid" },
+    { label: "Belum checkout", value: missingCheckout, tone: missingCheckout ? "pending" : "neutral" },
+    { label: "Review", value: review, tone: review ? "pending" : "neutral" },
+    { label: "Failed", value: failed, tone: failed ? "failed" : "neutral" },
+    { label: "Belum absen", value: missing, tone: missing ? "missing" : "neutral" },
+    { label: "Hari kerja valid", value: workdayCounted, tone: "valid" },
+  ] as const
+
+  return (
+    <div className="attendanceLiveRecap" aria-label={`Rekap absensi ${formatWorkDate(selectedDate)}`}>
+      {items.map((item) => (
+        <span className={clsx("attendanceLiveRecapItem", `tone-${item.tone}`)} key={item.label}>
+          <small>{item.label}</small>
+          <strong>{item.value}</strong>
+        </span>
+      ))}
+    </div>
   )
 }
 
