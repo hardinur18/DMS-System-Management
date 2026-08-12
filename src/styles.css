@@ -912,11 +912,14 @@ button {
 
 .filterPanel,
 .uiFilterCard {
+  position: relative;
+  z-index: 20;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   padding: 18px 20px;
+  overflow: visible;
 }
 
 .filterField {
@@ -927,6 +930,8 @@ button {
 }
 
 .filterField.dateFilterField {
+  position: relative;
+  z-index: 30;
   flex: 0 1 430px;
 }
 
@@ -991,6 +996,234 @@ button {
   color-scheme: light;
 }
 
+.attendanceDateFilter {
+  position: relative;
+  width: 100%;
+  z-index: 1;
+}
+
+.attendanceDateFilter.open {
+  z-index: 120;
+}
+
+.attendanceDateTrigger {
+  display: grid;
+  width: 100%;
+  min-height: var(--ops-control-h);
+  grid-template-columns: 22px minmax(0, 1fr) 20px;
+  align-items: center;
+  gap: 12px;
+  padding: 0 18px;
+  border: 1px solid rgba(15, 23, 42, 0.13);
+  border-radius: var(--ops-radius-sm);
+  background: #ffffff;
+  color: var(--ops-ink);
+  font-size: var(--font-ui);
+  font-weight: 820;
+  text-align: left;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.04);
+  cursor: pointer;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease, background 160ms ease;
+}
+
+.attendanceDateTrigger span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attendanceDateTrigger > svg:first-child {
+  color: #71819a;
+}
+
+.attendanceDateTrigger > svg:last-child {
+  justify-self: end;
+  color: #71819a;
+  transition: transform 160ms ease;
+}
+
+.attendanceDateTrigger:hover,
+.attendanceDateTrigger.active {
+  border-color: rgba(34, 174, 202, 0.44);
+  box-shadow: var(--ring), 0 16px 32px -24px rgba(7, 24, 74, 0.55);
+  transform: translateY(-1px);
+}
+
+.attendanceDateTrigger.active > svg:last-child {
+  transform: rotate(180deg);
+}
+
+.attendanceDatePopover {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 12px);
+  z-index: 220;
+  display: grid;
+  width: min(760px, calc(100vw - 64px));
+  grid-template-columns: 210px minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid rgba(34, 174, 202, 0.24);
+  border-radius: 24px;
+  background: #ffffff;
+  box-shadow: 0 30px 80px -44px rgba(7, 24, 74, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.72) inset;
+  animation: datePickerIn 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.attendanceDateSidebar {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  padding: 18px 0;
+  background: #fbfdff;
+  border-right: 1px solid rgba(15, 23, 42, 0.05);
+}
+
+.attendanceDateSidebar button {
+  min-height: 42px;
+  padding: 0 20px;
+  border: 0;
+  background: transparent;
+  color: #52617a;
+  font-size: 0.92rem;
+  font-weight: 820;
+  text-align: left;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease, transform 150ms ease;
+}
+
+.attendanceDateSidebar button:hover {
+  color: var(--blue-ink);
+  background: rgba(34, 174, 202, 0.08);
+}
+
+.attendanceDateSidebar button.active {
+  color: #076f88;
+  background: linear-gradient(90deg, rgba(230, 248, 252, 0.96), rgba(255, 255, 255, 0));
+}
+
+.attendanceDateCalendar {
+  display: grid;
+  gap: 14px;
+  padding: 22px 24px 18px;
+}
+
+.attendanceDateCalendarHeader {
+  display: grid;
+  grid-template-columns: 36px 36px minmax(0, 1fr) 36px 36px;
+  align-items: center;
+  gap: 8px;
+}
+
+.attendanceDateCalendarHeader strong {
+  color: var(--ops-ink);
+  font-size: 1.08rem;
+  font-weight: 900;
+  text-align: center;
+}
+
+.attendanceDateCalendarHeader button,
+.attendanceDateFooter button {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: #65748c;
+  font-size: 1.15rem;
+  font-weight: 820;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease, transform 150ms ease;
+}
+
+.attendanceDateCalendarHeader button:hover,
+.attendanceDateFooter button:hover {
+  color: var(--blue-ink);
+  background: rgba(34, 174, 202, 0.08);
+  transform: translateY(-1px);
+}
+
+.attendanceDateWeekdays,
+.attendanceDateGrid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.attendanceDateWeekdays span {
+  color: #93a2b8;
+  font-size: 0.78rem;
+  font-weight: 720;
+  text-align: center;
+}
+
+.attendanceDateGrid {
+  row-gap: 8px;
+}
+
+.attendanceDateGrid button {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  justify-self: center;
+  border: 1px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 0.9rem;
+  font-weight: 620;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease, transform 150ms ease, border-radius 150ms ease;
+}
+
+.attendanceDateGrid button:hover {
+  border-radius: 12px;
+  color: var(--blue-ink);
+  background: rgba(34, 174, 202, 0.09);
+  transform: translateY(-1px);
+}
+
+.attendanceDateGrid button.muted {
+  color: #c4cfdd;
+}
+
+.attendanceDateGrid button.today {
+  border-color: rgba(34, 174, 202, 0.34);
+  border-radius: 12px;
+}
+
+.attendanceDateGrid button.active {
+  border-radius: 0;
+  color: #ffffff;
+  background: #2876ff;
+  box-shadow: 0 12px 24px -16px rgba(40, 118, 255, 0.72);
+}
+
+.attendanceDateFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 4px;
+}
+
+.attendanceDateFooter strong {
+  color: var(--ops-ink);
+  font-size: 0.88rem;
+  font-weight: 860;
+}
+
+.attendanceDateFooter button {
+  min-width: 88px;
+  border-color: rgba(15, 23, 42, 0.1);
+  border-radius: 16px;
+  background: #ffffff;
+  color: var(--ops-ink);
+  font-size: 0.82rem;
+  box-shadow: 0 14px 28px -20px rgba(15, 23, 42, 0.5);
+}
+
 .employeeFilterPanel {
   grid-template-columns: minmax(360px, 1fr) minmax(190px, 240px) minmax(170px, 220px) auto;
 }
@@ -1005,6 +1238,15 @@ button {
   color: var(--ink);
   font-size: var(--font-ui);
   font-weight: 650;
+}
+
+.uiSelectTrigger {
+  appearance: none;
+  padding: 0 46px 0 18px;
+  background-image: url("data:image/svg+xml,%3Csvg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%235b6a80' stroke-width='2.3' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 18px center;
+  background-size: 18px 18px;
 }
 
 .inputWithIcon {
@@ -1040,7 +1282,49 @@ button {
 }
 
 .uiSelectTrigger {
-  padding: 0 13px;
+  appearance: none;
+  padding: 0 54px 0 16px;
+  background-image: url("data:image/svg+xml,%3Csvg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%23526179' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-position: calc(100% - 28px) 50%;
+  background-repeat: no-repeat;
+  background-size: 18px 18px;
+}
+
+.recapRangeField {
+  flex: 0 0 280px;
+}
+
+.recapRangeControl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  min-height: var(--ops-control-h);
+  padding: 5px;
+  gap: 4px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: var(--ops-radius-sm);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.recapRangeControl button {
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  color: #66758b;
+  font-size: 0.82rem;
+  font-weight: 820;
+  cursor: pointer;
+  transition: background 160ms ease, color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.recapRangeControl button:hover {
+  transform: translateY(-1px);
+  color: var(--blue-ink);
+}
+
+.recapRangeControl button.active {
+  color: var(--blue-ink);
+  background: #eefcff;
+  box-shadow: inset 0 0 0 1px rgba(34, 174, 202, 0.24), 0 10px 22px rgba(34, 174, 202, 0.08);
 }
 
 .dashboardStack {
@@ -1468,15 +1752,11 @@ button {
 
 .formField select {
   appearance: none;
-  padding-right: 40px;
-  background-image:
-    linear-gradient(45deg, transparent 50%, #526179 50%),
-    linear-gradient(135deg, #526179 50%, transparent 50%);
-  background-position:
-    calc(100% - 20px) 50%,
-    calc(100% - 14px) 50%;
+  padding-right: 56px;
+  background-image: url("data:image/svg+xml,%3Csvg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%23526179' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-position: calc(100% - 20px) 50%;
   background-repeat: no-repeat;
-  background-size: 6px 6px, 6px 6px;
+  background-size: 18px 18px;
 }
 
 .formField input:focus,
@@ -3751,6 +4031,45 @@ button {
   background: rgba(255, 247, 231, 0.9);
 }
 
+.attendanceReviewStory {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+  border: 1px solid rgba(34, 174, 202, 0.14);
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at 8% 10%, rgba(34, 174, 202, 0.12), transparent 34%),
+    linear-gradient(135deg, rgba(247, 253, 255, 0.94), rgba(255, 255, 255, 0.98));
+  box-shadow: 0 24px 56px -48px rgba(7, 24, 74, 0.62);
+}
+
+.attendanceReviewStoryIcon {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border: 1px solid rgba(34, 174, 202, 0.2);
+  border-radius: 16px;
+  color: var(--blue-ink);
+  background: rgba(230, 248, 252, 0.82);
+}
+
+.attendanceReviewStoryIcon.checkout {
+  border-color: rgba(249, 158, 36, 0.2);
+  color: #a05b00;
+  background: rgba(255, 247, 231, 0.92);
+}
+
+.attendanceReviewStory p {
+  margin: 0;
+  color: var(--ops-ink);
+  font-size: 0.82rem;
+  font-weight: 680;
+  line-height: 1.45;
+}
+
 .attendanceReviewContent {
   display: grid;
   flex: 1 1 auto;
@@ -3779,6 +4098,104 @@ button {
 
 .attendanceMonitorDetailDialog {
   width: min(820px, calc(100vw - 48px));
+}
+
+.checkoutCorrectionDialog {
+  display: flex;
+  width: min(720px, calc(100vw - 36px));
+  max-height: calc(100dvh - 40px);
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+  border-radius: 28px;
+}
+
+.checkoutCorrectionBody {
+  display: grid;
+  gap: 14px;
+  padding: 18px 26px 24px;
+}
+
+.checkoutCorrectionSummary {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+  padding: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 5% 15%, rgba(245, 158, 11, 0.12), transparent 34%),
+    linear-gradient(145deg, rgba(255, 251, 235, 0.48), rgba(255, 255, 255, 0.96));
+}
+
+.checkoutCorrectionSummary small,
+.checkoutCorrectionSummary p {
+  margin: 0;
+  color: var(--ops-muted);
+  font-size: 0.75rem;
+  font-weight: 760;
+  line-height: 1.35;
+}
+
+.checkoutCorrectionSummary strong {
+  display: block;
+  margin: 2px 0;
+  color: var(--ops-ink);
+  font-size: 1.02rem;
+  font-weight: 850;
+  line-height: 1.25;
+}
+
+.checkoutCorrectionFields {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 12px;
+}
+
+.checkoutCorrectionNotice {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid rgba(34, 174, 202, 0.18);
+  border-radius: 16px;
+  color: var(--blue-ink);
+  background: rgba(236, 253, 255, 0.72);
+  font-size: 0.82rem;
+  font-weight: 760;
+  line-height: 1.4;
+}
+
+.checkoutCorrectionNotice svg {
+  flex: 0 0 auto;
+}
+
+.formErrorMessage {
+  margin: 0;
+  color: var(--danger-ink);
+  font-size: 0.82rem;
+  font-weight: 760;
+}
+
+@media (max-width: 720px) {
+  .checkoutCorrectionDialog {
+    width: min(100vw - 24px, 720px);
+    max-height: calc(100dvh - 24px);
+    border-radius: 24px;
+  }
+
+  .checkoutCorrectionBody {
+    padding: 16px;
+  }
+
+  .checkoutCorrectionFields {
+    grid-template-columns: 1fr;
+  }
+
+  .checkoutCorrectionDialog .attendanceReviewActions {
+    grid-template-columns: 1fr;
+  }
 }
 
 .payrollProcessDialog {
@@ -4211,6 +4628,233 @@ button {
   min-width: 0;
 }
 
+.attendanceReviewGroupRow.active {
+  background: linear-gradient(90deg, rgba(230, 248, 252, 0.6), rgba(255, 255, 255, 0));
+}
+
+.attendanceReviewGroupActivity {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(86px, 1fr));
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  max-width: 230px;
+}
+
+.attendanceReviewMiniEvent {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+  padding: 4px 8px 4px 19px;
+  border: 0;
+  border-radius: 10px;
+  color: #738197;
+  background: transparent;
+}
+
+.attendanceReviewMiniEvent::before {
+  position: absolute;
+  top: 50%;
+  left: 4px;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #cbd5e1;
+  content: "";
+  box-shadow: 0 0 0 4px rgba(148, 163, 184, 0.12);
+  transform: translateY(-50%);
+}
+
+.attendanceReviewMiniEvent span {
+  font-size: 0.58rem;
+  font-weight: 850;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.attendanceReviewMiniEvent strong {
+  color: var(--ops-ink);
+  font-size: 0.78rem;
+  font-weight: 620;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attendanceReviewMiniEvent.tone-valid {
+  color: #087f4f;
+  background: rgba(236, 253, 245, 0.52);
+}
+
+.attendanceReviewMiniEvent.tone-valid::before {
+  background: #1fc46a;
+  box-shadow: 0 0 0 4px rgba(31, 196, 106, 0.13);
+}
+
+.attendanceReviewMiniEvent.tone-pending {
+  color: #a05b00;
+  background: rgba(255, 251, 235, 0.58);
+}
+
+.attendanceReviewMiniEvent.tone-pending::before {
+  background: #f59e0b;
+  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.14);
+}
+
+.attendanceReviewMiniEvent.tone-failed {
+  color: #be123c;
+  background: rgba(255, 241, 242, 0.58);
+}
+
+.attendanceReviewMiniEvent.tone-failed::before {
+  background: #ff3b63;
+  box-shadow: 0 0 0 4px rgba(255, 59, 99, 0.13);
+}
+
+.rowExpandButton {
+  display: inline-grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 13px;
+  color: #526179;
+  background: rgba(255, 255, 255, 0.88);
+  cursor: pointer;
+  transition: transform 160ms ease, border-color 160ms ease, color 160ms ease, background 160ms ease;
+}
+
+.attendanceReviewGroupRow.active .rowExpandButton {
+  color: var(--blue-ink);
+  border-color: rgba(34, 174, 202, 0.22);
+  background: rgba(230, 248, 252, 0.9);
+}
+
+.attendanceReviewGroupRow.active .rowExpandButton svg {
+  transform: rotate(180deg);
+}
+
+.rowExpandButton svg {
+  transition: transform 180ms ease;
+}
+
+.attendanceReviewExpandRow td {
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  background: #fff;
+}
+
+.attendanceReviewExpandPanel {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
+  align-items: stretch;
+  padding: 0 20px 18px;
+  border: 0;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 0;
+  background: #fff;
+  box-shadow: none;
+}
+
+.attendanceReviewEventPanel {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 10px 12px;
+  align-items: center;
+  min-width: 0;
+  padding: 18px 20px 0 0;
+  border: 0;
+  border-radius: 0;
+  background: #fff;
+  box-shadow: none;
+}
+
+.attendanceReviewEventPanel.checkout {
+  padding-right: 0;
+  padding-left: 20px;
+  border-left: 1px solid rgba(15, 23, 42, 0.06);
+  background: #fff;
+}
+
+.attendanceReviewEventPanel.tone-empty {
+  color: #738197;
+}
+
+.attendanceReviewEventPanel.tone-valid .attendanceReviewEventPanelIcon {
+  color: #0b9c6b;
+  background: rgba(230, 252, 242, 0.96);
+}
+
+.attendanceReviewEventPanel.tone-failed .attendanceReviewEventPanelIcon {
+  color: #e11d48;
+  background: rgba(255, 241, 244, 0.96);
+}
+
+.attendanceReviewEventPanel.tone-pending .attendanceReviewEventPanelIcon {
+  color: #a05b00;
+  background: rgba(255, 247, 231, 0.96);
+}
+
+.attendanceReviewEventPanelIcon {
+  display: inline-grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 14px;
+  color: var(--blue-ink);
+  background: rgba(230, 248, 252, 0.96);
+}
+
+.attendanceReviewEventPanel.checkout .attendanceReviewEventPanelIcon {
+  color: #a05b00;
+  background: rgba(255, 247, 231, 0.96);
+}
+
+.attendanceReviewEventPanelMain {
+  min-width: 0;
+}
+
+.attendanceReviewEventPanelMain strong,
+.attendanceReviewEventPanel p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attendanceReviewEventPanelMain strong {
+  display: block;
+  color: var(--ops-ink);
+  font-size: 0.86rem;
+  font-weight: 760;
+}
+
+.attendanceReviewEventPanel p {
+  margin: 2px 0 0;
+  color: #738197;
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.attendanceReviewEventPanel .attendanceEvidenceCell {
+  grid-column: 1 / -1;
+}
+
+.attendanceReviewEventPanel .compactButton {
+  grid-column: 1 / -1;
+  justify-self: start;
+  min-height: 36px;
+  padding: 0 13px;
+}
+
+.attendanceReviewApproveAll {
+  grid-column: 1 / -1;
+  justify-self: end;
+  margin-top: 18px;
+  min-width: 220px;
+}
+
 .attendanceReviewAvatar {
   width: 42px;
   height: 42px;
@@ -4457,6 +5101,101 @@ button {
   font-size: 0.72rem;
   font-weight: 640;
   line-height: 1.35;
+}
+
+.attendanceReviewDayContext {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1fr) minmax(160px, 0.8fr);
+  gap: 10px;
+  align-items: stretch;
+}
+
+.attendanceReviewDayEvent,
+.attendanceReviewDayDuration {
+  display: grid;
+  gap: 4px;
+  align-content: center;
+  min-width: 0;
+  min-height: 78px;
+  padding: 12px 13px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 18px;
+  background: rgba(248, 251, 255, 0.88);
+}
+
+.attendanceReviewDayEvent.active {
+  border-color: rgba(34, 174, 202, 0.32);
+  background: linear-gradient(135deg, rgba(230, 248, 252, 0.92), rgba(255, 255, 255, 0.98));
+  box-shadow: 0 18px 42px -34px rgba(8, 145, 178, 0.62);
+}
+
+.attendanceReviewDayEvent.review {
+  border-color: rgba(245, 158, 11, 0.22);
+}
+
+.attendanceReviewDayEvent.rejected {
+  border-color: rgba(244, 63, 94, 0.22);
+}
+
+.attendanceReviewDayEvent span,
+.attendanceReviewDayDuration span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #7b8aa3;
+  font-size: 0.68rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.attendanceReviewDayEvent strong,
+.attendanceReviewDayDuration strong {
+  overflow: hidden;
+  color: var(--ops-ink);
+  font-size: 1rem;
+  font-weight: 820;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attendanceReviewDayEvent small,
+.attendanceReviewDayDuration small {
+  overflow: hidden;
+  color: var(--ops-muted);
+  font-size: 0.7rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attendanceReviewDayLine {
+  position: relative;
+  align-self: center;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(34, 174, 202, 0.72), rgba(249, 158, 36, 0.62));
+}
+
+.attendanceReviewDayLine::before,
+.attendanceReviewDayLine::after {
+  position: absolute;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #ffffff;
+  content: "";
+  box-shadow: 0 0 0 3px rgba(34, 174, 202, 0.18);
+  transform: translateY(-50%);
+}
+
+.attendanceReviewDayLine::before {
+  left: 0;
+}
+
+.attendanceReviewDayLine::after {
+  right: 0;
+  box-shadow: 0 0 0 3px rgba(249, 158, 36, 0.18);
 }
 
 .attendanceReviewSummary {
@@ -5100,14 +5839,15 @@ button {
 .dataTablePaginationControls select {
   min-width: 72px;
   height: 38px;
-  padding: 0 30px 0 12px;
+  padding: 0 42px 0 12px;
   border: 1px solid rgba(15, 23, 42, 0.1);
   border-radius: 13px;
   color: var(--ops-ink);
-  background:
-    linear-gradient(45deg, transparent 50%, #526179 50%) calc(100% - 16px) 16px / 6px 6px no-repeat,
-    linear-gradient(135deg, #526179 50%, transparent 50%) calc(100% - 11px) 16px / 6px 6px no-repeat,
-    #ffffff;
+  background-color: #ffffff;
+  background-image: url("data:image/svg+xml,%3Csvg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%23526179' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-position: calc(100% - 15px) 50%;
+  background-repeat: no-repeat;
+  background-size: 16px 16px;
   font-size: 0.78rem;
   font-weight: 760;
   appearance: none;
@@ -5209,27 +5949,38 @@ button {
   --table-min-width: 1320px;
 }
 
+.attendanceRecapTableScroller {
+  --table-min-width: 1380px;
+}
+
 .liveAttendanceTableScroller tbody tr:hover {
   background: linear-gradient(90deg, rgba(236, 253, 255, 0.7), rgba(255, 255, 255, 0.98) 34%, rgba(248, 251, 255, 0.92));
 }
 
 .attendanceLiveRecap {
+  position: relative;
+  z-index: 1;
   display: grid;
-  grid-template-columns: repeat(8, minmax(96px, 1fr));
-  gap: 10px;
-  padding: 0 20px 18px;
-  border-bottom: 1px solid rgba(15, 23, 42, 0.07);
+  grid-template-columns: repeat(8, minmax(92px, 1fr));
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.05);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 24px 70px -54px rgba(7, 24, 74, 0.72);
 }
 
 .attendanceLiveRecapItem {
   position: relative;
   display: grid;
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
-  padding: 12px 13px 12px 15px;
+  min-height: 58px;
+  align-content: center;
+  padding: 9px 11px 9px 14px;
   border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: 18px;
-  background: linear-gradient(135deg, #ffffff, #f9fbff);
+  border-radius: 15px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(248, 251, 255, 0.94));
   overflow: hidden;
 }
 
@@ -5237,8 +5988,8 @@ button {
   content: "";
   position: absolute;
   left: 0;
-  top: 12px;
-  bottom: 12px;
+  top: 11px;
+  bottom: 11px;
   width: 3px;
   border-radius: 999px;
   background: #cbd5e1;
@@ -5259,76 +6010,188 @@ button {
 
 .attendanceLiveRecapItem small {
   color: #738197;
-  font-size: 0.65rem;
-  font-weight: 790;
+  font-size: 0.62rem;
+  font-weight: 820;
   text-transform: uppercase;
 }
 
 .attendanceLiveRecapItem strong {
   color: var(--ops-ink);
-  font-size: 0.98rem;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.recapEventText {
+  position: relative;
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding-left: 14px;
+}
+
+.recapEventText::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 5px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #cbd5e1;
+  box-shadow: 0 0 0 4px rgba(226, 232, 240, 0.72);
+}
+
+.recapEventText.tone-valid::before {
+  background: #1fc46a;
+  box-shadow: 0 0 0 4px rgba(31, 196, 106, 0.13);
+}
+
+.recapEventText.tone-pending::before {
+  background: #f59e0b;
+  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.14);
+}
+
+.recapEventText.tone-failed::before {
+  background: #ff3b63;
+  box-shadow: 0 0 0 4px rgba(255, 59, 99, 0.13);
+}
+
+.recapEventText span {
+  color: #718096;
+  font-size: 0.66rem;
+  font-weight: 850;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.recapEventText strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 0.91rem;
+  font-weight: 400;
+  line-height: 1.18;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recapEventText small {
+  color: #718096;
+  font-size: 0.74rem;
+  font-weight: 650;
+}
+
+.recapValidationSummary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.recapValidationPill {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-height: 29px;
+  gap: 6px;
+  padding: 5px 9px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 999px;
+  color: #526179;
+  background: rgba(248, 251, 255, 0.82);
+  font-size: 0.72rem;
   font-weight: 760;
+  white-space: nowrap;
+}
+
+.recapValidationPill.valid {
+  border-color: rgba(31, 196, 106, 0.22);
+  color: #07935f;
+  background: rgba(232, 252, 240, 0.85);
+}
+
+.recapValidationPill.pending {
+  border-color: rgba(245, 158, 11, 0.24);
+  color: #a05b00;
+  background: rgba(255, 251, 235, 0.86);
+}
+
+.recapValidationPill.failed {
+  border-color: rgba(255, 59, 99, 0.22);
+  color: #be123c;
+  background: rgba(255, 241, 242, 0.86);
 }
 
 .attendanceTimelineCell {
   position: relative;
   display: grid;
-  grid-template-columns: repeat(3, minmax(74px, 1fr));
+  grid-template-columns: repeat(3, minmax(70px, 1fr));
   align-items: start;
-  gap: 12px;
+  gap: 16px;
   min-width: 0;
-  max-width: 360px;
+  max-width: 390px;
 }
 
-.attendanceTimelineRail {
+.attendanceTimelineCell::before {
   position: absolute;
-  left: 4px;
-  right: 4px;
-  top: 9px;
-  height: 1px;
-  background: linear-gradient(90deg, rgba(31, 196, 106, 0.18), rgba(34, 174, 202, 0.12), rgba(148, 163, 184, 0.18));
+  top: 13px;
+  right: 22px;
+  left: 22px;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(31, 196, 106, 0.18), rgba(34, 174, 202, 0.13), rgba(148, 163, 184, 0.16));
+  content: "";
 }
 
 .attendanceTimelineStep {
   position: relative;
   display: grid;
-  grid-template-columns: 12px minmax(0, 1fr);
-  gap: 8px;
-  align-items: start;
+  grid-template-columns: 1fr;
+  gap: 7px;
   min-width: 0;
+  min-height: 64px;
   padding: 0;
   border: 0;
+  border-radius: 0;
   background: transparent;
   box-shadow: none;
 }
 
 .attendanceTimelineDot {
-  width: 8px;
-  height: 8px;
+  position: relative;
+  z-index: 1;
+  width: 12px;
+  height: 12px;
+  margin: 8px 0 0;
   border-radius: 999px;
   background: #cbd5e1;
-  box-shadow: 0 0 0 4px rgba(148, 163, 184, 0.12);
-  margin-top: 5px;
+  box-shadow: 0 0 0 8px rgba(148, 163, 184, 0.12), 0 8px 16px -10px rgba(15, 23, 42, 0.42);
 }
 
 .attendanceTimelineStep.tone-valid .attendanceTimelineDot {
   background: #1fc46a;
-  box-shadow: 0 0 0 4px rgba(31, 196, 106, 0.15);
+  box-shadow: 0 0 0 8px rgba(31, 196, 106, 0.14), 0 8px 16px -10px rgba(12, 143, 84, 0.48);
 }
 
 .attendanceTimelineStep.tone-pending .attendanceTimelineDot {
   background: #f59e0b;
-  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.15);
+  box-shadow: 0 0 0 8px rgba(245, 158, 11, 0.15), 0 8px 16px -10px rgba(180, 83, 9, 0.42);
 }
 
 .attendanceTimelineStep.tone-failed .attendanceTimelineDot {
   background: #ff3b63;
-  box-shadow: 0 0 0 4px rgba(255, 59, 99, 0.14);
+  box-shadow: 0 0 0 8px rgba(255, 59, 99, 0.14), 0 8px 16px -10px rgba(190, 18, 60, 0.42);
 }
 
 .attendanceTimelineStep.tone-missing .attendanceTimelineDot {
   background: #cbd5e1;
-  box-shadow: 0 0 0 4px rgba(148, 163, 184, 0.12);
+  box-shadow: 0 0 0 8px rgba(148, 163, 184, 0.12), 0 8px 16px -10px rgba(15, 23, 42, 0.22);
+}
+
+.attendanceTimelineCopy {
+  display: grid;
+  gap: 2px;
+  padding-top: 4px;
 }
 
 .attendanceTimelineCopy,
@@ -5336,7 +6199,8 @@ button {
 .attendanceTimelineCell strong,
 .attendanceTimelineCell small,
 .attendanceValidationCell strong,
-.attendanceValidationCell small {
+.attendanceValidationCell small,
+.attendanceValidationMetric span {
   display: block;
   min-width: 0;
   overflow: hidden;
@@ -5347,7 +6211,7 @@ button {
 .attendanceTimelineCopy span {
   color: #738197;
   font-size: 0.62rem;
-  font-weight: 760;
+  font-weight: 820;
   text-transform: uppercase;
   letter-spacing: 0;
 }
@@ -5369,69 +6233,107 @@ button {
 
 .attendanceValidationCell {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.75fr) minmax(0, 0.62fr);
-  align-items: center;
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 7px;
   min-width: 0;
+  max-width: 270px;
 }
 
-.attendanceValidationLine {
+.attendanceValidationLocation {
   display: grid;
-  grid-template-columns: 17px minmax(0, 1fr);
-  gap: 8px;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 9px;
   align-items: center;
   min-width: 0;
+}
+
+.attendanceValidationIcon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid rgba(34, 174, 202, 0.18);
+  border-radius: 12px;
+  background: rgba(230, 248, 252, 0.76);
   color: #0789a0;
 }
 
-.attendanceValidationLine.location {
-  grid-template-columns: 20px minmax(0, 1fr);
-}
-
-.attendanceValidationLine svg {
-  color: #0789a0;
-}
-
-.attendanceValidationDot {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: #cbd5e1;
-  box-shadow: 0 0 0 4px rgba(148, 163, 184, 0.12);
-}
-
-.attendanceValidationLine.tone-valid svg,
-.attendanceValidationLine.tone-valid .attendanceValidationDot {
+.attendanceValidationLocation.tone-valid .attendanceValidationIcon {
+  border-color: rgba(31, 196, 106, 0.22);
+  background: rgba(232, 252, 240, 0.88);
   color: #059669;
-  background: #1fc46a;
-  box-shadow: 0 0 0 4px rgba(31, 196, 106, 0.15);
 }
 
-.attendanceValidationLine.tone-pending svg,
-.attendanceValidationLine.tone-pending .attendanceValidationDot {
-  color: #c47a00;
-  background: #f59e0b;
-  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.15);
-}
-
-.attendanceValidationLine.tone-failed svg,
-.attendanceValidationLine.tone-failed .attendanceValidationDot {
+.attendanceValidationLocation.tone-failed .attendanceValidationIcon {
+  border-color: rgba(255, 59, 99, 0.2);
+  background: rgba(255, 241, 244, 0.9);
   color: #e11d48;
-  background: #ff3b63;
-  box-shadow: 0 0 0 4px rgba(255, 59, 99, 0.14);
 }
 
-.attendanceValidationLine.tone-missing svg,
-.attendanceValidationLine.tone-missing .attendanceValidationDot {
+.attendanceValidationLocation.tone-missing .attendanceValidationIcon {
+  border-color: rgba(148, 163, 184, 0.2);
+  background: rgba(248, 250, 252, 0.94);
   color: #94a3b8;
-  background: #cbd5e1;
-  box-shadow: 0 0 0 4px rgba(148, 163, 184, 0.12);
+}
+
+.attendanceValidationMetrics {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 7px;
+  align-items: center;
+  min-width: 0;
+  padding-left: 39px;
+}
+
+.attendanceValidationMetric {
+  display: inline-flex;
+  min-width: 86px;
+  max-width: 112px;
+  min-height: 27px;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 4px 9px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 999px;
+  background: #f8fbff;
+  color: #738197;
+}
+
+.attendanceValidationMetric.tone-valid {
+  border-color: rgba(31, 196, 106, 0.22);
+  background: rgba(232, 252, 240, 0.86);
+  color: #059669;
+}
+
+.attendanceValidationMetric.tone-pending {
+  border-color: rgba(245, 158, 11, 0.24);
+  background: rgba(255, 247, 237, 0.9);
+  color: #c47a00;
+}
+
+.attendanceValidationMetric.tone-failed {
+  border-color: rgba(255, 59, 99, 0.22);
+  background: rgba(255, 241, 244, 0.9);
+  color: #e11d48;
+}
+
+.attendanceValidationMetric.tone-missing {
+  border-color: rgba(148, 163, 184, 0.18);
+  background: rgba(248, 250, 252, 0.94);
+  color: #94a3b8;
 }
 
 .attendanceValidationCell strong {
   color: var(--ops-ink);
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   font-weight: 500;
+}
+
+.attendanceValidationMetric span {
+  font-size: 0.66rem;
+  font-weight: 720;
 }
 
 .clickableTableRow {
@@ -7434,9 +8336,48 @@ button {
     grid-column: 1 / -1;
   }
 
+  .attendanceDatePopover {
+    width: min(100%, calc(100vw - 40px));
+    grid-template-columns: 1fr;
+  }
+
+  .attendanceDateSidebar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 12px;
+    border-right: 0;
+    border-bottom: 1px solid rgba(15, 23, 42, 0.05);
+  }
+
+  .attendanceDateSidebar button {
+    min-height: 38px;
+    padding: 0 12px;
+    border-radius: 12px;
+    font-size: 0.78rem;
+  }
+
+  .attendanceDateCalendar {
+    padding: 16px;
+  }
+
+  .attendanceDateCalendarHeader {
+    grid-template-columns: 32px 32px minmax(0, 1fr) 32px 32px;
+  }
+
+  .attendanceDateGrid button {
+    width: 32px;
+    height: 32px;
+  }
+
   .attendanceLiveRecap {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    padding-inline: 14px;
+    gap: 8px;
+    padding: 10px;
+    border-radius: 20px;
+  }
+
+  .attendanceLiveRecapItem {
+    min-height: 54px;
+    padding: 8px 10px 8px 13px;
   }
 
   .rolePermissionSummary {
@@ -7813,8 +8754,32 @@ button {
   .attendanceEvidenceBoard,
   .attendanceEvidenceMapCard,
   .attendanceEvidenceFaceCard,
-  .attendanceReviewSummary {
+  .attendanceReviewSummary,
+  .attendanceReviewDayContext {
     grid-template-columns: 1fr;
+  }
+
+  .attendanceReviewStory {
+    grid-template-columns: 40px minmax(0, 1fr);
+    padding: 12px;
+  }
+
+  .attendanceReviewStoryIcon {
+    width: 40px;
+    height: 40px;
+    border-radius: 15px;
+  }
+
+  .attendanceReviewDayLine {
+    width: 2px;
+    height: 18px;
+    justify-self: center;
+    background: linear-gradient(180deg, rgba(34, 174, 202, 0.72), rgba(249, 158, 36, 0.62));
+  }
+
+  .attendanceReviewDayLine::before,
+  .attendanceReviewDayLine::after {
+    display: none;
   }
 
   .attendanceEvidenceMapCard .compactButton {
@@ -7829,6 +8794,97 @@ button {
 
   .attendanceEvidenceCell {
     gap: 6px;
+  }
+
+  .attendanceReviewGroupActivity {
+    grid-template-columns: 1fr;
+    gap: 5px;
+    max-width: none;
+  }
+
+  .attendanceReviewExpandPanel {
+    grid-template-columns: 1fr;
+    gap: 0;
+    padding: 0 14px 14px;
+    border-radius: 0;
+  }
+
+  .attendanceReviewEventPanel {
+    grid-template-columns: 36px minmax(0, 1fr);
+    padding: 14px 0;
+    border-radius: 0;
+  }
+
+  .attendanceReviewEventPanel.checkout {
+    padding-left: 0;
+    border-left: 0;
+    border-top: 1px solid rgba(15, 23, 42, 0.06);
+  }
+
+  .attendanceReviewEventPanelIcon {
+    width: 36px;
+    height: 36px;
+    border-radius: 13px;
+  }
+
+  .attendanceReviewApproveAll {
+    width: 100%;
+    min-width: 0;
+    justify-self: stretch;
+  }
+
+  .attendanceTimelineCell {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    max-width: none;
+  }
+
+  .attendanceTimelineCell::before {
+    display: none;
+  }
+
+  .attendanceTimelineStep {
+    grid-template-columns: 18px minmax(0, 1fr);
+    align-items: start;
+    gap: 9px;
+    min-height: 0;
+  }
+
+  .attendanceTimelineDot {
+    width: 10px;
+    height: 10px;
+    margin-top: 8px;
+    box-shadow: 0 0 0 6px rgba(148, 163, 184, 0.12);
+  }
+
+  .attendanceTimelineStep.tone-valid .attendanceTimelineDot {
+    box-shadow: 0 0 0 6px rgba(31, 196, 106, 0.14);
+  }
+
+  .attendanceTimelineStep.tone-pending .attendanceTimelineDot {
+    box-shadow: 0 0 0 6px rgba(245, 158, 11, 0.15);
+  }
+
+  .attendanceTimelineStep.tone-failed .attendanceTimelineDot {
+    box-shadow: 0 0 0 6px rgba(255, 59, 99, 0.14);
+  }
+
+  .attendanceTimelineCopy {
+    padding-top: 0;
+  }
+
+  .attendanceValidationCell {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    max-width: 100%;
+  }
+
+  .attendanceValidationMetrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .attendanceValidationMetric {
+    justify-content: flex-start;
   }
 
   .fieldAttendanceCard {

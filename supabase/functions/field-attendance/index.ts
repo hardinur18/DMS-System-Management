@@ -79,6 +79,10 @@ function getJakartaDateKey(date = new Date()) {
   return `${values.year}-${values.month}-${values.day}`
 }
 
+function appendSystemNote(existing: unknown, note: string) {
+  return [String(existing || "").trim(), note].filter(Boolean).join("\n")
+}
+
 function normalizeEmbedding(value: unknown) {
   if (!Array.isArray(value)) return []
   const vector = value.map((item) => Number(item))
@@ -267,8 +271,55 @@ Deno.serve(async (request) => {
             ? "review"
             : "failed"
     const status = gpsStatus === "valid" && (faceStatus === "verified" || faceStatus === "not_required") ? "valid" : "review"
-    const workdayCounted = eventType === "check_in" && status === "valid"
+    const workdayCounted = false
     const eventDateKey = getJakartaDateKey()
+
+    const { data: priorCheckIns, error: priorCheckInsError } = await adminClient
+      .from("attendance_logs")
+      .select("id, attendance_date, status, workday_counted, notes")
+      .eq("employee_id", employee.id)
+      .eq("event_type", "check_in")
+      .lt("attendance_date", eventDateKey)
+      .neq("status", "rejected")
+      .order("attendance_date", { ascending: false })
+      .limit(14)
+
+    if (priorCheckInsError) throw priorCheckInsError
+
+    const priorDates = Array.from(new Set((priorCheckIns || []).map((log) => String(log.attendance_date || "")).filter(Boolean)))
+    let closedPreviousOpenShifts = 0
+
+    if (priorDates.length > 0) {
+      const { data: priorCheckOuts, error: priorCheckOutsError } = await adminClient
+        .from("attendance_logs")
+        .select("attendance_date")
+        .eq("employee_id", employee.id)
+        .eq("event_type", "check_out")
+        .in("attendance_date", priorDates)
+
+      if (priorCheckOutsError) throw priorCheckOutsError
+
+      const datesWithCheckout = new Set((priorCheckOuts || []).map((log) => String(log.attendance_date || "")))
+      const staleCheckIns = (priorCheckIns || []).filter((log) => !datesWithCheckout.has(String(log.attendance_date || "")))
+
+      if (staleCheckIns.length > 0) {
+        await Promise.all(staleCheckIns.map(async (log) => {
+          const { error: staleUpdateError } = await adminClient
+            .from("attendance_logs")
+            .update({
+              status: "review",
+              workday_counted: false,
+              notes: appendSystemNote(log.notes, `SYSTEM: Missing checkout otomatis ditandai saat ${employee.full_name} absen pada ${eventDateKey}. Hari kerja belum dihitung sampai HR koreksi.`),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", log.id)
+
+          if (staleUpdateError) throw staleUpdateError
+        }))
+
+        closedPreviousOpenShifts = staleCheckIns.length
+      }
+    }
 
     const { data: todayLogs, error: todayLogsError } = await adminClient
       .from("attendance_logs")
@@ -365,6 +416,7 @@ Deno.serve(async (request) => {
     return jsonResponse({
       ok: true,
       log,
+      closed_previous_open_shifts: closedPreviousOpenShifts,
       employee: {
         id: employee.id,
         code: employee.employee_code,

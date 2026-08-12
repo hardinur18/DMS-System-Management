@@ -190,8 +190,33 @@ interface AttendanceReviewRow {
   workLocationLongitude: string
   workdayCounted: boolean
   workDurationLabel: string
+  pairedCheckInAt: string
+  pairedCheckInStatus: AttendanceLogStatus | "missing"
+  pairedCheckOutAt: string
+  pairedCheckOutStatus: AttendanceLogStatus | "missing"
   issueLabel: string
   notes: string
+}
+
+interface AttendanceReviewGroup {
+  id: string
+  employeeId: string
+  employeeCode: string
+  fullName: string
+  employeePhotoUrl: string
+  divisionName: string
+  workLocationName: string
+  attendanceDate: string
+  checkIn?: AttendanceReviewRow
+  checkOut?: AttendanceReviewRow
+  pairedCheckInAt: string
+  pairedCheckInStatus: AttendanceLogStatus | "missing"
+  pairedCheckOutAt: string
+  pairedCheckOutStatus: AttendanceLogStatus | "missing"
+  reviewCount: number
+  issues: string[]
+  workDurationLabel: string
+  status: AttendanceLogStatus
 }
 
 interface FieldLocationSummary {
@@ -234,10 +259,14 @@ interface OvertimeReviewRow {
 
 interface OperationsFoundationData {
   rows: AttendanceMonitorRow[]
+  allRows: AttendanceMonitorRow[]
   locations: FieldLocationSummary[]
   reviews: AttendanceReviewRow[]
   overtime: OvertimeReviewRow[]
 }
+
+type AttendanceRecapRange = "day" | "week" | "month"
+type AttendanceDateMode = "today" | "yesterday" | "last7" | "last30" | "day" | "week" | "month" | "year" | "all"
 
 interface FieldAttendanceSubmitPayload {
   eventType: "check_in" | "check_out"
@@ -693,7 +722,7 @@ const navItems: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, group: "" },
   { id: "attendance-live", label: "Live Absensi", icon: Megaphone, group: "Operasional" },
   { id: "employees", label: "Karyawan", icon: UserPlus, group: "Operasional" },
-  { id: "attendance-requests", label: "Request", icon: MessageSquare, group: "Operasional" },
+  { id: "attendance-requests", label: "Rekap Absensi", icon: CalendarCheck2, group: "Operasional" },
   { id: "attendance-review", label: "Approval", icon: ClipboardList, group: "Operasional" },
   { id: "field-monitoring", label: "Lapangan", icon: CalendarCheck2, group: "Operasional" },
   { id: "payroll", label: "Payroll", icon: BadgeDollarSign, group: "Finance" },
@@ -710,6 +739,7 @@ const productionReadyViews = new Set<ViewId>([
   "dashboard",
   "attendance-live",
   "employees",
+  "attendance-requests",
   "attendance-review",
   "field-monitoring",
   "payroll",
@@ -2348,7 +2378,8 @@ function EmployeeIdentityCell({
 function AttendanceTimelineCell({ row }: { row: AttendanceMonitorRow }) {
   const checkInTone = row.checkInStatus === "valid" ? "valid" : row.checkInStatus === "missing" ? "missing" : row.checkInStatus === "rejected" ? "failed" : "pending"
   const checkOutTone = row.checkOutAt ? row.checkOutStatus === "valid" ? "valid" : row.checkOutStatus === "rejected" ? "failed" : "pending" : "missing"
-  const durationTone = row.checkOutAt ? "valid" : row.checkInAt ? "pending" : "missing"
+  const missingCheckout = isMissingCheckoutShift(row.checkInAt, row.checkOutAt, row.attendanceDate)
+  const durationTone = row.checkOutAt ? "valid" : row.checkInAt ? missingCheckout ? "failed" : "pending" : "missing"
   const events = [
     {
       key: "check-in",
@@ -2368,17 +2399,16 @@ function AttendanceTimelineCell({ row }: { row: AttendanceMonitorRow }) {
       key: "duration",
       label: "Jam kerja",
       value: row.workDurationLabel,
-      meta: row.checkOutAt ? "Final" : row.checkInAt ? "Sementara" : "Belum mulai",
+      meta: row.checkOutAt ? "Final" : row.checkInAt ? missingCheckout ? "Perlu koreksi HR" : "Sementara" : "Belum mulai",
       tone: durationTone,
     },
   ] as const
 
   return (
     <div className="attendanceTimelineCell">
-      <span className="attendanceTimelineRail" aria-hidden="true" />
       {events.map((event) => (
         <span className={clsx("attendanceTimelineStep", `tone-${event.tone}`)} key={event.key}>
-          <span className="attendanceTimelineDot" />
+          <span className="attendanceTimelineDot" aria-hidden="true" />
           <span className="attendanceTimelineCopy">
             <span>{event.label}</span>
             <strong>{event.value}</strong>
@@ -2395,30 +2425,149 @@ function AttendanceValidationCell({ row }: { row: AttendanceMonitorRow }) {
   const faceLabel = row.faceScore === null ? "-" : `${row.faceScore}%`
   const gpsTone = row.gpsStatus === "valid" ? "valid" : row.gpsStatus === "out_of_radius" ? "failed" : "missing"
   const faceTone = row.faceStatus === "verified" ? "valid" : row.faceStatus === "review" ? "pending" : row.faceStatus === "failed" ? "failed" : "missing"
+  const distanceLabel = row.distanceM === null ? "Belum ada GPS" : `${row.distanceM}m dari radius ${row.radiusM || "-"}m`
 
   return (
     <div className="attendanceValidationCell">
-      <span className="attendanceValidationLine location">
-        <LocateFixed size={15} />
-        <span>
+      <span className={clsx("attendanceValidationLocation", `tone-${gpsTone}`)}>
+        <span className="attendanceValidationIcon">
+          <LocateFixed size={14} />
+        </span>
+        <span className="attendanceValidationCopy">
           <strong>{row.workLocationName || "-"}</strong>
-          <small>{row.distanceM === null ? "Belum ada GPS" : `${row.distanceM}m dari radius ${row.radiusM || "-"}m`}</small>
+          <small>{distanceLabel}</small>
         </span>
       </span>
-      <span className={clsx("attendanceValidationLine", `tone-${gpsTone}`)}>
-        <span className="attendanceValidationDot" />
-        <span>
-          <strong>{gpsLabel}</strong>
-          <small>GPS</small>
+      <span className="attendanceValidationMetrics">
+        <span className={clsx("attendanceValidationMetric", `tone-${gpsTone}`)} title={`GPS: ${gpsLabel}`}>
+          <AlertCircle size={13} />
+          <span>{gpsLabel}</span>
+        </span>
+        <span className={clsx("attendanceValidationMetric", `tone-${faceTone}`)} title={`Face: ${faceLabel} ${row.faceStatus}`}>
+          <ScanFace size={13} />
+          <span>{faceLabel}</span>
         </span>
       </span>
-      <span className={clsx("attendanceValidationLine", `tone-${faceTone}`)}>
-        <ScanFace size={15} />
-        <span>
-          <strong>{faceLabel}</strong>
-          <small>{row.faceStatus}</small>
-        </span>
-      </span>
+    </div>
+  )
+}
+
+function AttendanceDateFilter({
+  value,
+  mode,
+  onChange,
+}: {
+  value: string
+  mode: AttendanceDateMode
+  onChange: (nextDate: string, nextMode: AttendanceDateMode) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [calendarMonth, setCalendarMonth] = useState(() => new Date(`${value || getLocalDateKey()}T00:00:00+07:00`))
+  const fieldRef = useRef<HTMLDivElement | null>(null)
+  const todayDate = getLocalDateKey()
+  const yesterdayDate = shiftDateKey(todayDate, -1)
+  const activeLabel = getAttendanceDateFilterLabel(value, mode)
+  const calendarDays = getCalendarMonthDays(calendarMonth)
+  const monthLabel = new Intl.DateTimeFormat("id-ID", { month: "long", year: "numeric" }).format(calendarMonth)
+  const presets: Array<{ mode: AttendanceDateMode; label: string; date?: string }> = [
+    { mode: "today", label: "Hari ini", date: todayDate },
+    { mode: "yesterday", label: "Kemarin", date: yesterdayDate },
+    { mode: "last7", label: "7 hari sebelumnya" },
+    { mode: "last30", label: "30 hari sebelumnya" },
+    { mode: "day", label: "Per Hari" },
+    { mode: "week", label: "Per Minggu" },
+    { mode: "month", label: "Per Bulan" },
+    { mode: "year", label: "Berdasarkan Tahun" },
+    { mode: "all", label: "Semua Waktu" },
+  ]
+
+  useEffect(() => {
+    setCalendarMonth(new Date(`${value || todayDate}T00:00:00+07:00`))
+  }, [todayDate, value])
+
+  useEffect(() => {
+    if (!open) return
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!fieldRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+
+    window.addEventListener("pointerdown", handlePointerDown)
+    return () => window.removeEventListener("pointerdown", handlePointerDown)
+  }, [open])
+
+  const selectPreset = (preset: { mode: AttendanceDateMode; label: string; date?: string }) => {
+    const nextDate = preset.date || value || todayDate
+    onChange(nextDate, preset.mode)
+    if (preset.date) setCalendarMonth(new Date(`${nextDate}T00:00:00+07:00`))
+  }
+
+  const moveMonth = (amount: number) => {
+    setCalendarMonth((current) => {
+      const next = new Date(current)
+      next.setMonth(current.getMonth() + amount)
+      return next
+    })
+  }
+
+  return (
+    <div className={clsx("attendanceDateFilter", open && "open")} ref={fieldRef}>
+      <button
+        className={clsx("attendanceDateTrigger", open && "active")}
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+      >
+        <CalendarCheck2 size={18} />
+        <span>{activeLabel}</span>
+        <ChevronDown size={18} />
+      </button>
+      {open && (
+        <div className="attendanceDatePopover">
+          <aside className="attendanceDateSidebar">
+            {presets.map((preset) => (
+              <button
+                className={clsx(mode === preset.mode && "active")}
+                key={preset.mode}
+                type="button"
+                onClick={() => selectPreset(preset)}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </aside>
+          <section className="attendanceDateCalendar">
+            <div className="attendanceDateCalendarHeader">
+              <button type="button" onClick={() => moveMonth(-12)} aria-label="Tahun sebelumnya">«</button>
+              <button type="button" onClick={() => moveMonth(-1)} aria-label="Bulan sebelumnya">‹</button>
+              <strong>{monthLabel}</strong>
+              <button type="button" onClick={() => moveMonth(1)} aria-label="Bulan berikutnya">›</button>
+              <button type="button" onClick={() => moveMonth(12)} aria-label="Tahun berikutnya">»</button>
+            </div>
+            <div className="attendanceDateWeekdays">
+              {["Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Min"].map((day) => <span key={day}>{day}</span>)}
+            </div>
+            <div className="attendanceDateGrid">
+              {calendarDays.map((day) => (
+                <button
+                  className={clsx(day.muted && "muted", day.key === todayDate && "today", day.key === value && "active")}
+                  key={day.key}
+                  type="button"
+                  onClick={() => {
+                    onChange(day.key, "day")
+                    setCalendarMonth(day.date)
+                  }}
+                >
+                  {day.date.getDate()}
+                </button>
+              ))}
+            </div>
+            <div className="attendanceDateFooter">
+              <strong>{mode === "today" ? "Real-time (GMT+07)" : getAttendanceDateFilterLabel(value, mode)}</strong>
+              <button type="button" onClick={() => setOpen(false)}>Tutup</button>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   )
 }
@@ -3587,6 +3736,50 @@ function shiftDateKey(value: string, offsetDays: number) {
   return getLocalDateKey(base)
 }
 
+function getAttendanceRecapRangeStart(value: string, range: AttendanceRecapRange) {
+  if (range === "month") return shiftDateKey(value, -29)
+  if (range === "week") return shiftDateKey(value, -6)
+  return value
+}
+
+function getAttendanceDateRange(selectedDate: string, mode: AttendanceDateMode) {
+  if (mode === "last7" || mode === "week") return { start: shiftDateKey(selectedDate, -6), end: selectedDate }
+  if (mode === "last30" || mode === "month") return { start: shiftDateKey(selectedDate, -29), end: selectedDate }
+  if (mode === "year") return { start: `${selectedDate.slice(0, 4)}-01-01`, end: selectedDate }
+  if (mode === "all") return { start: "", end: selectedDate }
+  return { start: selectedDate, end: selectedDate }
+}
+
+function getAttendanceDateFilterLabel(selectedDate: string, mode: AttendanceDateMode) {
+  if (mode === "today") return "Hari ini"
+  if (mode === "yesterday") return "Kemarin"
+  if (mode === "last7") return "7 hari sebelumnya"
+  if (mode === "last30") return "30 hari sebelumnya"
+  if (mode === "day") return `Per hari · ${formatWorkDate(selectedDate)}`
+  if (mode === "week") return `Per minggu · ${formatWorkDate(selectedDate)}`
+  if (mode === "month") return `Per bulan · ${formatWorkDate(selectedDate)}`
+  if (mode === "year") return `Tahun ${selectedDate.slice(0, 4)}`
+  return "Semua waktu"
+}
+
+function getCalendarMonthDays(monthDate: Date) {
+  const year = monthDate.getFullYear()
+  const month = monthDate.getMonth()
+  const firstDate = new Date(year, month, 1)
+  const startOffset = (firstDate.getDay() + 6) % 7
+  const gridStart = new Date(year, month, 1 - startOffset)
+
+  return Array.from({ length: 42 }, (_, index) => {
+    const date = new Date(gridStart)
+    date.setDate(gridStart.getDate() + index)
+    return {
+      date,
+      key: getLocalDateKey(date),
+      muted: date.getMonth() !== month,
+    }
+  })
+}
+
 function formatAttendanceTime(value?: string | null) {
   if (!value) return "Belum absen"
   return new Intl.DateTimeFormat("id-ID", {
@@ -3594,6 +3787,27 @@ function formatAttendanceTime(value?: string | null) {
     minute: "2-digit",
     timeZone: "Asia/Jakarta",
   }).format(new Date(value))
+}
+
+function formatAttendanceTimeInput(value?: string | null, fallback = "17:00") {
+  if (!value) return fallback
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return fallback
+
+  return new Intl.DateTimeFormat("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    timeZone: "Asia/Jakarta",
+  }).format(date)
+}
+
+function addMinutesToIsoTimeInput(value: string, minutes: number, fallback = "17:00") {
+  if (!value) return fallback
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return fallback
+  date.setMinutes(date.getMinutes() + minutes)
+  return formatAttendanceTimeInput(date.toISOString(), fallback)
 }
 
 function formatWorkDate(value?: string | null) {
@@ -3624,9 +3838,23 @@ function getAttendanceDurationMinutes(checkInAt?: string | null, checkOutAt?: st
   return Math.round((endMs - startMs) / 60000)
 }
 
-function formatAttendanceWorkDuration(checkInAt?: string | null, checkOutAt?: string | null) {
+const OPEN_SHIFT_LIMIT_MINUTES = 16 * 60
+
+function isPastAttendanceDate(attendanceDate?: string | null) {
+  return Boolean(attendanceDate && attendanceDate < getLocalDateKey())
+}
+
+function isMissingCheckoutShift(checkInAt?: string | null, checkOutAt?: string | null, attendanceDate?: string | null) {
+  if (!checkInAt || checkOutAt) return false
+  const minutes = getAttendanceDurationMinutes(checkInAt, null)
+  if (minutes === null) return false
+  return isPastAttendanceDate(attendanceDate) || minutes > OPEN_SHIFT_LIMIT_MINUTES
+}
+
+function formatAttendanceWorkDuration(checkInAt?: string | null, checkOutAt?: string | null, attendanceDate?: string | null) {
   const minutes = getAttendanceDurationMinutes(checkInAt, checkOutAt)
   if (minutes === null) return "Belum mulai"
+  if (!checkOutAt && isMissingCheckoutShift(checkInAt, checkOutAt, attendanceDate)) return "Belum checkout"
   return checkOutAt ? formatMinutesDuration(minutes) : `Berjalan ${formatMinutesDuration(minutes)}`
 }
 
@@ -3646,6 +3874,7 @@ function getDailyAttendanceMonitorStatus(checkIn?: Record<string, unknown>, chec
   if (!checkIn) return "missing"
   if (checkIn.status === "rejected" || checkOut?.status === "rejected" || checkIn.face_status === "failed" || checkOut?.face_status === "failed") return "failed"
   if (checkIn.status === "review" || checkOut?.status === "review" || checkIn.gps_status === "out_of_radius" || checkOut?.gps_status === "out_of_radius" || checkIn.face_status === "review" || checkOut?.face_status === "review") return "pending"
+  if (!checkOut) return "pending"
   return "valid"
 }
 
@@ -3732,77 +3961,99 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey()): Pro
     selectedLogsByEmployee.set(employeeId, entry)
   })
 
-  const rows: AttendanceMonitorRow[] = ((employeeResult.data || []) as Array<Record<string, unknown>>)
-    .filter((employee) => employee.status !== "inactive")
+  const buildAttendanceMonitorRow = (
+    employee: Record<string, unknown>,
+    dateKey: string,
+    selectedAttendance?: { checkIn?: Record<string, unknown>; checkOut?: Record<string, unknown> },
+  ): AttendanceMonitorRow => {
+    const employeeId = String(employee.id)
+    const location = locationMap.get(String(employee.work_location_id || ""))
+    const attendance = selectedAttendance?.checkIn
+    const checkOut = selectedAttendance?.checkOut
+    const payroll = payrollByEmployee.get(employeeId)
+    const cycleDays = Number(payroll?.work_days_count ?? employee.payroll_cycle_days ?? 0)
+    const targetDays = Number(payroll?.target_work_days ?? 26)
+    const salaryType = mapEmployeeSalaryType(payroll?.salary_type || employee.salary_type)
+    const basePayrollAmount = Number(payroll?.gross_amount || 0)
+    const overtimeAmount = Number(payroll?.overtime_amount || 0)
+    const payrollAmount = Number(payroll?.net_amount || 0) || basePayrollAmount + overtimeAmount
+    const attendanceStatus = getDailyAttendanceMonitorStatus(attendance, checkOut)
+
+    return {
+      id: attendance ? String(attendance.id) : `missing-${employeeId}-${dateKey}`,
+      employeeId,
+      employeeCode: String(employee.employee_code || ""),
+      fullName: String(employee.full_name || ""),
+      employeePhotoPath: String(employee.photo_path || ""),
+      employeePhotoUrl: getEmployeePhotoPublicUrl(String(employee.photo_path || "")),
+      divisionName: divisionMap.get(String(employee.division_id || "")) || "Belum pilih divisi",
+      workLocationName: String(location?.name || "Belum pilih lokasi"),
+      attendanceDate: attendance ? String(attendance.attendance_date || "") : dateKey,
+      eventAt: attendance ? String(attendance.event_at || "") : "",
+      checkInId: attendance ? String(attendance.id || "") : "",
+      checkInAt: attendance ? String(attendance.event_at || "") : "",
+      checkInStatus: attendance ? (attendance.status === "valid" || attendance.status === "rejected" ? attendance.status : "review") : "missing",
+      checkInGpsStatus: attendance ? (attendance.gps_status === "valid" || attendance.gps_status === "out_of_radius" ? attendance.gps_status : "missing") : "missing",
+      checkInFaceStatus: attendance ? (attendance.face_status === "verified" || attendance.face_status === "failed" || attendance.face_status === "review" ? attendance.face_status : "not_required") : "not_required",
+      checkInFaceScore: attendance?.face_score === null || attendance?.face_score === undefined ? null : Number(attendance.face_score),
+      checkInDistanceM: attendance?.distance_m === null || attendance?.distance_m === undefined ? null : Number(attendance.distance_m),
+      checkInNotes: String(attendance?.notes || ""),
+      checkOutId: checkOut ? String(checkOut.id || "") : "",
+      checkOutAt: checkOut ? String(checkOut.event_at || "") : "",
+      checkOutStatus: checkOut ? (checkOut.status === "valid" || checkOut.status === "rejected" ? checkOut.status : "review") : "missing",
+      checkOutGpsStatus: checkOut ? (checkOut.gps_status === "valid" || checkOut.gps_status === "out_of_radius" ? checkOut.gps_status : "missing") : "missing",
+      checkOutFaceStatus: checkOut ? (checkOut.face_status === "verified" || checkOut.face_status === "failed" || checkOut.face_status === "review" ? checkOut.face_status : "not_required") : "not_required",
+      checkOutFaceScore: checkOut?.face_score === null || checkOut?.face_score === undefined ? null : Number(checkOut.face_score),
+      checkOutDistanceM: checkOut?.distance_m === null || checkOut?.distance_m === undefined ? null : Number(checkOut.distance_m),
+      checkOutNotes: String(checkOut?.notes || ""),
+      attendanceStatus,
+      logStatus: attendance ? (attendance.status === "valid" || attendance.status === "rejected" ? attendance.status : "review") : "missing",
+      gpsStatus: attendance ? (attendance.gps_status === "valid" || attendance.gps_status === "out_of_radius" ? attendance.gps_status : "missing") : "missing",
+      faceStatus: attendance ? (attendance.face_status === "verified" || attendance.face_status === "failed" || attendance.face_status === "review" ? attendance.face_status : "not_required") : "not_required",
+      faceScore: attendance?.face_score === null || attendance?.face_score === undefined ? null : Number(attendance.face_score),
+      distanceM: attendance?.distance_m === null || attendance?.distance_m === undefined ? null : Number(attendance.distance_m),
+      radiusM: Number(attendance?.radius_m || location?.radius_m || 0) || null,
+      cycleDays,
+      targetDays,
+      payrollCycleId: String(payroll?.id || ""),
+      payrollCycleNumber: Number(payroll?.cycle_number || 0),
+      periodStartedAt: String(payroll?.period_started_at || ""),
+      periodClosedAt: String(payroll?.period_closed_at || ""),
+      payrollReadyAt: String(payroll?.ready_at || ""),
+      payrollLockedAt: String(payroll?.locked_at || ""),
+      payrollPaidAt: String(payroll?.paid_at || ""),
+      payrollStatus: mapPayrollCycleStatus(payroll?.status),
+      payrollAmount,
+      basePayrollAmount,
+      overtimeAmount,
+      salaryType,
+      workDurationLabel: attendance ? formatAttendanceWorkDuration(String(attendance.event_at || ""), checkOut ? String(checkOut.event_at || "") : null, dateKey) : "Belum mulai",
+      notes: String(attendance?.notes || ""),
+    }
+  }
+
+  const activeEmployees = ((employeeResult.data || []) as Array<Record<string, unknown>>).filter((employee) => employee.status !== "inactive")
+
+  const rows: AttendanceMonitorRow[] = activeEmployees
     .map((employee) => {
       const employeeId = String(employee.id)
-      const location = locationMap.get(String(employee.work_location_id || ""))
-      const selectedAttendance = selectedLogsByEmployee.get(employeeId)
-      const attendance = selectedAttendance?.checkIn
-      const checkOut = selectedAttendance?.checkOut
-      const payroll = payrollByEmployee.get(employeeId)
-      const cycleDays = Number(payroll?.work_days_count ?? employee.payroll_cycle_days ?? 0)
-      const targetDays = Number(payroll?.target_work_days ?? 26)
-      const salaryType = mapEmployeeSalaryType(payroll?.salary_type || employee.salary_type)
-      const basePayrollAmount = Number(payroll?.gross_amount || 0)
-      const overtimeAmount = Number(payroll?.overtime_amount || 0)
-      const payrollAmount = Number(payroll?.net_amount || 0) || basePayrollAmount + overtimeAmount
-      const attendanceStatus = getDailyAttendanceMonitorStatus(attendance, checkOut)
-
-      return {
-        id: attendance ? String(attendance.id) : `missing-${employeeId}`,
-        employeeId,
-        employeeCode: String(employee.employee_code || ""),
-        fullName: String(employee.full_name || ""),
-        employeePhotoPath: String(employee.photo_path || ""),
-        employeePhotoUrl: getEmployeePhotoPublicUrl(String(employee.photo_path || "")),
-        divisionName: divisionMap.get(String(employee.division_id || "")) || "Belum pilih divisi",
-        workLocationName: String(location?.name || "Belum pilih lokasi"),
-        attendanceDate: attendance ? String(attendance.attendance_date || "") : selectedDate,
-        eventAt: attendance ? String(attendance.event_at || "") : "",
-        checkInId: attendance ? String(attendance.id || "") : "",
-        checkInAt: attendance ? String(attendance.event_at || "") : "",
-        checkInStatus: attendance ? (attendance.status === "valid" || attendance.status === "rejected" ? attendance.status : "review") : "missing",
-        checkInGpsStatus: attendance ? (attendance.gps_status === "valid" || attendance.gps_status === "out_of_radius" ? attendance.gps_status : "missing") : "missing",
-        checkInFaceStatus: attendance ? (attendance.face_status === "verified" || attendance.face_status === "failed" || attendance.face_status === "review" ? attendance.face_status : "not_required") : "not_required",
-        checkInFaceScore: attendance?.face_score === null || attendance?.face_score === undefined ? null : Number(attendance.face_score),
-        checkInDistanceM: attendance?.distance_m === null || attendance?.distance_m === undefined ? null : Number(attendance.distance_m),
-        checkInNotes: String(attendance?.notes || ""),
-        checkOutId: checkOut ? String(checkOut.id || "") : "",
-        checkOutAt: checkOut ? String(checkOut.event_at || "") : "",
-        checkOutStatus: checkOut ? (checkOut.status === "valid" || checkOut.status === "rejected" ? checkOut.status : "review") : "missing",
-        checkOutGpsStatus: checkOut ? (checkOut.gps_status === "valid" || checkOut.gps_status === "out_of_radius" ? checkOut.gps_status : "missing") : "missing",
-        checkOutFaceStatus: checkOut ? (checkOut.face_status === "verified" || checkOut.face_status === "failed" || checkOut.face_status === "review" ? checkOut.face_status : "not_required") : "not_required",
-        checkOutFaceScore: checkOut?.face_score === null || checkOut?.face_score === undefined ? null : Number(checkOut.face_score),
-        checkOutDistanceM: checkOut?.distance_m === null || checkOut?.distance_m === undefined ? null : Number(checkOut.distance_m),
-        checkOutNotes: String(checkOut?.notes || ""),
-        attendanceStatus,
-        logStatus: attendance ? (attendance.status === "valid" || attendance.status === "rejected" ? attendance.status : "review") : "missing",
-        gpsStatus: attendance ? (attendance.gps_status === "valid" || attendance.gps_status === "out_of_radius" ? attendance.gps_status : "missing") : "missing",
-        faceStatus: attendance ? (attendance.face_status === "verified" || attendance.face_status === "failed" || attendance.face_status === "review" ? attendance.face_status : "not_required") : "not_required",
-        faceScore: attendance?.face_score === null || attendance?.face_score === undefined ? null : Number(attendance.face_score),
-        distanceM: attendance?.distance_m === null || attendance?.distance_m === undefined ? null : Number(attendance.distance_m),
-        radiusM: Number(attendance?.radius_m || location?.radius_m || 0) || null,
-        cycleDays,
-        targetDays,
-        payrollCycleId: String(payroll?.id || ""),
-        payrollCycleNumber: Number(payroll?.cycle_number || 0),
-        periodStartedAt: String(payroll?.period_started_at || ""),
-        periodClosedAt: String(payroll?.period_closed_at || ""),
-        payrollReadyAt: String(payroll?.ready_at || ""),
-        payrollLockedAt: String(payroll?.locked_at || ""),
-        payrollPaidAt: String(payroll?.paid_at || ""),
-        payrollStatus: mapPayrollCycleStatus(payroll?.status),
-        payrollAmount,
-        basePayrollAmount,
-        overtimeAmount,
-        salaryType,
-        workDurationLabel: attendance ? formatAttendanceWorkDuration(String(attendance.event_at || ""), checkOut ? String(checkOut.event_at || "") : null) : "Belum mulai",
-        notes: String(attendance?.notes || ""),
-      }
+      return buildAttendanceMonitorRow(employee, selectedDate, selectedLogsByEmployee.get(employeeId))
     })
 
-  const employeesById = new Map(((employeeResult.data || []) as Array<Record<string, unknown>>).map((employee) => [String(employee.id), employee]))
+  const allRows: AttendanceMonitorRow[] = []
+  logsByEmployeeDate.forEach((entry, key) => {
+    const [employeeId, attendanceDate] = key.split(":")
+    const employee = activeEmployees.find((item) => String(item.id) === employeeId)
+    if (!employee || !attendanceDate) return
+    allRows.push(buildAttendanceMonitorRow(employee, attendanceDate, entry))
+  })
+  allRows.sort((a, b) => {
+    const dateCompare = b.attendanceDate.localeCompare(a.attendanceDate)
+    if (dateCompare !== 0) return dateCompare
+    return a.employeeCode.localeCompare(b.employeeCode)
+  })
+
+  const employeesById = new Map(activeEmployees.map((employee) => [String(employee.id), employee]))
   const reviewRows: AttendanceReviewRow[] = logs
     .filter((log) => log.status === "review")
     .slice(0, 50)
@@ -3838,7 +4089,11 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey()): Pro
         workLocationLatitude: location?.latitude === null || location?.latitude === undefined ? "" : String(location?.latitude || ""),
         workLocationLongitude: location?.longitude === null || location?.longitude === undefined ? "" : String(location?.longitude || ""),
         workdayCounted: log.workday_counted === true,
-        workDurationLabel: checkInLog ? (checkOutLog ? formatAttendanceWorkDuration(String(checkInLog.event_at || ""), String(checkOutLog.event_at || "")) : "Belum checkout") : "Belum mulai",
+        workDurationLabel: checkInLog ? formatAttendanceWorkDuration(String(checkInLog.event_at || ""), checkOutLog ? String(checkOutLog.event_at || "") : null, String(log.attendance_date || "")) : "Belum mulai",
+        pairedCheckInAt: String(checkInLog?.event_at || ""),
+        pairedCheckInStatus: checkInLog?.status === "valid" || checkInLog?.status === "rejected" ? checkInLog.status : checkInLog ? "review" : "missing",
+        pairedCheckOutAt: String(checkOutLog?.event_at || ""),
+        pairedCheckOutStatus: checkOutLog?.status === "valid" || checkOutLog?.status === "rejected" ? checkOutLog.status : checkOutLog ? "review" : "missing",
         issueLabel: getAttendanceReviewIssue(log),
         notes: String(log.notes || ""),
       }
@@ -3893,7 +4148,7 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey()): Pro
     }
   })
 
-  return { rows, locations, reviews: reviewRows, overtime: overtimeReviewRows }
+  return { rows, allRows, locations, reviews: reviewRows, overtime: overtimeReviewRows }
 }
 
 function getBrowserPosition(): Promise<GeolocationPosition> {
@@ -4391,6 +4646,25 @@ async function resetAttendanceDay(employeeId: string, attendanceDate: string, no
   })
 
   if (error) throw new Error(await getFunctionInvokeError(error, "Reset absensi belum bisa diproses."))
+  if (data?.error) throw new Error(String(data.error))
+
+  return data
+}
+
+async function correctMissingCheckout(employeeId: string, attendanceDate: string, checkOutTime: string, notes: string) {
+  const { data, error } = await supabase.functions.invoke("attendance-review", {
+    body: {
+      action: "correct_checkout",
+      payload: {
+        employeeId,
+        attendanceDate,
+        checkOutTime,
+        notes,
+      },
+    },
+  })
+
+  if (error) throw new Error(await getFunctionInvokeError(error, "Koreksi checkout belum bisa diproses."))
   if (data?.error) throw new Error(String(data.error))
 
   return data
@@ -8059,7 +8333,7 @@ function MasterDataDialog({
 }
 
 function DashboardPage({ activeView }: { activeView: ViewId }) {
-  const [data, setData] = useState<OperationsFoundationData>({ rows: [], locations: [], reviews: [], overtime: [] })
+  const [data, setData] = useState<OperationsFoundationData>({ rows: [], allRows: [], locations: [], reviews: [], overtime: [] })
   const [loading, setLoading] = useState(true)
   const [errorMessage, setErrorMessage] = useState("")
 
@@ -8270,10 +8544,12 @@ function AttendanceMonitorDetailDialog({
   row,
   onClose,
   onResetDay,
+  onCorrectCheckout,
 }: {
   row: AttendanceMonitorRow | null
   onClose: () => void
   onResetDay?: (row: AttendanceMonitorRow) => void
+  onCorrectCheckout?: (row: AttendanceMonitorRow) => void
 }) {
   if (!row) return null
 
@@ -8324,6 +8600,7 @@ function AttendanceMonitorDetailDialog({
     { label: "Total payroll", value: `${row.payrollAmount ? formatCurrency(row.payrollAmount) : "-"} · ${payrollLabel[row.payrollStatus]}` },
   ]
   const hasAttendance = Boolean(row.checkInId || row.checkOutId)
+  const canCorrectCheckout = Boolean(row.checkInId && !row.checkOutId && isMissingCheckoutShift(row.checkInAt, row.checkOutAt, row.attendanceDate))
 
   return createPortal(
     <div className="dialogBackdrop" role="presentation" onMouseDown={onClose}>
@@ -8394,6 +8671,15 @@ function AttendanceMonitorDetailDialog({
         </div>
 
         <div className="masterDetailActions">
+          {canCorrectCheckout && onCorrectCheckout && (
+            <button className="secondaryButton" type="button" onClick={() => {
+              onClose()
+              onCorrectCheckout(row)
+            }}>
+              <CalendarCheck2 size={17} />
+              Koreksi Pulang
+            </button>
+          )}
           {hasAttendance && onResetDay && (
             <button className="secondaryButton dangerSoftButton" type="button" onClick={() => {
               onClose()
@@ -8411,11 +8697,13 @@ function AttendanceMonitorDetailDialog({
   )
 }
 
-function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "attendance-review" | "field-monitoring" | "payroll" }) {
-  const [data, setData] = useState<OperationsFoundationData>({ rows: [], locations: [], reviews: [], overtime: [] })
+function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "attendance-requests" | "attendance-review" | "field-monitoring" | "payroll" }) {
+  const [data, setData] = useState<OperationsFoundationData>({ rows: [], allRows: [], locations: [], reviews: [], overtime: [] })
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
   const [selectedDate, setSelectedDate] = useState(getLocalDateKey())
+  const [attendanceDateMode, setAttendanceDateMode] = useState<AttendanceDateMode>("today")
+  const [recapRange, setRecapRange] = useState<AttendanceRecapRange>("day")
   const [loading, setLoading] = useState(true)
   const [errorMessage, setErrorMessage] = useState("")
   const [fieldDialogOpen, setFieldDialogOpen] = useState(false)
@@ -8431,6 +8719,8 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
   const [payrollSubmitting, setPayrollSubmitting] = useState(false)
   const [resetAttendanceRow, setResetAttendanceRow] = useState<AttendanceMonitorRow | null>(null)
   const [resetAttendanceSubmitting, setResetAttendanceSubmitting] = useState(false)
+  const [checkoutCorrectionRow, setCheckoutCorrectionRow] = useState<AttendanceMonitorRow | null>(null)
+  const [checkoutCorrectionSubmitting, setCheckoutCorrectionSubmitting] = useState(false)
   const [toast, setToast] = useState<ToastMessage | null>(null)
 
   const showToast = (message: Omit<ToastMessage, "id">) => {
@@ -8551,6 +8841,29 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
     }
   }
 
+  const handleApproveReviewGroup = async (rows: AttendanceReviewRow[]) => {
+    if (!rows.length) return
+
+    setReviewSubmitting(true)
+    try {
+      await Promise.all(rows.map((row) => reviewAttendanceLog(row.id, "approve", "Approved bersama dari antrian harian.")))
+      showToast({
+        tone: "success",
+        title: rows.length > 1 ? "Review harian disetujui" : "Absensi disetujui",
+        description: `${rows[0].fullName} · ${rows.length} event sudah diproses.`,
+      })
+      await refreshData()
+    } catch (error) {
+      showToast({
+        tone: "error",
+        title: "Gagal approve review",
+        description: getFriendlySupabaseError(error, "Approval absensi belum bisa diproses."),
+      })
+    } finally {
+      setReviewSubmitting(false)
+    }
+  }
+
   const handleOvertimeReviewSubmit = async (decision: "approve" | "reject", approvedMinutes: number, notes: string) => {
     if (!overtimeTarget) return
 
@@ -8640,8 +8953,46 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
     }
   }
 
+  const handleCheckoutCorrectionSubmit = async (checkOutTime: string, notes: string) => {
+    if (!checkoutCorrectionRow) return
+
+    setCheckoutCorrectionSubmitting(true)
+    try {
+      await correctMissingCheckout(
+        checkoutCorrectionRow.employeeId,
+        checkoutCorrectionRow.attendanceDate,
+        checkOutTime,
+        notes || "Koreksi checkout manual oleh HR.",
+      )
+      showToast({
+        tone: "success",
+        title: "Checkout dikoreksi",
+        description: `${checkoutCorrectionRow.fullName} ditutup pukul ${checkOutTime} untuk ${formatEmployeeDate(checkoutCorrectionRow.attendanceDate)}.`,
+      })
+      setCheckoutCorrectionRow(null)
+      await refreshData()
+    } catch (error) {
+      showToast({
+        tone: "error",
+        title: "Gagal koreksi checkout",
+        description: getFriendlySupabaseError(error, "Checkout belum bisa dikoreksi."),
+      })
+    } finally {
+      setCheckoutCorrectionSubmitting(false)
+    }
+  }
+
+  const todayDate = getLocalDateKey()
+  const isTodayView = selectedDate === todayDate && attendanceDateMode === "today"
+  const attendanceDateRange = getAttendanceDateRange(selectedDate, attendanceDateMode)
+  const liveAttendanceSourceRows = activeView === "attendance-live" && !["today", "yesterday", "day"].includes(attendanceDateMode)
+    ? data.allRows
+    : data.rows
   const normalizedSearch = searchTerm.trim().toLowerCase()
-  const filteredRows = data.rows.filter((row) => {
+  const filteredRows = liveAttendanceSourceRows.filter((row) => {
+    const matchesDate = activeView !== "attendance-live"
+      || attendanceDateMode === "all"
+      || (row.attendanceDate >= attendanceDateRange.start && row.attendanceDate <= attendanceDateRange.end)
     const matchesSearch = normalizedSearch
       ? [row.employeeCode, row.fullName, row.divisionName, row.workLocationName, row.logStatus, row.gpsStatus, row.faceStatus].join(" ").toLowerCase().includes(normalizedSearch)
       : true
@@ -8649,7 +9000,7 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
       || row.attendanceStatus === statusFilter
       || row.payrollStatus === statusFilter
 
-    return matchesSearch && matchesStatus
+    return matchesDate && matchesSearch && matchesStatus
   })
   const filteredReviewRows = data.reviews.filter((row) => {
     const matchesSearch = normalizedSearch
@@ -8680,13 +9031,32 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
   })
   const pendingOvertimeRows = data.overtime.filter((row) => row.status === "pending")
   const approvedOvertimeTotal = data.overtime.reduce((sum, row) => sum + (row.status === "approved" ? row.totalAmount : 0), 0)
-  const todayDate = getLocalDateKey()
-  const yesterdayDate = shiftDateKey(todayDate, -1)
-  const isTodayView = selectedDate === todayDate
+  const isDateDrivenView = activeView === "attendance-live" || activeView === "attendance-requests"
+  const rangeStartDate = getAttendanceRecapRangeStart(selectedDate, recapRange)
+  const recapSourceRows = recapRange === "day" ? data.rows : data.allRows
+  const filteredRecapRows = recapSourceRows.filter((row) => {
+    const inRange = recapRange === "day"
+      ? row.attendanceDate === selectedDate
+      : row.attendanceDate >= rangeStartDate && row.attendanceDate <= selectedDate
+    if (!inRange) return false
+
+    const matchesSearch = normalizedSearch
+      ? [row.employeeCode, row.fullName, row.divisionName, row.workLocationName, row.attendanceStatus, row.gpsStatus, row.faceStatus].join(" ").toLowerCase().includes(normalizedSearch)
+      : true
+    const matchesStatus = statusFilter === "all"
+      || row.attendanceStatus === statusFilter
+      || row.payrollStatus === statusFilter
+      || row.gpsStatus === statusFilter
+      || row.faceStatus === statusFilter
+
+    return matchesSearch && matchesStatus
+  })
   const pageSubtitle = activeView === "payroll"
     ? "Preview payroll otomatis dari 26 hari kerja valid, lembur approved, tipe gaji, dan cycle berjalan."
     : activeView === "attendance-review"
       ? "Approve atau reject absensi bermasalah sebelum masuk hitungan payroll cycle."
+    : activeView === "attendance-requests"
+      ? "Rekap check-in, check-out, jam kerja, validasi GPS/face, dan status hari kerja per tanggal."
     : activeView === "field-monitoring"
       ? "Monitoring titik lokasi kerja, radius GPS, kesiapan koordinat, dan aktivitas absensi per lokasi."
       : "Pantau absensi realtime dengan validasi GPS radius, face verification, dan progress payroll cycle."
@@ -8728,26 +9098,36 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
         }
       />
 
-      <OperationalKpiGrid>
-        <OperationalKpiCard label="Absen Valid" value={data.rows.filter((row) => row.attendanceStatus === "valid").length} detail={isTodayView ? "Hari ini" : formatWorkDate(selectedDate)} icon={UserRoundCheck} tone="green" />
-        <OperationalKpiCard label="Butuh Review" value={reviewRows.length} detail="GPS/face/perlu approval" icon={AlertTriangle} tone="amber" />
-        <OperationalKpiCard label="Lokasi GPS" value={`${gpsReadyLocations.length}/${data.locations.length}`} detail="Koordinat + radius siap" icon={LocateFixed} tone="blue" />
-        <OperationalKpiCard label="Preview Payroll" value={formatCurrency(payrollPreviewTotal)} detail="Pokok + lembur approved" icon={BadgeDollarSign} tone="violet" />
-      </OperationalKpiGrid>
+      {activeView !== "attendance-live" && activeView !== "attendance-review" && activeView !== "attendance-requests" && (
+        <OperationalKpiGrid>
+          <OperationalKpiCard label="Absen Valid" value={data.rows.filter((row) => row.attendanceStatus === "valid").length} detail={isTodayView ? "Hari ini" : formatWorkDate(selectedDate)} icon={UserRoundCheck} tone="green" />
+          <OperationalKpiCard label="Butuh Review" value={reviewRows.length} detail="GPS/face/perlu approval" icon={AlertTriangle} tone="amber" />
+          <OperationalKpiCard label="Lokasi GPS" value={`${gpsReadyLocations.length}/${data.locations.length}`} detail="Koordinat + radius siap" icon={LocateFixed} tone="blue" />
+          <OperationalKpiCard label="Preview Payroll" value={formatCurrency(payrollPreviewTotal)} detail="Pokok + lembur approved" icon={BadgeDollarSign} tone="violet" />
+        </OperationalKpiGrid>
+      )}
 
       <OperationalFilterPanel>
-        {activeView === "attendance-live" && (
+        {isDateDrivenView && (
           <div className="filterField dateFilterField">
             <label>Tanggal</label>
-            <div className="dateFilterControl">
-              <button className={clsx("dateQuickButton", isTodayView && "active")} type="button" onClick={() => setSelectedDate(todayDate)}>Hari ini</button>
-              <button className={clsx("dateQuickButton", selectedDate === yesterdayDate && "active")} type="button" onClick={() => setSelectedDate(yesterdayDate)}>Kemarin</button>
-              <input
-                className="uiDateInput"
-                type="date"
-                value={selectedDate}
-                onChange={(event) => setSelectedDate(event.target.value || todayDate)}
-              />
+            <AttendanceDateFilter
+              value={selectedDate}
+              mode={attendanceDateMode}
+              onChange={(nextDate, nextMode) => {
+                setSelectedDate(nextDate)
+                setAttendanceDateMode(nextMode)
+              }}
+            />
+          </div>
+        )}
+        {activeView === "attendance-requests" && (
+          <div className="filterField recapRangeField">
+            <label>Range</label>
+            <div className="recapRangeControl" role="tablist" aria-label="Range rekap absensi">
+              <button className={clsx(recapRange === "day" && "active")} type="button" onClick={() => setRecapRange("day")}>Harian</button>
+              <button className={clsx(recapRange === "week" && "active")} type="button" onClick={() => setRecapRange("week")}>7 Hari</button>
+              <button className={clsx(recapRange === "month" && "active")} type="button" onClick={() => setRecapRange("month")}>30 Hari</button>
             </div>
           </div>
         )}
@@ -8784,20 +9164,30 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
         <button className="secondaryButton" type="button" onClick={() => {
           setSearchTerm("")
           setStatusFilter("all")
+          if (isDateDrivenView) {
+            setSelectedDate(todayDate)
+            setAttendanceDateMode("today")
+          }
         }}>Reset Filter</button>
       </OperationalFilterPanel>
+
+      {(activeView === "attendance-live" || activeView === "attendance-requests") && (
+        <AttendanceLiveRecap rows={activeView === "attendance-requests" ? filteredRecapRows : filteredRows} selectedDate={selectedDate} range={activeView === "attendance-requests" ? recapRange : "day"} />
+      )}
 
       {activeView === "field-monitoring" ? (
         <LocationRadiusTable locations={data.locations} loading={loading} errorMessage={errorMessage} />
       ) : activeView === "attendance-review" ? (
-        <AttendanceReviewTable rows={filteredReviewRows} loading={loading} errorMessage={errorMessage} onReview={openReviewDialog} />
+        <AttendanceReviewTable rows={filteredReviewRows} loading={loading || reviewSubmitting} errorMessage={errorMessage} onReview={openReviewDialog} onApproveAll={handleApproveReviewGroup} />
+      ) : activeView === "attendance-requests" ? (
+        <AttendanceRecapTable rows={filteredRecapRows} loading={loading} errorMessage={errorMessage} selectedDate={selectedDate} range={recapRange} onResetDay={setResetAttendanceRow} onCorrectCheckout={setCheckoutCorrectionRow} />
       ) : activeView === "payroll" ? (
         <>
           <PayrollPreviewTable rows={filteredRows} loading={loading} errorMessage={errorMessage} overtimeTotal={approvedOvertimeTotal} onProcess={openPayrollProcessDialog} />
           <OvertimeReviewTable rows={filteredOvertimeRows} loading={loading} errorMessage={errorMessage} onReview={setOvertimeTarget} />
         </>
       ) : (
-        <LiveAttendanceTable rows={filteredRows} loading={loading} errorMessage={errorMessage} selectedDate={selectedDate} onResetDay={setResetAttendanceRow} />
+        <LiveAttendanceTable rows={filteredRows} loading={loading} errorMessage={errorMessage} selectedDate={selectedDate} onResetDay={setResetAttendanceRow} onCorrectCheckout={setCheckoutCorrectionRow} />
       )}
 
       <FieldAttendanceDialog
@@ -8854,8 +9244,106 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
           </div>
         )}
       </ConfirmDialog>
+      <CheckoutCorrectionDialog
+        row={checkoutCorrectionRow}
+        saving={checkoutCorrectionSubmitting}
+        onClose={() => {
+          if (!checkoutCorrectionSubmitting) setCheckoutCorrectionRow(null)
+        }}
+        onSubmit={handleCheckoutCorrectionSubmit}
+      />
       <ToastViewport toast={toast} onClose={() => setToast(null)} />
     </OperationalPageShell>
+  )
+}
+
+function CheckoutCorrectionDialog({
+  row,
+  saving,
+  onClose,
+  onSubmit,
+}: {
+  row: AttendanceMonitorRow | null
+  saving: boolean
+  onClose: () => void
+  onSubmit: (checkOutTime: string, notes: string) => void
+}) {
+  const [checkOutTime, setCheckOutTime] = useState("17:00")
+  const [notes, setNotes] = useState("")
+  const [error, setError] = useState("")
+
+  useEffect(() => {
+    if (!row) return
+    setCheckOutTime(addMinutesToIsoTimeInput(row.checkInAt, 8 * 60, "17:00"))
+    setNotes("")
+    setError("")
+  }, [row])
+
+  if (!row) return null
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!checkOutTime) {
+      setError("Jam pulang wajib diisi untuk menutup hari kerja.")
+      return
+    }
+
+    onSubmit(checkOutTime, notes)
+  }
+
+  return createPortal(
+    <div className="dialogBackdrop" role="presentation" onMouseDown={saving ? undefined : onClose}>
+      <section
+        className="dialogPanel checkoutCorrectionDialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="checkout-correction-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="dialogCompactHeader">
+          <div className="dialogHeaderCopy">
+            <span>Koreksi HR</span>
+            <h2 id="checkout-correction-title">Tutup checkout {row.fullName}</h2>
+            <p>Dipakai saat karyawan lupa absen pulang. Hari kerja baru dihitung setelah koreksi ini disimpan.</p>
+          </div>
+          <button className="iconButton dialogClose" type="button" aria-label="Tutup koreksi checkout" onClick={onClose} disabled={saving}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <form className="checkoutCorrectionBody" onSubmit={handleSubmit}>
+          <div className="checkoutCorrectionSummary">
+            <span className="attendanceMonitorIcon pending"><CalendarCheck2 size={20} /></span>
+            <div>
+              <small>{row.employeeCode} · {formatEmployeeDate(row.attendanceDate)}</small>
+              <strong>{row.checkInAt ? `Masuk ${formatAttendanceTime(row.checkInAt)}` : "Belum ada check-in"}</strong>
+              <p>{row.workLocationName} · {row.divisionName}</p>
+            </div>
+          </div>
+
+          <div className="checkoutCorrectionFields">
+            <TextFormField label="Jam Pulang" type="time" value={checkOutTime} onChange={(event) => setCheckOutTime(event.target.value)} required />
+            <TextFormField label="Catatan HR" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Contoh: lupa checkout, dikoreksi sesuai konfirmasi supervisor" />
+          </div>
+
+          <div className="checkoutCorrectionNotice">
+            <AlertCircle size={17} />
+            <span>Log check-in akan diset valid, checkout manual dibuat sebagai sumber management, lalu payroll cycle diperbarui.</span>
+          </div>
+
+          {error && <p className="formErrorMessage">{error}</p>}
+
+          <div className="attendanceReviewActions">
+            <button className="secondaryButton" type="button" onClick={onClose} disabled={saving}>Batal</button>
+            <button className="primaryButton" type="submit" disabled={saving}>
+              <FileCheck2 size={17} />
+              {saving ? "Menyimpan..." : "Simpan Koreksi"}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>,
+    document.body,
   )
 }
 
@@ -8865,12 +9353,14 @@ function LiveAttendanceTable({
   errorMessage,
   selectedDate,
   onResetDay,
+  onCorrectCheckout,
 }: {
   rows: AttendanceMonitorRow[]
   loading: boolean
   errorMessage: string
   selectedDate: string
   onResetDay: (row: AttendanceMonitorRow) => void
+  onCorrectCheckout: (row: AttendanceMonitorRow) => void
 }) {
   const [detailRow, setDetailRow] = useState<AttendanceMonitorRow | null>(null)
 
@@ -8883,7 +9373,6 @@ function LiveAttendanceTable({
             <p>Data check-in dan check-out {formatWorkDate(selectedDate)} dari GPS radius, face verification, dan workday counted.</p>
           </div>
         </div>
-        <AttendanceLiveRecap rows={rows} selectedDate={selectedDate} />
         <div className="tableScroller uiDataTableScroller uiDataTableHasColumns liveAttendanceTableScroller">
           <table>
             <colgroup>
@@ -8909,39 +9398,49 @@ function LiveAttendanceTable({
             <tbody>
               {loading && <tr><td className="tableStateCell" colSpan={7}><TableState title="Memuat absensi" description="Mengambil live feed absensi." icon={Megaphone} /></td></tr>}
               {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={7}><TableState title="Gagal memuat" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
-              {!loading && !errorMessage && rows.map((row, index) => (
-                <ClickableTableRow key={row.id} label={`Lihat detail absensi ${row.fullName}`} onOpen={() => setDetailRow(row)}>
-                  <td><TableNumberCell value={index + 1} /></td>
-                  <td><EmployeeIdentityCell fullName={row.fullName} code={row.employeeCode} photoUrl={row.employeePhotoUrl} /></td>
-                  <td><AttendanceTimelineCell row={row} /></td>
-                  <td><AttendanceValidationCell row={row} /></td>
-                  <td><span className="cycleCell"><ProgressRing value={row.cycleDays} /><span>{row.cycleDays}/{row.targetDays}</span></span></td>
-                  <td><StatusBadge status={row.attendanceStatus} /></td>
-                  <td>
-                    <RowActionMenu label={`Aksi absensi ${row.fullName}`}>
-                      <RowActionMenuItem onClick={() => setDetailRow(row)}>
-                        <Eye size={15} />
-                        Detail
-                      </RowActionMenuItem>
-                      <RowActionMenuItem danger disabled={!row.checkInId && !row.checkOutId} onClick={() => onResetDay(row)}>
-                        <RotateCcw size={15} />
-                        Reset Tanggal Ini
-                      </RowActionMenuItem>
-                    </RowActionMenu>
-                  </td>
-                </ClickableTableRow>
-              ))}
+              {!loading && !errorMessage && rows.map((row, index) => {
+                const canCorrectCheckout = Boolean(row.checkInId && !row.checkOutId && isMissingCheckoutShift(row.checkInAt, row.checkOutAt, row.attendanceDate))
+
+                return (
+                  <ClickableTableRow key={row.id} label={`Lihat detail absensi ${row.fullName}`} onOpen={() => setDetailRow(row)}>
+                    <td><TableNumberCell value={index + 1} /></td>
+                    <td><EmployeeIdentityCell fullName={row.fullName} code={row.employeeCode} photoUrl={row.employeePhotoUrl} /></td>
+                    <td><AttendanceTimelineCell row={row} /></td>
+                    <td><AttendanceValidationCell row={row} /></td>
+                    <td><span className="cycleCell"><ProgressRing value={row.cycleDays} /><span>{row.cycleDays}/{row.targetDays}</span></span></td>
+                    <td><StatusBadge status={row.attendanceStatus} /></td>
+                    <td className="tableActionCell">
+                      <div className="rowActions" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+                        <RowActionMenu label={`Aksi absensi ${row.fullName}`}>
+                          <RowActionMenuItem onClick={() => setDetailRow(row)}>
+                            <Eye size={15} />
+                            Detail
+                          </RowActionMenuItem>
+                          <RowActionMenuItem disabled={!canCorrectCheckout} onClick={() => onCorrectCheckout(row)}>
+                            <CalendarCheck2 size={15} />
+                            Koreksi Pulang
+                          </RowActionMenuItem>
+                          <RowActionMenuItem danger disabled={!row.checkInId && !row.checkOutId} onClick={() => onResetDay(row)}>
+                            <RotateCcw size={15} />
+                            Reset Tanggal Ini
+                          </RowActionMenuItem>
+                        </RowActionMenu>
+                      </div>
+                    </td>
+                  </ClickableTableRow>
+                )
+              })}
               {!loading && !errorMessage && rows.length === 0 && <tr><td className="tableStateCell" colSpan={7}><TableState title="Tidak ada data" description="Belum ada feed sesuai filter." icon={Search} /></td></tr>}
             </tbody>
           </table>
         </div>
       </OperationalTableCard>
-      <AttendanceMonitorDetailDialog row={detailRow} onClose={() => setDetailRow(null)} onResetDay={onResetDay} />
+      <AttendanceMonitorDetailDialog row={detailRow} onClose={() => setDetailRow(null)} onResetDay={onResetDay} onCorrectCheckout={onCorrectCheckout} />
     </>
   )
 }
 
-function AttendanceLiveRecap({ rows, selectedDate }: { rows: AttendanceMonitorRow[]; selectedDate: string }) {
+function AttendanceLiveRecap({ rows, selectedDate, range = "day" }: { rows: AttendanceMonitorRow[]; selectedDate: string; range?: AttendanceRecapRange }) {
   const checkedIn = rows.filter((row) => row.checkInId).length
   const checkedOut = rows.filter((row) => row.checkOutId).length
   const review = rows.filter((row) => row.attendanceStatus === "pending").length
@@ -8949,8 +9448,9 @@ function AttendanceLiveRecap({ rows, selectedDate }: { rows: AttendanceMonitorRo
   const missing = rows.filter((row) => !row.checkInId).length
   const missingCheckout = rows.filter((row) => row.checkInId && !row.checkOutId).length
   const workdayCounted = rows.filter((row) => row.attendanceStatus === "valid" && row.checkInId).length
+  const rangeLabel = range === "month" ? "30 hari" : range === "week" ? "7 hari" : "Tanggal"
   const items = [
-    { label: "Tanggal", value: formatWorkDate(selectedDate), tone: "neutral" },
+    { label: rangeLabel, value: formatWorkDate(selectedDate), tone: "neutral" },
     { label: "Masuk", value: checkedIn, tone: "valid" },
     { label: "Pulang", value: checkedOut, tone: "valid" },
     { label: "Belum checkout", value: missingCheckout, tone: missingCheckout ? "pending" : "neutral" },
@@ -8972,35 +9472,177 @@ function AttendanceLiveRecap({ rows, selectedDate }: { rows: AttendanceMonitorRo
   )
 }
 
+function AttendanceRecapTable({
+  rows,
+  loading,
+  errorMessage,
+  selectedDate,
+  range,
+  onResetDay,
+  onCorrectCheckout,
+}: {
+  rows: AttendanceMonitorRow[]
+  loading: boolean
+  errorMessage: string
+  selectedDate: string
+  range: AttendanceRecapRange
+  onResetDay: (row: AttendanceMonitorRow) => void
+  onCorrectCheckout: (row: AttendanceMonitorRow) => void
+}) {
+  const [detailRow, setDetailRow] = useState<AttendanceMonitorRow | null>(null)
+  const title = range === "day" ? `Rekap ${formatWorkDate(selectedDate)}` : range === "week" ? `Rekap 7 hari sampai ${formatWorkDate(selectedDate)}` : `Rekap 30 hari sampai ${formatWorkDate(selectedDate)}`
+
+  return (
+    <>
+      <OperationalTableCard>
+        <div className="tableHeader">
+          <div>
+            <h2>Attendance Recap</h2>
+            <p>{title}. Klik baris untuk melihat detail check-in, check-out, GPS, face, dan payroll cycle.</p>
+          </div>
+        </div>
+        <div className="tableScroller uiDataTableScroller uiDataTableHasColumns attendanceRecapTableScroller">
+          <table>
+            <colgroup>
+              <col className="tableNumberColumn" />
+              <col style={{ width: "250px" }} />
+              <col style={{ width: "150px" }} />
+              <col style={{ width: "150px" }} />
+              <col style={{ width: "150px" }} />
+              <col style={{ width: "170px" }} />
+              <col style={{ width: "260px" }} />
+              <col style={{ width: "130px" }} />
+              <col className="tableActionColumn" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th>No</th>
+                <th>Karyawan</th>
+                <th>Tanggal</th>
+                <th>Masuk</th>
+                <th>Pulang</th>
+                <th>Jam Kerja</th>
+                <th>Validasi</th>
+                <th>Status</th>
+                <th>Aksi</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading && <tr><td className="tableStateCell" colSpan={9}><TableState title="Memuat rekap" description="Mengambil data absensi dari attendance logs." icon={CalendarCheck2} /></td></tr>}
+              {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={9}><TableState title="Gagal memuat" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
+              {!loading && !errorMessage && rows.map((row, index) => {
+                const canCorrectCheckout = Boolean(row.checkInId && !row.checkOutId && isMissingCheckoutShift(row.checkInAt, row.checkOutAt, row.attendanceDate))
+                const durationMeta = row.checkInId && row.checkOutId ? "Final" : row.checkInId ? canCorrectCheckout ? "Perlu koreksi HR" : "Berjalan" : "Belum mulai"
+
+                return (
+                  <ClickableTableRow key={`${row.employeeId}-${row.attendanceDate}-${row.checkInId || "missing"}`} label={`Lihat rekap absensi ${row.fullName}`} onOpen={() => setDetailRow(row)}>
+                    <td><TableNumberCell value={index + 1} /></td>
+                    <td><EmployeeIdentityCell fullName={row.fullName} code={row.employeeCode} photoUrl={row.employeePhotoUrl} /></td>
+                    <td><TableText primary={formatWorkDate(row.attendanceDate)} secondary={row.divisionName} /></td>
+                    <td><RecapEventText eventType="check_in" time={row.checkInAt} status={row.checkInStatus} /></td>
+                    <td><RecapEventText eventType="check_out" time={row.checkOutAt} status={row.checkOutStatus} /></td>
+                    <td><TableText primary={row.workDurationLabel} secondary={durationMeta} /></td>
+                    <td><RecapValidationSummary row={row} /></td>
+                    <td><StatusBadge status={row.attendanceStatus} /></td>
+                    <td className="tableActionCell">
+                      <div className="rowActions" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+                        <RowActionMenu label={`Aksi rekap ${row.fullName}`}>
+                          <RowActionMenuItem onClick={() => setDetailRow(row)}>
+                            <Eye size={15} />
+                            Detail
+                          </RowActionMenuItem>
+                          <RowActionMenuItem disabled={!canCorrectCheckout} onClick={() => onCorrectCheckout(row)}>
+                            <CalendarCheck2 size={15} />
+                            Koreksi Pulang
+                          </RowActionMenuItem>
+                          <RowActionMenuItem danger disabled={!row.checkInId && !row.checkOutId} onClick={() => onResetDay(row)}>
+                            <RotateCcw size={15} />
+                            Reset Data Ini
+                          </RowActionMenuItem>
+                        </RowActionMenu>
+                      </div>
+                    </td>
+                  </ClickableTableRow>
+                )
+              })}
+              {!loading && !errorMessage && rows.length === 0 && <tr><td className="tableStateCell" colSpan={9}><TableState title="Tidak ada rekap" description="Belum ada data absensi sesuai filter tanggal/range." icon={Search} /></td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </OperationalTableCard>
+      <AttendanceMonitorDetailDialog row={detailRow} onClose={() => setDetailRow(null)} onResetDay={onResetDay} onCorrectCheckout={onCorrectCheckout} />
+    </>
+  )
+}
+
+function RecapEventText({ eventType, time, status }: { eventType: "check_in" | "check_out"; time: string; status: AttendanceLogStatus | "missing" }) {
+  const tone = status === "valid" ? "valid" : status === "review" ? "pending" : status === "rejected" ? "failed" : "missing"
+  return (
+    <span className={clsx("recapEventText", `tone-${tone}`)}>
+      <span>{eventType === "check_in" ? "Masuk" : "Pulang"}</span>
+      <strong>{time ? formatAttendanceTime(time) : "Belum"}</strong>
+      <small>{status === "missing" ? "Belum ada" : status}</small>
+    </span>
+  )
+}
+
+function RecapValidationSummary({ row }: { row: AttendanceMonitorRow }) {
+  const distance = row.checkOutDistanceM ?? row.checkInDistanceM
+  const radius = row.radiusM
+  const gpsStatus = row.checkOutId ? row.checkOutGpsStatus : row.checkInGpsStatus
+  const faceScore = row.checkOutFaceScore ?? row.checkInFaceScore ?? row.faceScore
+  const faceStatus = row.checkOutId ? row.checkOutFaceStatus : row.checkInFaceStatus
+  const gpsText = distance === null || distance === undefined
+    ? "GPS kosong"
+    : `${distance}m${radius ? ` dari ${radius}m` : ""}`
+
+  return (
+    <div className="recapValidationSummary">
+      <span className={clsx("recapValidationPill", gpsStatus === "valid" && "valid", gpsStatus === "out_of_radius" && "failed")}>
+        <LocateFixed size={14} />
+        {gpsText}
+      </span>
+      <span className={clsx("recapValidationPill", faceStatus === "verified" && "valid", faceStatus === "review" && "pending", faceStatus === "failed" && "failed")}>
+        <ScanFace size={14} />
+        {faceScore === null || faceScore === undefined ? "Face -" : `${faceScore}% face`}
+      </span>
+    </div>
+  )
+}
+
 function AttendanceReviewTable({
   rows,
   loading,
   errorMessage,
   onReview,
+  onApproveAll,
 }: {
   rows: AttendanceReviewRow[]
   loading: boolean
   errorMessage: string
-  onReview: (row: AttendanceReviewRow, decision: "approve" | "reject") => void
+  onReview: (row: AttendanceReviewRow) => void
+  onApproveAll: (rows: AttendanceReviewRow[]) => void
 }) {
+  const [openGroupId, setOpenGroupId] = useState<string | null>(null)
+  const groups = useMemo(() => groupAttendanceReviewRows(rows), [rows])
+
   return (
     <OperationalTableCard>
       <div className="tableHeader">
         <div>
           <h2>Attendance Review Queue</h2>
-          <p>Absensi yang butuh keputusan HR sebelum dihitung ke payroll cycle 26 hari.</p>
+          <p>Satu baris adalah satu karyawan per tanggal. Klik baris untuk melihat review check-in dan check-out.</p>
         </div>
       </div>
       <div className="tableScroller uiDataTableScroller uiDataTableHasColumns">
         <table>
           <colgroup>
             <col className="tableNumberColumn" />
-            <col style={{ width: "220px" }} />
-            <col style={{ width: "150px" }} />
-            <col style={{ width: "150px" }} />
-            <col style={{ width: "140px" }} />
-            <col style={{ width: "240px" }} />
-            <col style={{ width: "130px" }} />
+            <col style={{ width: "260px" }} />
+            <col style={{ width: "170px" }} />
+            <col style={{ width: "260px" }} />
+            <col style={{ width: "230px" }} />
+            <col style={{ width: "170px" }} />
             <col className="tableActionColumn" />
           </colgroup>
           <thead>
@@ -9008,47 +9650,250 @@ function AttendanceReviewTable({
               <th>No</th>
               <th>Karyawan</th>
               <th>Tanggal</th>
-              <th>Jam Kerja</th>
+              <th>Aktivitas Review</th>
               <th>Issue</th>
-              <th>Evidence</th>
               <th>Status</th>
               <th>Aksi</th>
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td className="tableStateCell" colSpan={8}><TableState title="Memuat review" description="Mengambil antrian absensi bermasalah." icon={ClipboardList} /></td></tr>}
-            {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={8}><TableState title="Gagal memuat" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
-            {!loading && !errorMessage && rows.map((row, index) => (
-              <ClickableTableRow key={row.id} label={`Review absensi ${row.fullName}`} onOpen={() => onReview(row, "approve")}>
-                <td><TableNumberCell value={index + 1} /></td>
-                <td><AttendanceReviewEmployeeCell row={row} /></td>
-                <td><TableText primary={formatEmployeeDate(row.attendanceDate)} secondary={formatAttendanceTime(row.eventAt)} /></td>
-                <td><TableText primary={row.workDurationLabel} secondary={row.eventType === "check_in" ? "Dari check-in" : "Dari check-out"} /></td>
-                <td><TableText primary={row.issueLabel} secondary={row.workdayCounted ? "Sudah dihitung" : "Belum dihitung"} /></td>
-                <td><AttendanceEvidenceCell row={row} /></td>
-                <td><UiStatusBadge tone={row.status === "valid" ? "valid" : row.status === "rejected" ? "failed" : "pending"}>{row.status === "valid" ? "Valid" : row.status === "rejected" ? "Ditolak" : "Review"}</UiStatusBadge></td>
-                <td className="tableActionCell">
-                  <div className="rowActions">
-                    <RowActionMenu>
-                      <RowActionMenuItem onClick={() => onReview(row, "approve")}>
-                        <FileCheck2 size={16} />
-                        Approve
-                      </RowActionMenuItem>
-                      <RowActionMenuItem danger onClick={() => onReview(row, "reject")}>
-                        <X size={16} />
-                        Reject
-                      </RowActionMenuItem>
-                    </RowActionMenu>
-                  </div>
-                </td>
-              </ClickableTableRow>
-            ))}
-            {!loading && !errorMessage && rows.length === 0 && <tr><td className="tableStateCell" colSpan={8}><TableState title="Antrian bersih" description="Tidak ada absensi yang butuh review saat ini." icon={FileCheck2} /></td></tr>}
+            {loading && <tr><td className="tableStateCell" colSpan={7}><TableState title="Memuat review" description="Mengambil antrian absensi bermasalah." icon={ClipboardList} /></td></tr>}
+            {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={7}><TableState title="Gagal memuat" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
+            {!loading && !errorMessage && groups.map((group, index) => {
+              const isOpen = openGroupId === group.id
+              const reviewEvents = [group.checkIn, group.checkOut].filter(Boolean) as AttendanceReviewRow[]
+
+              return (
+                <Fragment key={group.id}>
+                  <tr className={clsx("clickableTableRow attendanceReviewGroupRow", isOpen && "active")} tabIndex={0} onClick={() => setOpenGroupId(isOpen ? null : group.id)} onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault()
+                      setOpenGroupId(isOpen ? null : group.id)
+                    }
+                  }}>
+                    <td><TableNumberCell value={index + 1} /></td>
+                    <td><AttendanceReviewGroupEmployeeCell group={group} /></td>
+                    <td><TableText primary={formatWorkDate(group.attendanceDate)} secondary={`${group.reviewCount} event review`} /></td>
+                    <td><AttendanceReviewGroupActivity group={group} /></td>
+                    <td><TableText primary={group.issues.join(", ")} secondary={group.workDurationLabel} /></td>
+                    <td><UiStatusBadge tone="pending">Review</UiStatusBadge></td>
+                    <td className="tableActionCell">
+                      <div className="rowActions" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+                        <button className="rowExpandButton" type="button" aria-label={isOpen ? "Tutup detail review" : "Buka detail review"} onClick={() => setOpenGroupId(isOpen ? null : group.id)}>
+                          <ChevronDown size={18} />
+                        </button>
+                        <RowActionMenu>
+                          <RowActionMenuItem onClick={() => setOpenGroupId(isOpen ? null : group.id)}>
+                            <Eye size={16} />
+                            {isOpen ? "Tutup Detail" : "Lihat Detail"}
+                          </RowActionMenuItem>
+                          <RowActionMenuItem disabled={reviewEvents.length === 0} onClick={() => onApproveAll(reviewEvents)}>
+                            <FileCheck2 size={16} />
+                            Approve Semua
+                          </RowActionMenuItem>
+                        </RowActionMenu>
+                      </div>
+                    </td>
+                  </tr>
+                  {isOpen && (
+                    <tr className="attendanceReviewExpandRow">
+                      <td />
+                      <td colSpan={6}>
+                        <div className="attendanceReviewExpandPanel">
+                          <AttendanceReviewEventPanel
+                            label="Absen Masuk"
+                            eventType="check_in"
+                            row={group.checkIn}
+                            pairedAt={group.pairedCheckInAt}
+                            pairedStatus={group.pairedCheckInStatus}
+                            onReview={onReview}
+                          />
+                          <AttendanceReviewEventPanel
+                            label="Absen Pulang"
+                            eventType="check_out"
+                            row={group.checkOut}
+                            pairedAt={group.pairedCheckOutAt}
+                            pairedStatus={group.pairedCheckOutStatus}
+                            onReview={onReview}
+                          />
+                          {reviewEvents.length > 1 && (
+                            <button className="primaryButton compactButton attendanceReviewApproveAll" type="button" onClick={() => onApproveAll(reviewEvents)}>
+                              <FileCheck2 size={16} />
+                              Approve Masuk & Pulang
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              )
+            })}
+            {!loading && !errorMessage && groups.length === 0 && <tr><td className="tableStateCell" colSpan={7}><TableState title="Antrian bersih" description="Tidak ada absensi yang butuh review saat ini." icon={FileCheck2} /></td></tr>}
           </tbody>
         </table>
       </div>
     </OperationalTableCard>
   )
+}
+
+function groupAttendanceReviewRows(rows: AttendanceReviewRow[]) {
+  const groups = new Map<string, AttendanceReviewGroup>()
+
+  rows.forEach((row) => {
+    const groupId = `${row.employeeId}:${row.attendanceDate}`
+    const existing = groups.get(groupId)
+    const issues = existing?.issues || []
+    const nextIssues = issues.includes(row.issueLabel) ? issues : [...issues, row.issueLabel]
+    const nextGroup: AttendanceReviewGroup = existing || {
+      id: groupId,
+      employeeId: row.employeeId,
+      employeeCode: row.employeeCode,
+      fullName: row.fullName,
+      employeePhotoUrl: row.employeePhotoUrl,
+      divisionName: row.divisionName,
+      workLocationName: row.workLocationName,
+      attendanceDate: row.attendanceDate,
+      pairedCheckInAt: row.pairedCheckInAt,
+      pairedCheckInStatus: row.pairedCheckInStatus,
+      pairedCheckOutAt: row.pairedCheckOutAt,
+      pairedCheckOutStatus: row.pairedCheckOutStatus,
+      reviewCount: 0,
+      issues: [],
+      workDurationLabel: row.workDurationLabel,
+      status: "review",
+    }
+
+    if (row.eventType === "check_out") nextGroup.checkOut = row
+    else nextGroup.checkIn = row
+
+    nextGroup.reviewCount += 1
+    nextGroup.issues = nextIssues
+    if (!nextGroup.pairedCheckInAt && row.pairedCheckInAt) {
+      nextGroup.pairedCheckInAt = row.pairedCheckInAt
+      nextGroup.pairedCheckInStatus = row.pairedCheckInStatus
+    }
+    if (!nextGroup.pairedCheckOutAt && row.pairedCheckOutAt) {
+      nextGroup.pairedCheckOutAt = row.pairedCheckOutAt
+      nextGroup.pairedCheckOutStatus = row.pairedCheckOutStatus
+    }
+    nextGroup.workDurationLabel = row.workDurationLabel || nextGroup.workDurationLabel
+    groups.set(groupId, nextGroup)
+  })
+
+  return Array.from(groups.values())
+}
+
+function AttendanceReviewGroupEmployeeCell({ group }: { group: AttendanceReviewGroup }) {
+  return (
+    <EmployeeIdentityCell fullName={group.fullName} code={group.employeeCode} photoUrl={group.employeePhotoUrl} secondary={`${group.employeeCode} · ${group.divisionName}`} />
+  )
+}
+
+function AttendanceReviewGroupActivity({ group }: { group: AttendanceReviewGroup }) {
+  return (
+    <div className="attendanceReviewGroupActivity">
+      <AttendanceReviewMiniEvent label="Masuk" row={group.checkIn} pairedAt={group.pairedCheckInAt} pairedStatus={group.pairedCheckInStatus} />
+      <AttendanceReviewMiniEvent label="Pulang" row={group.checkOut} pairedAt={group.pairedCheckOutAt} pairedStatus={group.pairedCheckOutStatus} />
+    </div>
+  )
+}
+
+function AttendanceReviewMiniEvent({
+  label,
+  row,
+  pairedAt,
+  pairedStatus,
+}: {
+  label: string
+  row?: AttendanceReviewRow
+  pairedAt: string
+  pairedStatus: AttendanceLogStatus | "missing"
+}) {
+  const effectiveStatus = row?.status || pairedStatus
+  const tone = effectiveStatus === "rejected" ? "failed" : effectiveStatus === "valid" ? "valid" : effectiveStatus === "review" ? "pending" : "missing"
+  const timeLabel = row ? formatAttendanceTime(row.eventAt) : pairedAt ? formatAttendanceTime(pairedAt) : "Belum ada"
+
+  return (
+    <span className={clsx("attendanceReviewMiniEvent", `tone-${tone}`)}>
+      <span>{label}</span>
+      <strong>{timeLabel}</strong>
+    </span>
+  )
+}
+
+function AttendanceReviewEventPanel({
+  label,
+  eventType,
+  row,
+  pairedAt,
+  pairedStatus,
+  onReview,
+}: {
+  label: string
+  eventType: AttendanceReviewRow["eventType"]
+  row?: AttendanceReviewRow
+  pairedAt: string
+  pairedStatus: AttendanceLogStatus | "missing"
+  onReview: (row: AttendanceReviewRow) => void
+}) {
+  if (!row) {
+    const hasPairedEvent = Boolean(pairedAt)
+    const panelTone = pairedStatus === "valid" ? "valid" : pairedStatus === "rejected" ? "failed" : pairedStatus === "review" ? "pending" : "empty"
+
+    return (
+      <div className={clsx("attendanceReviewEventPanel", eventType === "check_out" && "checkout", `tone-${panelTone}`)}>
+        <span className="attendanceReviewEventPanelIcon">
+          {hasPairedEvent && pairedStatus === "valid" ? <ShieldCheck size={17} /> : <AlertCircle size={17} />}
+        </span>
+        <div>
+          <strong>{label}{hasPairedEvent ? ` · ${formatAttendanceTime(pairedAt)}` : ""}</strong>
+          <p>{getAttendanceReviewEventCopy(pairedStatus, eventType)}</p>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className={clsx("attendanceReviewEventPanel", row.eventType === "check_out" && "checkout", "tone-pending")}>
+      <span className="attendanceReviewEventPanelIcon">
+        {row.eventType === "check_out" ? <LogOut size={17} /> : <LogIn size={17} />}
+      </span>
+      <div className="attendanceReviewEventPanelMain">
+        <strong>{label} · {formatAttendanceTime(row.eventAt)}</strong>
+        <p>{row.issueLabel} · {row.workLocationName} · {row.distanceM === null ? "GPS kosong" : `${row.distanceM}m dari radius ${row.radiusM || "-"}m`}</p>
+      </div>
+      <AttendanceEvidenceCell row={row} />
+      <button className="secondaryButton compactButton" type="button" onClick={() => onReview(row)}>
+        <Eye size={15} />
+        Review Event
+      </button>
+    </div>
+  )
+}
+
+function getAttendanceReviewEventCopy(status: AttendanceLogStatus | "missing", eventType: AttendanceReviewRow["eventType"]) {
+  if (status === "valid") return "Sudah valid, tidak masuk antrian review."
+  if (status === "rejected") return "Sudah ditolak HR, tidak dihitung payroll."
+  if (status === "review") return "Masih menunggu keputusan HR."
+  return eventType === "check_out" ? "Belum ada absen pulang pada tanggal ini." : "Belum ada absen masuk pada tanggal ini."
+}
+
+function getAttendanceEventLabel(eventType: AttendanceReviewRow["eventType"]) {
+  return eventType === "check_out" ? "Absen Pulang" : "Absen Masuk"
+}
+
+function getAttendanceLogStatusLabel(status: AttendanceLogStatus | "missing") {
+  if (status === "valid") return "Valid"
+  if (status === "review") return "Review"
+  if (status === "rejected") return "Ditolak"
+  return "Belum ada"
+}
+
+function getAttendancePairSummary(row: AttendanceReviewRow) {
+  const checkIn = row.pairedCheckInAt ? `Masuk ${formatAttendanceTime(row.pairedCheckInAt)}` : "Masuk belum ada"
+  const checkOut = row.pairedCheckOutAt ? `Pulang ${formatAttendanceTime(row.pairedCheckOutAt)}` : "Pulang belum ada"
+  return `${checkIn} · ${checkOut}`
 }
 
 function AttendanceEvidenceCell({ row }: { row: AttendanceReviewRow }) {
@@ -9068,12 +9913,6 @@ function AttendanceEvidenceCell({ row }: { row: AttendanceReviewRow }) {
         {row.faceScore === null ? (hasFace ? "Foto wajah" : "Foto belum ada") : `${row.faceScore}% face`}
       </span>
     </div>
-  )
-}
-
-function AttendanceReviewEmployeeCell({ row }: { row: AttendanceReviewRow }) {
-  return (
-    <EmployeeIdentityCell fullName={row.fullName} code={row.employeeCode} photoUrl={row.employeePhotoUrl} secondary={`${row.employeeCode} · ${row.divisionName}`} />
   )
 }
 
@@ -9100,11 +9939,12 @@ function AttendanceReviewDialog({
   const hasGps = Boolean(row.latitude && row.longitude)
   const insideRadius = row.gpsStatus === "valid"
   const hasFaceSnapshot = Boolean(row.faceSnapshotUrl)
-  const eventLabel = row.eventType === "check_out" ? "Absen Pulang" : "Absen Masuk"
+  const eventLabel = getAttendanceEventLabel(row.eventType)
   const eventTone = row.eventType === "check_out" ? "checkout" : "checkin"
   const eventDescription = row.eventType === "check_out"
-    ? "Review ini hanya untuk log pulang. Check-in tetap menjadi event terpisah."
-    : "Review ini hanya untuk log masuk. Check-out tetap menjadi event terpisah."
+    ? "Keputusan ini hanya memproses log pulang. Log masuk di hari yang sama tetap punya status sendiri."
+    : "Keputusan ini hanya memproses log masuk. Log pulang di hari yang sama tetap punya status sendiri."
+  const reviewStory = `${row.fullName} melakukan ${eventLabel.toLowerCase()} pukul ${formatAttendanceTime(row.eventAt)} pada ${formatWorkDate(row.attendanceDate)} di ${row.workLocationName}. ${hasGps ? `${insideRadius ? "Posisi masuk radius" : "Posisi di luar radius"} ${row.radiusM || "-"}m dengan jarak ${row.distanceM ?? "-"}m.` : "Koordinat GPS belum tersedia."} ${row.faceScore === null ? "Face score belum tersedia." : `Face score ${row.faceScore}%.`}`
   const distanceRatio = row.distanceM !== null && row.radiusM ? Math.min(1.45, row.distanceM / row.radiusM) : 0
   const userOffset = hasGps ? Math.min(32, Math.max(7, distanceRatio * 24)) : 0
   const mapStyle = {
@@ -9128,8 +9968,8 @@ function AttendanceReviewDialog({
           </span>
           <div>
             <span>Attendance Review</span>
-            <h2 id="attendance-review-title">{row.fullName}</h2>
-            <p id="attendance-review-description">{row.employeeCode} · {row.divisionName} · {eventLabel} · {formatEmployeeDate(row.attendanceDate)} {formatAttendanceTime(row.eventAt)}</p>
+            <h2 id="attendance-review-title">Review {eventLabel}</h2>
+            <p id="attendance-review-description">{row.fullName} · {row.employeeCode} · {row.divisionName} · {formatEmployeeDate(row.attendanceDate)} {formatAttendanceTime(row.eventAt)}</p>
           </div>
           <span className={clsx("attendanceReviewEventBadge", eventTone)}>
             {row.eventType === "check_out" ? <LogOut size={15} /> : <LogIn size={15} />}
@@ -9141,6 +9981,13 @@ function AttendanceReviewDialog({
         </div>
 
         <div className="attendanceReviewContent">
+          <div className="attendanceReviewStory">
+            <span className={clsx("attendanceReviewStoryIcon", eventTone)}>
+              {row.eventType === "check_out" ? <LogOut size={18} /> : <LogIn size={18} />}
+            </span>
+            <p>{reviewStory}</p>
+          </div>
+
           <div className="attendanceEvidenceBoard">
             <div className="attendanceEvidenceMapCard">
               <div className="attendanceEvidenceMap" style={mapStyle}>
@@ -9170,6 +10017,25 @@ function AttendanceReviewDialog({
                 <strong>{hasFaceSnapshot ? "Foto wajah tersedia" : "Foto wajah belum tersedia"}</strong>
                 <small>{row.faceScore === null ? "Face score belum dikirim." : `Face match ${row.faceScore}%. Status ${row.faceStatus}.`}</small>
               </div>
+            </div>
+          </div>
+
+          <div className="attendanceReviewDayContext">
+            <div className={clsx("attendanceReviewDayEvent", row.eventType === "check_in" && "active", row.pairedCheckInStatus)}>
+              <span><LogIn size={16} /> Masuk</span>
+              <strong>{row.pairedCheckInAt ? formatAttendanceTime(row.pairedCheckInAt) : "Belum ada"}</strong>
+              <small>{getAttendanceLogStatusLabel(row.pairedCheckInStatus)}</small>
+            </div>
+            <div className="attendanceReviewDayLine" />
+            <div className={clsx("attendanceReviewDayEvent", row.eventType === "check_out" && "active", row.pairedCheckOutStatus)}>
+              <span><LogOut size={16} /> Pulang</span>
+              <strong>{row.pairedCheckOutAt ? formatAttendanceTime(row.pairedCheckOutAt) : "Belum ada"}</strong>
+              <small>{getAttendanceLogStatusLabel(row.pairedCheckOutStatus)}</small>
+            </div>
+            <div className="attendanceReviewDayDuration">
+              <span>Jam kerja</span>
+              <strong>{row.workDurationLabel}</strong>
+              <small>{eventDescription}</small>
             </div>
           </div>
 
@@ -11093,7 +11959,7 @@ function EmployeePwaApp({ profile, onLogout }: { profile: AppAccessProfile; onLo
                     </span>
                     <span>
                       <small>Durasi</small>
-                      <strong>{row.checkIn ? row.checkOut ? formatAttendanceWorkDuration(row.checkIn.eventAt, row.checkOut.eventAt) : "Belum checkout" : "-"}</strong>
+                      <strong>{row.checkIn ? formatAttendanceWorkDuration(row.checkIn.eventAt, row.checkOut ? row.checkOut.eventAt : null, row.date) : "-"}</strong>
                     </span>
                   </div>
                 </article>
@@ -11488,7 +12354,7 @@ export function App() {
         <div className="workspaceViewport withMobileNav">
           {activeView === "dashboard" ? (
             <DashboardPage activeView={activeView} />
-          ) : activeView === "attendance-live" || activeView === "attendance-review" || activeView === "field-monitoring" || activeView === "payroll" ? (
+          ) : activeView === "attendance-live" || activeView === "attendance-requests" || activeView === "attendance-review" || activeView === "field-monitoring" || activeView === "payroll" ? (
             <AttendanceCyclePage activeView={activeView} />
           ) : activeView === "employees" ? (
             <EmployeesPage activeView={activeView} profile={accessProfile} />

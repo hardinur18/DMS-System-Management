@@ -1,11 +1,12 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0"
 
-type AttendanceReviewAction = "approve" | "reject" | "reset_day"
+type AttendanceReviewAction = "approve" | "reject" | "reset_day" | "correct_checkout"
 
 interface AttendanceReviewPayload {
   id?: string
   employeeId?: string
   attendanceDate?: string
+  checkOutTime?: string
   notes?: string
 }
 
@@ -24,6 +25,18 @@ function jsonResponse(body: Record<string, unknown>, status = 200) {
 
 function assertPayload(condition: unknown, message: string) {
   if (!condition) throw new Error(message)
+}
+
+function appendReviewNote(existing: unknown, note: string) {
+  return [String(existing || "").trim(), note].filter(Boolean).join("\n")
+}
+
+function buildJakartaDateTime(attendanceDate: string, time: string) {
+  const normalizedTime = time.trim()
+  assertPayload(/^\d{2}:\d{2}$/.test(normalizedTime), "Jam pulang wajib format HH:mm.")
+  const [hour, minute] = normalizedTime.split(":").map((value) => Number(value))
+  assertPayload(hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59, "Jam pulang tidak valid.")
+  return `${attendanceDate}T${normalizedTime}:00+07:00`
 }
 
 Deno.serve(async (request) => {
@@ -54,7 +67,7 @@ Deno.serve(async (request) => {
     const action = body.action
     const payload = body.payload || {}
 
-    assertPayload(action === "approve" || action === "reject" || action === "reset_day", "Action review tidak valid.")
+    assertPayload(action === "approve" || action === "reject" || action === "reset_day" || action === "correct_checkout", "Action review tidak valid.")
 
     const token = authorization.replace(/^Bearer\s+/i, "")
     const { data: authData, error: authError } = await userClient.auth.getUser(token)
@@ -141,6 +154,98 @@ Deno.serve(async (request) => {
       })
     }
 
+    if (action === "correct_checkout") {
+      assertPayload(payload.employeeId, "ID karyawan wajib ada.")
+      assertPayload(payload.attendanceDate && /^\d{4}-\d{2}-\d{2}$/.test(payload.attendanceDate), "Tanggal absensi wajib format YYYY-MM-DD.")
+      assertPayload(payload.checkOutTime, "Jam pulang koreksi wajib ada.")
+
+      const employeeId = payload.employeeId as string
+      const attendanceDate = payload.attendanceDate as string
+      const checkOutAt = buildJakartaDateTime(attendanceDate, payload.checkOutTime as string)
+      const reviewNote = payload.notes?.trim()
+
+      const { data: checkIn, error: checkInError } = await adminClient
+        .from("attendance_logs")
+        .select("id, employee_id, app_user_id, work_location_id, attendance_date, event_type, event_at, status, notes")
+        .eq("employee_id", employeeId)
+        .eq("attendance_date", attendanceDate)
+        .eq("event_type", "check_in")
+        .maybeSingle()
+
+      if (checkInError) throw checkInError
+      if (!checkIn) return jsonResponse({ error: "Check-in belum ada. Koreksi checkout harus punya log masuk." }, 404)
+      if (checkIn.status === "rejected") return jsonResponse({ error: "Check-in ditolak HR. Koreksi checkout tidak bisa langsung dihitung." }, 409)
+
+      const checkInAt = new Date(String(checkIn.event_at || "")).getTime()
+      const checkOutMs = new Date(checkOutAt).getTime()
+      assertPayload(Number.isFinite(checkInAt) && Number.isFinite(checkOutMs) && checkOutMs > checkInAt, "Jam pulang harus setelah jam masuk.")
+
+      const correctionNote = reviewNote
+        ? `HR koreksi checkout ${payload.checkOutTime}: ${reviewNote}`
+        : `HR koreksi checkout ${payload.checkOutTime} tanpa catatan tambahan.`
+
+      const { data: checkOut, error: checkOutError } = await adminClient
+        .from("attendance_logs")
+        .upsert({
+          employee_id: employeeId,
+          app_user_id: checkIn.app_user_id,
+          work_location_id: checkIn.work_location_id,
+          attendance_date: attendanceDate,
+          event_type: "check_out",
+          event_at: checkOutAt,
+          gps_status: "missing",
+          face_status: "not_required",
+          status: "valid",
+          workday_counted: false,
+          source: "management",
+          notes: correctionNote,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: "employee_id,attendance_date,event_type" })
+        .select("id, employee_id, attendance_date, event_type, status, workday_counted, notes")
+        .single()
+
+      if (checkOutError) throw checkOutError
+
+      const { error: checkInUpdateError } = await adminClient
+        .from("attendance_logs")
+        .update({
+          status: "valid",
+          workday_counted: true,
+          notes: appendReviewNote(checkIn.notes, correctionNote),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", checkIn.id)
+
+      if (checkInUpdateError) throw checkInUpdateError
+
+      const { error: refreshError } = await adminClient.rpc("refresh_employee_payroll_cycles", { target_employee_id: employeeId })
+      if (refreshError) throw refreshError
+
+      await adminClient.from("audit_logs").insert({
+        actor_user_id: actor.id,
+        actor_name: actor.full_name,
+        action: "Correct missing checkout",
+        target_table: "attendance_logs",
+        target_id: `${employeeId}:${attendanceDate}`,
+        status: "success",
+        metadata: {
+          attendance_date: attendanceDate,
+          employee_id: employeeId,
+          check_in_id: checkIn.id,
+          check_out_id: checkOut.id,
+          check_out_at: checkOutAt,
+          source: "edge-function",
+        },
+      })
+
+      return jsonResponse({
+        ok: true,
+        check_in_id: checkIn.id,
+        check_out: checkOut,
+        attendance_date: attendanceDate,
+      })
+    }
+
     assertPayload(payload.id, "ID absensi wajib ada.")
 
     const { data: attendance, error: attendanceError } = await adminClient
@@ -164,7 +269,7 @@ Deno.serve(async (request) => {
     const pairedCheckOut = dayLogs?.find((log) => log.event_type === "check_out" && log.id !== attendance.id)
     const nextWorkdayCounted = approved
       && attendance.event_type === "check_in"
-      && (!pairedCheckOut || pairedCheckOut.status === "valid")
+      && pairedCheckOut?.status === "valid"
 
     const reviewNote = payload.notes?.trim()
     const nextNotes = [
