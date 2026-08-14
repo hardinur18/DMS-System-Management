@@ -1,9 +1,16 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0"
 
 type AttendanceEventType = "check_in" | "check_out"
+type AttendanceMode = "field" | "kiosk"
+type KioskCredentialType = "barcode" | "rfid"
 
 interface FieldAttendancePayload {
-  eventType?: AttendanceEventType
+  mode?: AttendanceMode
+  eventType?: AttendanceEventType | "auto"
+  kioskId?: string | null
+  kioskCode?: string | null
+  credentialType?: KioskCredentialType | null
+  credentialValue?: string | null
   latitude?: number
   longitude?: number
   faceScore?: number | null
@@ -83,6 +90,12 @@ function appendSystemNote(existing: unknown, note: string) {
   return [String(existing || "").trim(), note].filter(Boolean).join("\n")
 }
 
+async function sha256Hex(value: string) {
+  const data = new TextEncoder().encode(value)
+  const hash = await crypto.subtle.digest("SHA-256", data)
+  return Array.from(new Uint8Array(hash)).map((byte) => byte.toString(16).padStart(2, "0")).join("")
+}
+
 function normalizeEmbedding(value: unknown) {
   if (!Array.isArray(value)) return []
   const vector = value.map((item) => Number(item))
@@ -156,9 +169,14 @@ Deno.serve(async (request) => {
 
   try {
     const payload = await request.json() as FieldAttendancePayload
-    const eventType = payload.eventType || "check_in"
+    const mode: AttendanceMode = payload.mode === "kiosk" ? "kiosk" : "field"
+    let eventType: AttendanceEventType | "auto" = payload.eventType || "check_in"
     const latitude = toNumber(payload.latitude)
     const longitude = toNumber(payload.longitude)
+    const kioskId = payload.kioskId?.trim() || ""
+    const kioskCode = payload.kioskCode?.trim() || ""
+    const credentialType = payload.credentialType === "rfid" ? "rfid" : payload.credentialType === "barcode" ? "barcode" : null
+    const credentialValue = payload.credentialValue?.trim() || ""
     const faceScore = payload.faceScore === null || payload.faceScore === undefined ? null : toNumber(payload.faceScore)
     const faceEmbedding = normalizeEmbedding(payload.faceEmbedding)
     const faceEmbeddingModel = payload.faceEmbeddingModel?.trim() || null
@@ -166,9 +184,17 @@ Deno.serve(async (request) => {
     const faceSnapshotContentType = payload.faceSnapshotContentType?.trim() || "image/jpeg"
     let faceSnapshotPath = payload.faceSnapshotPath?.trim() || null
 
-    assertPayload(eventType === "check_in" || eventType === "check_out", "Tipe absensi tidak valid.")
-    assertPayload(latitude !== null && latitude >= -90 && latitude <= 90, "Latitude GPS tidak valid.")
-    assertPayload(longitude !== null && longitude >= -180 && longitude <= 180, "Longitude GPS tidak valid.")
+    assertPayload(eventType === "check_in" || eventType === "check_out" || eventType === "auto", "Tipe absensi tidak valid.")
+    if (mode === "field") {
+      assertPayload(eventType !== "auto", "Mode app lapangan wajib menentukan check-in atau check-out.")
+      assertPayload(latitude !== null && latitude >= -90 && latitude <= 90, "Latitude GPS tidak valid.")
+      assertPayload(longitude !== null && longitude >= -180 && longitude <= 180, "Longitude GPS tidak valid.")
+    }
+    if (mode === "kiosk") {
+      assertPayload(Boolean(kioskId || kioskCode), "Kiosk wajib dipilih.")
+      assertPayload(Boolean(credentialType), "Media scan kiosk wajib barcode atau RFID.")
+      assertPayload(credentialValue.length >= 3, "Kode scan kiosk tidak valid.")
+    }
     assertPayload(faceScore === null || (faceScore >= 0 && faceScore <= 100), "Face score harus 0 sampai 100.")
     assertPayload(!faceSnapshotBase64 || ["image/jpeg", "image/png", "image/webp"].includes(faceSnapshotContentType), "Format snapshot wajah tidak valid.")
     assertPayload(!faceSnapshotPath || faceSnapshotPath.startsWith("attendance/"), "Path snapshot wajah tidak valid.")
@@ -185,13 +211,51 @@ Deno.serve(async (request) => {
 
     if (actorError) throw actorError
     if (!actor || actor.status !== "active") return jsonResponse({ error: "Akses user lapangan tidak aktif." }, 403)
-    if (actor.app_scope !== "field" && actor.app_scope !== "both") return jsonResponse({ error: "User belum punya scope app lapangan." }, 403)
-    if (!actor.employee_id) return jsonResponse({ error: "User belum dikaitkan ke data karyawan." }, 403)
+    if (mode === "field" && actor.app_scope !== "field" && actor.app_scope !== "both") return jsonResponse({ error: "User belum punya scope app lapangan." }, 403)
+    if (mode === "field" && !actor.employee_id) return jsonResponse({ error: "User belum dikaitkan ke data karyawan." }, 403)
+
+    let kiosk: Record<string, unknown> | null = null
+    let policy: Record<string, unknown> | null = null
+    let targetEmployeeId = actor.employee_id ? String(actor.employee_id) : ""
+    let attendanceMedia = mode === "kiosk" ? credentialType : "gps"
+    let scanValueHash: string | null = null
+
+    if (mode === "kiosk") {
+      const kioskQuery = adminClient
+        .from("attendance_kiosks")
+        .select("id, kiosk_code, name, work_location_id, policy_id, status, attendance_policies(id, code, name, allowed_media, require_face, require_location, auto_detect_event, allow_checkout_while_checkin_review, block_out_of_radius, face_score_threshold)")
+
+      const { data: kioskRow, error: kioskError } = kioskId
+        ? await kioskQuery.eq("id", kioskId).maybeSingle()
+        : await kioskQuery.eq("kiosk_code", kioskCode.toUpperCase()).maybeSingle()
+
+      if (kioskError) throw kioskError
+      if (!kioskRow || kioskRow.status !== "active") return jsonResponse({ error: "Kiosk absensi belum aktif." }, 422)
+
+      kiosk = kioskRow as Record<string, unknown>
+      policy = (Array.isArray(kiosk.attendance_policies) ? kiosk.attendance_policies[0] : kiosk.attendance_policies) as Record<string, unknown> | null
+
+      const scannedEmployeeQuery = adminClient
+        .from("employees")
+        .select("id")
+        .eq("kiosk_access_enabled", true)
+        .is("deleted_at", null)
+
+      const { data: scannedEmployee, error: scannedEmployeeError } = credentialType === "rfid"
+        ? await scannedEmployeeQuery.eq("rfid_uid", credentialValue).maybeSingle()
+        : await scannedEmployeeQuery.eq("qr_token", credentialValue.toUpperCase()).maybeSingle()
+
+      if (scannedEmployeeError) throw scannedEmployeeError
+      if (!scannedEmployee) return jsonResponse({ error: "Karyawan tidak ditemukan dari kartu/barcode ini." }, 404)
+
+      targetEmployeeId = String(scannedEmployee.id)
+      scanValueHash = await sha256Hex(`${credentialType}:${credentialValue}`)
+    }
 
     const { data: employee, error: employeeError } = await adminClient
       .from("employees")
-      .select("id, employee_code, full_name, status, work_location_id")
-      .eq("id", actor.employee_id)
+      .select("id, employee_code, full_name, status, work_location_id, attendance_policy_id")
+      .eq("id", targetEmployeeId)
       .is("deleted_at", null)
       .maybeSingle()
 
@@ -199,6 +263,22 @@ Deno.serve(async (request) => {
     if (!employee) return jsonResponse({ error: "Data karyawan tidak ditemukan." }, 404)
     if (employee.status === "inactive") return jsonResponse({ error: "Karyawan nonaktif tidak bisa absensi." }, 403)
     if (!employee.work_location_id) return jsonResponse({ error: "Lokasi kerja karyawan belum diset." }, 422)
+
+    if (mode === "kiosk" && !policy && employee.attendance_policy_id) {
+      const { data: employeePolicy, error: employeePolicyError } = await adminClient
+        .from("attendance_policies")
+        .select("id, code, name, allowed_media, require_face, require_location, auto_detect_event, allow_checkout_while_checkin_review, block_out_of_radius, face_score_threshold")
+        .eq("id", employee.attendance_policy_id)
+        .maybeSingle()
+
+      if (employeePolicyError) throw employeePolicyError
+      policy = employeePolicy as Record<string, unknown> | null
+    }
+
+    const allowedMedia = Array.isArray(policy?.allowed_media) ? policy?.allowed_media.map((item) => String(item)) : ["barcode", "rfid"]
+    if (mode === "kiosk" && attendanceMedia && !allowedMedia.includes(attendanceMedia)) {
+      return jsonResponse({ error: `Policy kiosk tidak mengizinkan media ${attendanceMedia}.` }, 422)
+    }
 
     const { data: location, error: locationError } = await adminClient
       .from("work_locations")
@@ -214,11 +294,19 @@ Deno.serve(async (request) => {
     const radiusM = Number(location.radius_m || 0)
     assertPayload(locationLat !== null && locationLon !== null && radiusM > 0, "Koordinat atau radius lokasi kerja belum lengkap.")
 
-    const distanceM = haversineDistanceMeters(latitude, longitude, locationLat, locationLon)
-    const gpsStatus = distanceM <= radiusM ? "valid" : "out_of_radius"
-    if (gpsStatus !== "valid") {
+    let distanceM = mode === "kiosk" ? 0 : haversineDistanceMeters(latitude as number, longitude as number, locationLat, locationLon)
+    let gpsStatus = distanceM <= radiusM ? "valid" : "out_of_radius"
+    const kioskLocationId = kiosk?.work_location_id ? String(kiosk.work_location_id) : ""
+    if (mode === "kiosk" && kioskLocationId && kioskLocationId !== String(employee.work_location_id)) {
+      gpsStatus = "out_of_radius"
+      distanceM = radiusM + 1
+    }
+    const blockOutOfRadius = mode === "kiosk" ? policy?.block_out_of_radius !== false : true
+    if (gpsStatus !== "valid" && blockOutOfRadius) {
       return jsonResponse({
-        error: `Absensi ditolak. Posisi berada ${distanceM}m dari ${location.name}, melebihi radius ${radiusM}m.`,
+        error: mode === "kiosk"
+          ? `Absensi ditolak. Kiosk ini bukan lokasi kerja ${employee.full_name}.`
+          : `Absensi ditolak. Posisi berada ${distanceM}m dari ${location.name}, melebihi radius ${radiusM}m.`,
         code: "OUT_OF_RADIUS",
         distance_m: distanceM,
         radius_m: radiusM,
@@ -234,8 +322,11 @@ Deno.serve(async (request) => {
 
     if (faceProfileError) throw faceProfileError
 
-    const verificationRequired = faceProfile?.verification_required !== false
-    const faceThreshold = Number(faceProfile?.face_score_threshold || 85)
+    const policyRequiresFace = mode === "kiosk" ? policy?.require_face === true || allowedMedia.includes("face") : true
+    const verificationRequired = mode === "kiosk"
+      ? policyRequiresFace
+      : faceProfile?.verification_required !== false
+    const faceThreshold = Number(policy?.face_score_threshold || faceProfile?.face_score_threshold || 85)
     const faceProfileApproved = faceProfile?.status === "approved" || faceProfile?.status === "enrolled"
     if (verificationRequired && !faceProfileApproved) {
       return jsonResponse({ error: "Profil wajah belum approved HR. Daftarkan wajah dulu sebelum absensi." }, 422)
@@ -332,7 +423,14 @@ Deno.serve(async (request) => {
     const todayCheckIn = todayLogs?.find((log) => log.event_type === "check_in")
     const todayCheckOut = todayLogs?.find((log) => log.event_type === "check_out")
 
+    if (mode === "kiosk" && eventType === "auto") {
+      eventType = !todayCheckIn ? "check_in" : !todayCheckOut ? "check_out" : "check_in"
+    }
+
     if (eventType === "check_in" && todayCheckIn) {
+      if (mode === "kiosk" && todayCheckOut) {
+        return jsonResponse({ error: "Absensi hari ini sudah lengkap. Check-in dan check-out sudah tercatat." }, 409)
+      }
       return jsonResponse({ error: "Check-in hari ini sudah tercatat. Data awal tidak boleh ditimpa." }, 409)
     }
 
@@ -371,8 +469,8 @@ Deno.serve(async (request) => {
       work_location_id: location.id,
       attendance_date: eventDateKey,
       event_type: eventType,
-      latitude,
-      longitude,
+      latitude: mode === "kiosk" ? locationLat : latitude,
+      longitude: mode === "kiosk" ? locationLon : longitude,
       distance_m: distanceM,
       radius_m: radiusM,
       gps_status: gpsStatus,
@@ -382,8 +480,11 @@ Deno.serve(async (request) => {
       face_match_distance: faceMatchDistance,
       status,
       workday_counted: workdayCounted,
-      source: "field_app",
-      notes: payload.notes?.trim() || `${eventType === "check_in" ? "Check-in" : "Check-out"} dari app lapangan.`,
+      source: mode === "kiosk" ? "kiosk" : "field_app",
+      attendance_media: attendanceMedia,
+      scan_value_hash: scanValueHash,
+      kiosk_id: kiosk?.id || null,
+      notes: payload.notes?.trim() || `${eventType === "check_in" ? "Check-in" : "Check-out"} dari ${mode === "kiosk" ? "kiosk absensi" : "app lapangan"}.`,
       event_at: new Date().toISOString(),
     }
 
@@ -427,6 +528,11 @@ Deno.serve(async (request) => {
         name: location.name,
         radiusM,
       },
+      kiosk: kiosk ? {
+        id: kiosk.id,
+        code: kiosk.kiosk_code,
+        name: kiosk.name,
+      } : null,
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : "Gagal menyimpan absensi."

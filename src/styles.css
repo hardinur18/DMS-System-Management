@@ -3059,6 +3059,87 @@ button {
   min-width: 0;
 }
 
+.employeeKioskAccessPanel {
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(34, 174, 202, 0.16);
+  border-radius: 22px;
+  background:
+    linear-gradient(135deg, rgba(236, 253, 255, 0.9), rgba(255, 255, 255, 0.96) 42%),
+    #ffffff;
+  box-shadow: 0 20px 46px -42px rgba(7, 24, 74, 0.58);
+}
+
+.employeeKioskAccessHeader,
+.employeeKioskPolicyPreview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.employeeKioskIcon {
+  display: grid;
+  width: 46px;
+  height: 46px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid rgba(34, 174, 202, 0.18);
+  border-radius: 16px;
+  color: var(--cyan);
+  background: rgba(236, 253, 255, 0.88);
+}
+
+.employeeKioskAccessHeader div,
+.employeeKioskPolicyPreview {
+  min-width: 0;
+}
+
+.employeeKioskAccessHeader strong,
+.employeeKioskPolicyPreview strong {
+  display: block;
+  color: var(--ink);
+  font-size: 0.9rem;
+  font-weight: 850;
+}
+
+.employeeKioskAccessHeader small,
+.employeeKioskPolicyPreview small {
+  display: block;
+  color: var(--muted);
+  font-size: 0.73rem;
+  font-weight: 720;
+  line-height: 1.35;
+}
+
+.employeeKioskGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.employeeKioskPolicyPreview {
+  flex-wrap: wrap;
+  padding: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.employeeKioskPolicyPreview > span {
+  flex: 0 0 auto;
+  padding: 7px 9px;
+  border-radius: 999px;
+  color: var(--cyan-dark);
+  background: rgba(34, 174, 202, 0.1);
+  font-size: 0.67rem;
+  font-weight: 900;
+}
+
+.employeeKioskPolicyPreview small {
+  flex: 1 1 320px;
+}
+
 .employeePhotoField {
   display: grid;
   position: relative;
@@ -5511,6 +5592,17 @@ button {
   text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.employeeKioskDetailList .employeeDetailLine strong {
+  font-family: inherit;
+  letter-spacing: 0;
+}
+
+.employeeKioskDetailList .employeeDetailLine:nth-child(3) strong,
+.employeeKioskDetailList .employeeDetailLine:nth-child(4) strong {
+  color: #526178;
+  font-size: 0.76rem;
 }
 
 .employeeDetailDialog .masterDetailField {

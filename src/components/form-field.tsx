@@ -118,6 +118,7 @@ export function SwitchFormField({
   onDescription = "Data aktif dan bisa dipakai modul lain.",
   offDescription = "Data disimpan, tapi tidak dipakai pilihan aktif.",
   required,
+  disabled,
 }: {
   label: string
   checked: boolean
@@ -127,6 +128,7 @@ export function SwitchFormField({
   onDescription?: string
   offDescription?: string
   required?: boolean
+  disabled?: boolean
 }) {
   return (
     <FormField label={label} required={required}>
@@ -135,7 +137,10 @@ export function SwitchFormField({
         type="button"
         role="switch"
         aria-checked={checked}
-        onClick={() => onChange(!checked)}
+        disabled={disabled}
+        onClick={() => {
+          if (!disabled) onChange(!checked)
+        }}
       >
         <span className="formSwitchTrack">
           <span className="formSwitchThumb" />

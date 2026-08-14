@@ -36,8 +36,10 @@ import {
   PanelLeftOpen,
   Pencil,
   Copy,
+  RefreshCcw,
   RotateCcw,
   ScanFace,
+  ScanLine,
   Search,
   Settings,
   ShieldCheck,
@@ -269,9 +271,14 @@ type AttendanceRecapRange = "day" | "week" | "month"
 type AttendanceDateMode = "today" | "yesterday" | "last7" | "last30" | "day" | "week" | "month" | "year" | "all"
 
 interface FieldAttendanceSubmitPayload {
-  eventType: "check_in" | "check_out"
-  latitude: number
-  longitude: number
+  mode?: "field" | "kiosk"
+  eventType: "check_in" | "check_out" | "auto"
+  kioskId?: string | null
+  kioskCode?: string | null
+  credentialType?: "barcode" | "rfid" | null
+  credentialValue?: string | null
+  latitude?: number
+  longitude?: number
   faceScore: number | null
   faceEmbedding?: number[] | null
   faceEmbeddingModel?: string | null
@@ -451,6 +458,12 @@ interface EmployeeDirectoryRow {
   monthlySalary: number
   payrollMethod: EmployeePayrollMethod
   prorateEnabled: boolean
+  qrToken: string
+  rfidUid: string
+  attendancePolicyId: string
+  attendancePolicyName: string
+  kioskAccessEnabled: boolean
+  lastCardIssuedAt: string
   joinDate: string
   payrollCycleDays: number
   status: EmployeeStatus
@@ -486,6 +499,11 @@ interface EmployeeFormValues {
   monthlySalary: string
   payrollMethod: EmployeePayrollMethod
   prorateEnabled: boolean
+  qrToken: string
+  rfidUid: string
+  attendancePolicyId: string
+  kioskAccessEnabled: boolean
+  kioskSchemaReady: boolean
   joinDate: string
   payrollCycleDays: string
   status: EmployeeStatus
@@ -497,6 +515,16 @@ interface EmployeeOption {
   code: string
   name: string
   divisionId?: string
+  isActive: boolean
+}
+
+interface AttendancePolicyOption {
+  id: string
+  code: string
+  name: string
+  requireFace: boolean
+  requireLocation: boolean
+  allowedMedia: string[]
   isActive: boolean
 }
 
@@ -3320,8 +3348,10 @@ function buildEmployeePhotoPath(employeeCode: string) {
 }
 
 function createEmptyEmployeeForm(rows: EmployeeDirectoryRow[] = []): EmployeeFormValues {
+  const employeeCode = generateNextEmployeeCode(rows)
+
   return {
-    employeeCode: generateNextEmployeeCode(rows),
+    employeeCode,
     fullName: "",
     photoPath: "",
     photoUrl: "",
@@ -3339,11 +3369,21 @@ function createEmptyEmployeeForm(rows: EmployeeDirectoryRow[] = []): EmployeeFor
     monthlySalary: "0",
     payrollMethod: "attendance_cycle",
     prorateEnabled: true,
+    qrToken: generateEmployeeQrToken(employeeCode),
+    rfidUid: "",
+    attendancePolicyId: "",
+    kioskAccessEnabled: true,
+    kioskSchemaReady: true,
     joinDate: new Date().toISOString().slice(0, 10),
     payrollCycleDays: "0",
     status: "active",
     notes: "",
   }
+}
+
+function generateEmployeeQrToken(employeeCode: string) {
+  const randomPart = Math.random().toString(36).slice(2, 10).toUpperCase()
+  return `DMS-${employeeCode.trim().toUpperCase() || "EMP"}-${randomPart}`
 }
 
 function normalizeIntegerInput(value: string, maxValue?: number) {
@@ -3395,12 +3435,26 @@ function mapEmployeePayrollMethod(value: unknown): EmployeePayrollMethod {
   return "attendance_cycle"
 }
 
+function isMissingKioskEmployeeSchema(error: unknown) {
+  const errorObject = error && typeof error === "object" ? error as { message?: unknown; details?: unknown; hint?: unknown } : null
+  const message = `${String(errorObject?.message || "")} ${String(errorObject?.details || "")} ${String(errorObject?.hint || "")}`.toLowerCase()
+
+  return (
+    message.includes("employees.qr_token") ||
+    message.includes("employees.rfid_uid") ||
+    message.includes("employees.attendance_policy_id") ||
+    message.includes("employees.kiosk_access_enabled") ||
+    message.includes("employees.last_card_issued_at")
+  )
+}
+
 function mapEmployeeRow(
   row: Record<string, unknown>,
   divisionMap: Map<string, EmployeeOption>,
   positionMap: Map<string, EmployeeOption>,
   locationMap: Map<string, EmployeeOption>,
   shiftMap: Map<string, EmployeeOption>,
+  policyMap = new Map<string, AttendancePolicyOption>(),
   faceProfileMap = new Map<string, Record<string, unknown>>(),
   faceUrlMap = new Map<string, string>(),
 ): EmployeeDirectoryRow {
@@ -3408,6 +3462,7 @@ function mapEmployeeRow(
   const positionId = row.position_id ? String(row.position_id) : ""
   const workLocationId = row.work_location_id ? String(row.work_location_id) : ""
   const shiftId = row.shift_id ? String(row.shift_id) : ""
+  const attendancePolicyId = row.attendance_policy_id ? String(row.attendance_policy_id) : ""
   const faceProfile = faceProfileMap.get(String(row.id))
   const referenceImagePath = String(faceProfile?.reference_image_path || "")
 
@@ -3433,6 +3488,12 @@ function mapEmployeeRow(
     monthlySalary: Number(row.monthly_salary || 0),
     payrollMethod: mapEmployeePayrollMethod(row.payroll_method),
     prorateEnabled: row.prorate_enabled !== false,
+    qrToken: String(row.qr_token || ""),
+    rfidUid: String(row.rfid_uid || ""),
+    attendancePolicyId,
+    attendancePolicyName: policyMap.get(attendancePolicyId)?.name || "Multi Method",
+    kioskAccessEnabled: row.kiosk_access_enabled !== false,
+    lastCardIssuedAt: row.last_card_issued_at ? String(row.last_card_issued_at) : "",
     joinDate: row.join_date ? String(row.join_date) : "",
     payrollCycleDays: Number(row.payroll_cycle_days || 0),
     status: mapEmployeeStatus(row.status),
@@ -3451,17 +3512,22 @@ function mapEmployeeRow(
 }
 
 async function loadEmployeeData() {
-  const [employeesResult, divisions, positions, locations, shifts, faceProfiles] = await Promise.all([
-    supabase
-      .from("employees")
-      .select("id, employee_code, full_name, photo_path, nik, phone, email, division_id, position_id, work_location_id, shift_id, salary_type, daily_salary, monthly_salary, payroll_method, prorate_enabled, join_date, payroll_cycle_days, status, notes, deleted_at, created_at")
-      .order("employee_code", { ascending: true }),
+  const baseEmployeeSelect = "id, employee_code, full_name, photo_path, nik, phone, email, division_id, position_id, work_location_id, shift_id, salary_type, daily_salary, monthly_salary, payroll_method, prorate_enabled, join_date, payroll_cycle_days, status, notes, deleted_at, created_at"
+  const kioskEmployeeSelect = `${baseEmployeeSelect}, qr_token, rfid_uid, attendance_policy_id, kiosk_access_enabled, last_card_issued_at`
+  const employeeQuery = supabase.from("employees").select(kioskEmployeeSelect).order("employee_code", { ascending: true })
+  const [initialEmployeesResult, divisions, positions, locations, shifts, faceProfiles, policies] = await Promise.all([
+    employeeQuery,
     supabase.from("divisions").select("id, code, name, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
     supabase.from("positions").select("id, code, name, division_id, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
     supabase.from("work_locations").select("id, code, name, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
     supabase.from("shifts").select("id, code, name, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
     supabase.from("employee_face_profiles").select("id, employee_id, status, verification_required, face_score_threshold, reference_image_path, submitted_at, reviewed_at, review_notes"),
+    supabase.from("attendance_policies").select("id, code, name, allowed_media, require_face, require_location, status").order("code", { ascending: true }),
   ])
+  const kioskSchemaReady = !initialEmployeesResult.error || !isMissingKioskEmployeeSchema(initialEmployeesResult.error)
+  const employeesResult = kioskSchemaReady
+    ? initialEmployeesResult
+    : await supabase.from("employees").select(baseEmployeeSelect).order("employee_code", { ascending: true })
   const error = employeesResult.error || divisions.error || positions.error || locations.error || shifts.error || faceProfiles.error
 
   if (error) throw error
@@ -3491,26 +3557,38 @@ async function loadEmployeeData() {
     name: String(row.name || ""),
     isActive: row.is_active !== false,
   }))
+  const policyOptions = policies.error ? [] : (policies.data || []).map((row) => ({
+    id: String(row.id),
+    code: String(row.code || ""),
+    name: String(row.name || ""),
+    allowedMedia: Array.isArray(row.allowed_media) ? row.allowed_media.map((item) => String(item)) : [],
+    requireFace: row.require_face === true,
+    requireLocation: row.require_location !== false,
+    isActive: row.status !== "inactive",
+  }))
   const divisionMap = new Map(divisionOptions.map((item) => [item.id, item]))
   const positionMap = new Map(positionOptions.map((item) => [item.id, item]))
   const locationMap = new Map(locationOptions.map((item) => [item.id, item]))
   const shiftMap = new Map(shiftOptions.map((item) => [item.id, item]))
+  const policyMap = new Map(policyOptions.map((item) => [item.id, item]))
   const faceProfileMap = new Map(((faceProfiles.data || []) as Array<Record<string, unknown>>).map((row) => [String(row.employee_id || ""), row]))
   const faceReferencePaths = Array.from(new Set(((faceProfiles.data || []) as Array<Record<string, unknown>>).map((row) => String(row.reference_image_path || "")).filter(Boolean)))
   const faceUrlEntries = await Promise.all(faceReferencePaths.map(async (path) => [path, await getEmployeeFaceSignedUrl(path)] as const))
   const faceUrlMap = new Map(faceUrlEntries)
 
   return {
-    rows: (employeesResult.data || []).map((row) => mapEmployeeRow(row, divisionMap, positionMap, locationMap, shiftMap, faceProfileMap, faceUrlMap)),
+    rows: (employeesResult.data || []).map((row) => mapEmployeeRow(row, divisionMap, positionMap, locationMap, shiftMap, policyMap, faceProfileMap, faceUrlMap)),
     divisions: divisionOptions,
     positions: positionOptions,
     locations: locationOptions,
     shifts: shiftOptions,
+    policies: policyOptions,
+    kioskSchemaReady,
   }
 }
 
 function createEmployeePayload(values: EmployeeFormValues, photoPath = values.photoPath) {
-  return {
+  const payload: Record<string, unknown> = {
     employee_code: values.employeeCode.trim().toUpperCase(),
     full_name: values.fullName.trim(),
     photo_path: photoPath || null,
@@ -3531,6 +3609,15 @@ function createEmployeePayload(values: EmployeeFormValues, photoPath = values.ph
     status: values.status,
     notes: values.notes.trim() || null,
   }
+
+  if (values.kioskSchemaReady) {
+    payload.qr_token = values.qrToken.trim().toUpperCase() || null
+    payload.rfid_uid = values.rfidUid.trim() || null
+    payload.attendance_policy_id = values.attendancePolicyId || null
+    payload.kiosk_access_enabled = values.kioskAccessEnabled
+  }
+
+  return payload
 }
 
 function validateEmployeeForm(values: EmployeeFormValues) {
@@ -3558,6 +3645,9 @@ function validateEmployeeForm(values: EmployeeFormValues) {
   if (!emailValid) errors.push("Email karyawan belum valid.")
   if (!photoFileValid) errors.push("Foto wajib JPG, PNG, atau WEBP.")
   if (!photoSizeValid) errors.push("Ukuran foto maksimal 2MB.")
+  if (values.kioskSchemaReady && values.kioskAccessEnabled && !values.qrToken.trim() && !values.rfidUid.trim()) {
+    errors.push("Akses kiosk aktif wajib punya token barcode/QR atau UID RFID.")
+  }
 
   return errors
 }
@@ -4771,6 +4861,8 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
   const [positions, setPositions] = useState<EmployeeOption[]>([])
   const [locations, setLocations] = useState<EmployeeOption[]>([])
   const [shifts, setShifts] = useState<EmployeeOption[]>([])
+  const [policies, setPolicies] = useState<AttendancePolicyOption[]>([])
+  const [kioskSchemaReady, setKioskSchemaReady] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
   const [activeTab, setActiveTab] = useState<EmployeeDirectoryTab>("all")
   const [divisionFilter, setDivisionFilter] = useState("all")
@@ -4794,6 +4886,8 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
       setPositions(data.positions)
       setLocations(data.locations)
       setShifts(data.shifts)
+      setPolicies(data.policies)
+      setKioskSchemaReady(data.kioskSchemaReady)
       return data
     } catch (error) {
       setErrorMessage(getFriendlySupabaseError(error, "Gagal mengambil data karyawan."))
@@ -4849,12 +4943,15 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
   const openCreateDialog = () => {
     setEditingRow(null)
     const fallbackValues = createEmptyEmployeeForm(rows)
+    fallbackValues.kioskSchemaReady = kioskSchemaReady
     setDialogInitialValues(fallbackValues)
     setDialogOpen(true)
     void getNextEmployeeCode(rows).then((employeeCode) => {
       setDialogInitialValues((current) => ({
         ...current,
-        employeeCode: current.employeeCode === fallbackValues.employeeCode ? employeeCode : current.employeeCode,
+            employeeCode: current.employeeCode === fallbackValues.employeeCode ? employeeCode : current.employeeCode,
+            qrToken: current.employeeCode === fallbackValues.employeeCode ? generateEmployeeQrToken(employeeCode) : current.qrToken,
+            kioskSchemaReady,
       }))
     }).catch(() => {})
   }
@@ -4881,6 +4978,11 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
       monthlySalary: String(row.monthlySalary),
       payrollMethod: row.payrollMethod,
       prorateEnabled: row.prorateEnabled,
+      qrToken: row.qrToken || generateEmployeeQrToken(row.employeeCode),
+      rfidUid: row.rfidUid,
+      attendancePolicyId: row.attendancePolicyId,
+      kioskAccessEnabled: row.kioskAccessEnabled,
+      kioskSchemaReady,
       joinDate: row.joinDate,
       payrollCycleDays: String(row.payrollCycleDays),
       status: row.status,
@@ -5270,6 +5372,7 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
         positions={positions}
         locations={locations}
         shifts={shifts}
+        policies={policies}
         saving={saving}
         onClose={() => {
           setDialogOpen(false)
@@ -5391,6 +5494,7 @@ function EmployeeDialog({
   positions,
   locations,
   shifts,
+  policies,
   saving,
   onClose,
   onSubmit,
@@ -5402,6 +5506,7 @@ function EmployeeDialog({
   positions: EmployeeOption[]
   locations: EmployeeOption[]
   shifts: EmployeeOption[]
+  policies: AttendancePolicyOption[]
   saving: boolean
   onClose: () => void
   onSubmit: (values: EmployeeFormValues) => Promise<void>
@@ -5447,6 +5552,8 @@ function EmployeeDialog({
   ))
   const activeLocations = locations.filter((location) => location.isActive || location.id === values.workLocationId)
   const activeShifts = shifts.filter((shift) => shift.isActive || shift.id === values.shiftId)
+  const activePolicies = policies.filter((policy) => policy.isActive || policy.id === values.attendancePolicyId)
+  const selectedPolicy = activePolicies.find((policy) => policy.id === values.attendancePolicyId)
   const photoPreview = values.removePhoto ? "" : localPhotoPreview || values.photoUrl
 
   return createPortal(
@@ -5561,6 +5668,73 @@ function EmployeeDialog({
             <TextFormField label="NIK" value={values.nik} onChange={(event) => setValues((current) => ({ ...current, nik: event.target.value }))} placeholder="Nomor identitas karyawan" />
             <TextFormField label="No HP" value={values.phone} onChange={(event) => setValues((current) => ({ ...current, phone: event.target.value }))} placeholder="08xxxxxxxxxx" />
             <TextFormField label="Email" type="email" value={values.email} onChange={(event) => setValues((current) => ({ ...current, email: event.target.value }))} placeholder="nama@dms.local" />
+            <div className="employeeKioskAccessPanel employeeFormFull">
+              <div className="employeeKioskAccessHeader">
+                <span className="employeeKioskIcon">
+                  <ScanLine size={20} />
+                </span>
+                <div>
+                  <strong>Akses Kiosk / Pintu Absensi</strong>
+                  <small>
+                    {values.kioskSchemaReady
+                      ? "Barcode, RFID, face, dan lokasi bisa diatur per karyawan lewat policy."
+                      : "Migration kiosk belum aktif di database. Data QR/RFID akan aktif setelah migration diterapkan."}
+                  </small>
+                </div>
+              </div>
+              <div className="employeeKioskGrid">
+                <TextFormField
+                  label="Token Barcode / QR"
+                  value={values.qrToken}
+                  disabled={!values.kioskSchemaReady}
+                  onChange={(event) => setValues((current) => ({ ...current, qrToken: event.target.value.toUpperCase() }))}
+                  placeholder="DMS-EMP-001-XXXX"
+                />
+                <TextFormField
+                  label="UID RFID"
+                  value={values.rfidUid}
+                  disabled={!values.kioskSchemaReady}
+                  onChange={(event) => setValues((current) => ({ ...current, rfidUid: event.target.value.trim() }))}
+                  placeholder="Tap kartu RFID di reader"
+                />
+                <SelectFormField label="Policy Absensi" value={values.attendancePolicyId} disabled={!values.kioskSchemaReady} onChange={(event) => setValues((current) => ({ ...current, attendancePolicyId: event.target.value }))}>
+                  <option value="">Default multi method</option>
+                  {activePolicies.map((policy) => (
+                    <option value={policy.id} key={policy.id}>{policy.name}</option>
+                  ))}
+                </SelectFormField>
+                <SwitchFormField
+                  label="Akses Kiosk"
+                  checked={values.kioskAccessEnabled}
+                  onChange={(kioskAccessEnabled) => setValues((current) => ({ ...current, kioskAccessEnabled }))}
+                  onLabel="Aktif"
+                  offLabel="Nonaktif"
+                  onDescription="Karyawan bisa absen dari kiosk lokasi kerja."
+                  offDescription="Karyawan tidak bisa dipanggil dari scan kartu/barcode."
+                  disabled={!values.kioskSchemaReady}
+                />
+              </div>
+              <div className="employeeKioskPolicyPreview">
+                <span>{selectedPolicy?.code || "POLICY-DEFAULT"}</span>
+                <strong>{selectedPolicy?.name || "Multi Method"}</strong>
+                <small>
+                  Media: {(selectedPolicy?.allowedMedia.length ? selectedPolicy.allowedMedia : ["barcode", "rfid"]).join(" + ")}
+                  {" · "}
+                  Face {selectedPolicy?.requireFace ? "wajib" : "opsional"}
+                  {" · "}
+                  Lokasi {selectedPolicy?.requireLocation !== false ? "wajib" : "opsional"}
+                </small>
+                <button
+                  className="secondaryButton compactButton"
+                  type="button"
+                  disabled={!values.kioskSchemaReady}
+                  onClick={() => setValues((current) => ({ ...current, qrToken: generateEmployeeQrToken(current.employeeCode) }))}
+                >
+                  <RefreshCcw size={14} />
+                  Generate QR
+                </button>
+              </div>
+            </div>
             <SelectFormField label="Divisi" value={values.divisionId} onChange={(event) => setValues((current) => ({ ...current, divisionId: event.target.value, positionId: "" }))} required>
               <option value="">Pilih divisi</option>
               {activeDivisions.map((division) => (
@@ -5716,6 +5890,12 @@ function EmployeeDetailDialog({
     { label: "Tanggal masuk", value: formatEmployeeDate(row.joinDate) },
     { label: "Cycle payroll", value: `${row.payrollCycleDays}/26 hari` },
   ]
+  const kioskRows = [
+    { label: "Akses kiosk", value: row.kioskAccessEnabled ? "Aktif" : "Nonaktif" },
+    { label: "Policy absensi", value: row.attendancePolicyName || "Multi Method" },
+    { label: "QR / barcode", value: row.qrToken || "Belum dibuat" },
+    { label: "RFID", value: row.rfidUid || "Belum terdaftar" },
+  ]
 
   return createPortal(
     <div className="dialogBackdrop employeeDialogBackdrop" role="presentation" onMouseDown={onClose}>
@@ -5781,6 +5961,18 @@ function EmployeeDetailDialog({
               <h3>Payroll</h3>
               <div className="employeeDetailList compact">
                 {payrollRows.map((field) => (
+                  <div className="employeeDetailLine" key={field.label}>
+                    <span>{field.label}</span>
+                    <strong>{field.value}</strong>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="employeeDetailSection wide">
+              <h3>Akses Kiosk</h3>
+              <div className="employeeDetailList compact employeeKioskDetailList">
+                {kioskRows.map((field) => (
                   <div className="employeeDetailLine" key={field.label}>
                     <span>{field.label}</span>
                     <strong>{field.value}</strong>
