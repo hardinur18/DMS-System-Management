@@ -16,6 +16,7 @@ import {
   CreditCard,
   Crown,
   Database,
+  Download,
   Eye,
   EyeOff,
   ExternalLink,
@@ -36,6 +37,7 @@ import {
   PanelLeftOpen,
   Pencil,
   Copy,
+  Printer,
   RefreshCcw,
   RotateCcw,
   ScanFace,
@@ -74,6 +76,7 @@ import { supabase } from "./lib/supabase"
 type ViewId =
   | "dashboard"
   | "attendance-live"
+  | "kiosk-mode"
   | "employees"
   | "attendance-requests"
   | "attendance-review"
@@ -386,7 +389,7 @@ interface EmployeePortalData {
   recentLogs: EmployeePortalAttendanceLog[]
 }
 
-type ModuleViewId = Exclude<ViewId, "dashboard" | "master-data" | "users" | "role-permission" | "audit-log" | "profile">
+type ModuleViewId = Exclude<ViewId, "dashboard" | "kiosk-mode" | "master-data" | "users" | "role-permission" | "audit-log" | "profile">
 
 interface ModuleKpi {
   label: string
@@ -526,6 +529,20 @@ interface AttendancePolicyOption {
   requireLocation: boolean
   allowedMedia: string[]
   isActive: boolean
+}
+
+interface AttendanceKioskOption {
+  id: string
+  kioskCode: string
+  name: string
+  workLocationId: string
+  workLocationName: string
+  policyId: string
+  policyName: string
+  allowedMedia: string[]
+  requireFace: boolean
+  requireLocation: boolean
+  status: string
 }
 
 interface FaceEnrollmentTarget {
@@ -749,6 +766,7 @@ const accessProfileCacheMaxAgeMs = 1000 * 60 * 60 * 12
 const navItems: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, group: "" },
   { id: "attendance-live", label: "Live Absensi", icon: Megaphone, group: "Operasional" },
+  { id: "kiosk-mode", label: "Kiosk Mode", icon: ScanLine, group: "Operasional" },
   { id: "employees", label: "Karyawan", icon: UserPlus, group: "Operasional" },
   { id: "attendance-requests", label: "Rekap Absensi", icon: CalendarCheck2, group: "Operasional" },
   { id: "attendance-review", label: "Approval", icon: ClipboardList, group: "Operasional" },
@@ -766,6 +784,7 @@ const navItems: NavItem[] = [
 const productionReadyViews = new Set<ViewId>([
   "dashboard",
   "attendance-live",
+  "kiosk-mode",
   "employees",
   "attendance-requests",
   "attendance-review",
@@ -781,6 +800,7 @@ const productionReadyViews = new Set<ViewId>([
 const viewPermissionMap: Partial<Record<ViewId, string>> = {
   dashboard: "dashboard.view",
   "attendance-live": "attendance.view",
+  "kiosk-mode": "attendance.view",
   employees: "employees.view",
   "attendance-requests": "attendance.review",
   "attendance-review": "attendance.review",
@@ -3386,6 +3406,105 @@ function generateEmployeeQrToken(employeeCode: string) {
   return `DMS-${employeeCode.trim().toUpperCase() || "EMP"}-${randomPart}`
 }
 
+async function loadAttendanceKiosks(): Promise<AttendanceKioskOption[]> {
+  const [{ data: kiosks, error: kioskError }, { data: locations, error: locationError }, { data: policies, error: policyError }] = await Promise.all([
+    supabase
+      .from("attendance_kiosks")
+      .select("id,kiosk_code,name,work_location_id,policy_id,status")
+      .order("name", { ascending: true }),
+    supabase
+      .from("work_locations")
+      .select("id,name")
+      .order("name", { ascending: true }),
+    supabase
+      .from("attendance_policies")
+      .select("id,code,name,require_face,require_location,allowed_media,status")
+      .order("name", { ascending: true }),
+  ])
+
+  if (kioskError) throw kioskError
+  if (locationError) throw locationError
+  if (policyError) throw policyError
+
+  const locationMap = new Map((locations || []).map((location: any) => [String(location.id), String(location.name || "Lokasi kerja")]))
+  const policyMap = new Map((policies || []).map((policy: any) => [String(policy.id), policy]))
+
+  return (kiosks || []).map((kiosk: any) => {
+    const policy = policyMap.get(String(kiosk.policy_id || ""))
+    const allowedMedia = Array.isArray(policy?.allowed_media) ? policy.allowed_media.map(String) : ["barcode", "rfid"]
+
+    return {
+      id: String(kiosk.id || ""),
+      kioskCode: String(kiosk.kiosk_code || ""),
+      name: String(kiosk.name || kiosk.kiosk_code || "Kiosk Absensi"),
+      workLocationId: String(kiosk.work_location_id || ""),
+      workLocationName: locationMap.get(String(kiosk.work_location_id || "")) || "Lokasi belum dipilih",
+      policyId: String(kiosk.policy_id || ""),
+      policyName: String(policy?.name || "Multi Method"),
+      allowedMedia,
+      requireFace: Boolean(policy?.require_face),
+      requireLocation: Boolean(policy?.require_location),
+      status: String(kiosk.status || "active"),
+    }
+  })
+}
+
+const code128Patterns = [
+  "212222", "222122", "222221", "121223", "121322", "131222", "122213", "122312", "132212", "221213",
+  "221312", "231212", "112232", "122132", "122231", "113222", "123122", "123221", "223211", "221132",
+  "221231", "213212", "223112", "312131", "311222", "321122", "321221", "312212", "322112", "322211",
+  "212123", "212321", "232121", "111323", "131123", "131321", "112313", "132113", "132311", "211313",
+  "231113", "231311", "112133", "112331", "132131", "113123", "113321", "133121", "313121", "211331",
+  "231131", "213113", "213311", "213131", "311123", "311321", "331121", "312113", "312311", "332111",
+  "314111", "221411", "431111", "111224", "111422", "121124", "121421", "141122", "141221", "112214",
+  "112412", "122114", "122411", "142112", "142211", "241211", "221114", "413111", "241112", "134111",
+  "111242", "121142", "121241", "114212", "124112", "124211", "411212", "421112", "421211", "212141",
+  "214121", "412121", "111143", "111341", "131141", "114113", "114311", "411113", "411311", "113141",
+  "114131", "311141", "411131", "211412", "211214", "211232", "2331112",
+]
+
+function getCode128Segments(value: string) {
+  const safeValue = value.replace(/[^\x20-\x7E]/g, "").slice(0, 64)
+  const codes = [104, ...safeValue.split("").map((character) => character.charCodeAt(0) - 32)]
+  const checksum = codes.reduce((total, code, index) => total + (index === 0 ? code : code * index), 0) % 103
+  const sequence = [...codes, checksum, 106]
+  let x = 0
+  const bars: Array<{ x: number; width: number }> = []
+
+  sequence.forEach((code) => {
+    const pattern = code128Patterns[code] || code128Patterns[0]
+    pattern.split("").forEach((widthText, index) => {
+      const width = Number(widthText)
+      if (index % 2 === 0) bars.push({ x, width })
+      x += width
+    })
+  })
+
+  return { bars, width: x, value: safeValue }
+}
+
+function Code128Barcode({ value, className = "" }: { value: string; className?: string }) {
+  const barcode = getCode128Segments(value || "DMS")
+  return (
+    <svg className={className} viewBox={`0 0 ${barcode.width} 48`} role="img" aria-label={`Barcode ${barcode.value}`} preserveAspectRatio="none">
+      <rect width={barcode.width} height="48" fill="#ffffff" />
+      {barcode.bars.map((bar, index) => (
+        <rect key={`${bar.x}-${index}`} x={bar.x} y="0" width={bar.width} height="48" fill="#071332" />
+      ))}
+    </svg>
+  )
+}
+
+function downloadTextFile(filename: string, content: string, mimeType: string) {
+  const blob = new Blob([content], { type: mimeType })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement("a")
+  anchor.href = url
+  anchor.download = filename
+  anchor.click()
+  URL.revokeObjectURL(url)
+}
+
 function normalizeIntegerInput(value: string, maxValue?: number) {
   const digits = value.replace(/\D/g, "")
   if (!digits) return ""
@@ -4853,6 +4972,7 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
   const [pendingStatus, setPendingStatus] = useState<EmployeeStatus>("active")
   const [deleteRow, setDeleteRow] = useState<EmployeeDirectoryRow | null>(null)
   const [restoreRow, setRestoreRow] = useState<EmployeeDirectoryRow | null>(null)
+  const [nametagRow, setNametagRow] = useState<EmployeeDirectoryRow | null>(null)
   const [faceEnrollmentRow, setFaceEnrollmentRow] = useState<EmployeeDirectoryRow | null>(null)
   const [faceEnrollmentSubmitting, setFaceEnrollmentSubmitting] = useState(false)
   const [dialogInitialValues, setDialogInitialValues] = useState<EmployeeFormValues>(() => createEmptyEmployeeForm())
@@ -5328,6 +5448,10 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
                                 <Pencil size={14} />
                                 Edit
                               </RowActionMenuItem>
+                              <RowActionMenuItem disabled={saving} onClick={() => setNametagRow(row)}>
+                                <CreditCard size={14} />
+                                Cetak Nametag
+                              </RowActionMenuItem>
                               <RowActionMenuItem disabled={!canManage || saving || row.status === "active"} onClick={() => openStatusDialog(row, "active")}>
                                 <FileCheck2 size={14} />
                                 Aktifkan
@@ -5385,11 +5509,13 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
         onClose={() => setDetailRow(null)}
         onEdit={(row) => openEditDialog(row)}
         onRestore={(row) => setRestoreRow(row)}
+        onNametag={(row) => setNametagRow(row)}
         onFaceEnroll={(row) => setFaceEnrollmentRow(row)}
         onFaceAction={handleFaceProfileAction}
         canManage={canManage}
         saving={saving}
       />
+      <EmployeeNametagDialog row={nametagRow} onClose={() => setNametagRow(null)} />
       <FaceEnrollmentDialog
         open={Boolean(faceEnrollmentRow)}
         saving={faceEnrollmentSubmitting}
@@ -5483,6 +5609,213 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
       </ConfirmDialog>
       <ToastViewport toast={toast} onClose={() => setToast(null)} />
     </OperationalPageShell>
+  )
+}
+
+function KioskModePage({ activeView }: { activeView: ViewId }) {
+  const [kiosks, setKiosks] = useState<AttendanceKioskOption[]>([])
+  const [selectedKioskId, setSelectedKioskId] = useState("")
+  const [credentialType, setCredentialType] = useState<"barcode" | "rfid">("barcode")
+  const [credentialValue, setCredentialValue] = useState("")
+  const [faceScore, setFaceScore] = useState("92")
+  const [notes, setNotes] = useState("")
+  const [result, setResult] = useState<FieldAttendanceResult | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [errorMessage, setErrorMessage] = useState("")
+  const [toast, setToast] = useState<ToastMessage | null>(null)
+  const scanInputRef = useRef<HTMLInputElement | null>(null)
+
+  const selectedKiosk = kiosks.find((kiosk) => kiosk.id === selectedKioskId)
+  const mediaAllowed = selectedKiosk?.allowedMedia.includes(credentialType) ?? true
+  const activeKiosks = kiosks.filter((kiosk) => kiosk.status === "active")
+
+  const showToast = (message: Omit<ToastMessage, "id">) => {
+    setToast({ ...message, id: Date.now() })
+  }
+
+  const fetchKiosks = async () => {
+    setLoading(true)
+    setErrorMessage("")
+    try {
+      const data = await loadAttendanceKiosks()
+      setKiosks(data)
+      setSelectedKioskId((current) => current || data.find((kiosk) => kiosk.status === "active")?.id || data[0]?.id || "")
+    } catch (error) {
+      setErrorMessage(getFriendlySupabaseError(error, "Gagal memuat data kiosk absensi."))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void fetchKiosks()
+  }, [])
+
+  useEffect(() => {
+    scanInputRef.current?.focus()
+  }, [selectedKioskId, credentialType])
+
+  const handleSubmit = async (event?: FormEvent) => {
+    event?.preventDefault()
+    if (!selectedKiosk) {
+      showToast({ tone: "error", title: "Pilih kiosk", description: "Kiosk/pintu absensi wajib dipilih dulu." })
+      return
+    }
+    if (!mediaAllowed) {
+      showToast({ tone: "error", title: "Media tidak aktif", description: `${credentialType.toUpperCase()} tidak aktif di policy kiosk ini.` })
+      return
+    }
+    if (credentialValue.trim().length < 3) {
+      showToast({ tone: "error", title: "Scan belum terbaca", description: "Tempel kartu atau scan barcode sampai kode masuk ke field." })
+      return
+    }
+
+    setSaving(true)
+    setResult(null)
+    try {
+      const data = await submitFieldAttendance({
+        mode: "kiosk",
+        eventType: "auto",
+        kioskId: selectedKiosk.id,
+        credentialType,
+        credentialValue: credentialValue.trim(),
+        faceScore: selectedKiosk.requireFace ? Number(faceScore) || null : null,
+        notes,
+      })
+      setResult(data)
+      setCredentialValue("")
+      showToast({
+        tone: data.log.status === "valid" ? "success" : "error",
+        title: data.log.status === "valid" ? "Absensi tersimpan" : "Masuk antrian review",
+        description: `${data.employee.code} - ${data.employee.name} ${data.log.event_type === "check_in" ? "check-in" : "check-out"}.`,
+      })
+      window.setTimeout(() => scanInputRef.current?.focus(), 80)
+    } catch (error) {
+      showToast({ tone: "error", title: "Scan gagal", description: getFriendlySupabaseError(error, "Absensi kiosk belum bisa diproses.") })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <section className="operationalPage">
+      <OperationalPageHeader
+        eyebrow="Management App"
+        title="Kiosk Mode"
+        subtitle="Satu pintu absensi untuk scan barcode atau RFID. Sistem otomatis menentukan check-in atau check-out hari ini."
+        icon={ScanLine}
+        actions={(
+          <button className="secondaryButton" type="button" onClick={() => void fetchKiosks()} disabled={loading}>
+            <RefreshCcw size={16} />
+            Refresh Kiosk
+          </button>
+        )}
+      />
+
+      <InlinePageStats
+        items={[
+          `${activeKiosks.length} kiosk aktif`,
+          `${kiosks.length} pintu terdaftar`,
+          selectedKiosk?.policyName || "Policy belum dipilih",
+          activeView === "kiosk-mode" ? "Auto check-in/out" : "Kiosk",
+        ]}
+      />
+
+      <div className="kioskModeLayout">
+        <form className="kioskTerminalPanel" onSubmit={handleSubmit}>
+          <div className="kioskTerminalHeader">
+            <span><ScanLine size={22} /></span>
+            <div>
+              <strong>Terminal Scan</strong>
+              <small>Scanner USB barcode/RFID biasanya mengirim kode lalu Enter otomatis.</small>
+            </div>
+          </div>
+
+          {errorMessage && <div className="formAlert error">{errorMessage}</div>}
+
+          <div className="kioskTerminalGrid">
+            <SelectFormField label="Pintu / Lokasi" value={selectedKioskId} onChange={(event) => setSelectedKioskId(event.target.value)}>
+              <option value="">Pilih kiosk</option>
+              {kiosks.map((kiosk) => (
+                <option value={kiosk.id} key={kiosk.id}>{kiosk.name} - {kiosk.workLocationName}</option>
+              ))}
+            </SelectFormField>
+            <SelectFormField label="Media Scan" value={credentialType} onChange={(event) => setCredentialType(event.target.value as "barcode" | "rfid")}>
+              <option value="barcode">Barcode / QR</option>
+              <option value="rfid">RFID</option>
+            </SelectFormField>
+          </div>
+
+          <label className="kioskScanField">
+            <span>{credentialType === "barcode" ? "Scan Barcode" : "Tap RFID"}</span>
+            <input
+              ref={scanInputRef}
+              value={credentialValue}
+              onChange={(event) => setCredentialValue(event.target.value)}
+              placeholder={credentialType === "barcode" ? "DMS-EMP-001-XXXX" : "UID kartu RFID"}
+              autoComplete="off"
+            />
+          </label>
+
+          <div className="kioskPolicyPreview">
+            <span className={clsx("kioskPolicyPill", mediaAllowed ? "success" : "danger")}>{mediaAllowed ? "Media aktif" : "Media diblokir"}</span>
+            <span>{selectedKiosk?.policyName || "Policy belum siap"}</span>
+            <span>{selectedKiosk?.requireFace ? "Face wajib" : "Face opsional"}</span>
+            <span>{selectedKiosk?.requireLocation ? "Lokasi kiosk aktif" : "Tanpa lokasi"}</span>
+          </div>
+
+          {selectedKiosk?.requireFace && (
+            <TextFormField
+              label="Face Score Kiosk"
+              value={faceScore}
+              onChange={(event) => setFaceScore(normalizeIntegerInput(event.target.value, 100))}
+              placeholder="92"
+              inputMode="numeric"
+            />
+          )}
+
+          <TextFormField label="Catatan Operator" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Opsional, misal scanner pintu utama" />
+
+          <div className="kioskTerminalActions">
+            <button className="secondaryButton" type="button" onClick={() => { setCredentialValue(""); setResult(null); scanInputRef.current?.focus() }}>
+              <RotateCcw size={16} />
+              Reset
+            </button>
+            <button className="primaryButton" type="submit" disabled={saving || loading}>
+              <ScanLine size={16} />
+              {saving ? "Memproses..." : "Proses Scan"}
+            </button>
+          </div>
+        </form>
+
+        <aside className="kioskResultPanel">
+          <div className="kioskResultHeader">
+            <span><FileCheck2 size={20} /></span>
+            <div>
+              <strong>Hasil Scan Terakhir</strong>
+              <small>{result ? "Data berhasil dikembalikan dari Supabase." : "Belum ada scan di sesi ini."}</small>
+            </div>
+          </div>
+          {result ? (
+            <div className={clsx("kioskResultCard", result.log.status)}>
+              <span className="kioskResultEvent">{result.log.event_type === "check_in" ? "Check-in" : "Check-out"}</span>
+              <h3>{result.employee.name}</h3>
+              <p>{result.employee.code} - {result.location.name}</p>
+              <div className="kioskResultMetrics">
+                <span>Status <strong>{getAttendanceLogStatusLabel(result.log.status)}</strong></span>
+                <span>GPS <strong>{result.log.distance_m}m / {result.log.radius_m}m</strong></span>
+                <span>Face <strong>{result.log.face_score ?? "-"}%</strong></span>
+              </div>
+            </div>
+          ) : (
+            <TableState title="Siap menerima scan" description="Pilih kiosk, fokus field scan, lalu tempel kartu atau barcode nametag." icon={ScanLine} />
+          )}
+        </aside>
+      </div>
+
+      <ToastViewport toast={toast} onClose={() => setToast(null)} />
+    </section>
   )
 }
 
@@ -5855,6 +6188,7 @@ function EmployeeDetailDialog({
   onClose,
   onEdit,
   onRestore,
+  onNametag,
   onFaceEnroll,
   onFaceAction,
 }: {
@@ -5864,6 +6198,7 @@ function EmployeeDetailDialog({
   onClose: () => void
   onEdit: (row: EmployeeDirectoryRow) => void
   onRestore: (row: EmployeeDirectoryRow) => void
+  onNametag: (row: EmployeeDirectoryRow) => void
   onFaceEnroll: (row: EmployeeDirectoryRow) => void
   onFaceAction: (row: EmployeeDirectoryRow, action: "approve" | "reject" | "reset" | "disable") => Promise<void>
 }) {
@@ -6042,6 +6377,10 @@ function EmployeeDetailDialog({
 
         <div className="masterDetailActions">
           <button className="secondaryButton" type="button" onClick={onClose}>Tutup</button>
+          <button className="secondaryButton" type="button" onClick={() => onNametag(row)}>
+            <Printer size={16} />
+            Nametag
+          </button>
           {row.deletedAt ? (
             <button className="primaryButton" type="button" disabled={!canManage || saving} onClick={() => onRestore(row)}>
               <RotateCcw size={16} />
@@ -6053,6 +6392,104 @@ function EmployeeDetailDialog({
               Edit Karyawan
             </button>
           )}
+        </div>
+      </section>
+    </div>,
+    document.body,
+  )
+}
+
+function EmployeeNametagDialog({ row, onClose }: { row: EmployeeDirectoryRow | null; onClose: () => void }) {
+  if (!row) return null
+
+  const barcodeValue = row.qrToken || generateEmployeeQrToken(row.employeeCode)
+  const safeFileName = `${row.employeeCode || "employee"}-nametag`.toLowerCase().replace(/[^a-z0-9_-]/g, "-")
+  const barcode = getCode128Segments(barcodeValue)
+  const barSvg = barcode.bars.map((bar) => `<rect x="${bar.x}" y="0" width="${bar.width}" height="52" fill="#071332"/>`).join("")
+  const nametagSvg = `
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="980" viewBox="0 0 640 980">
+  <rect width="640" height="980" rx="44" fill="#ffffff"/>
+  <rect x="36" y="36" width="568" height="908" rx="36" fill="#f8fbff" stroke="#d7e7f0" stroke-width="2"/>
+  <text x="320" y="98" text-anchor="middle" font-family="Arial" font-size="22" font-weight="700" fill="#0085a0">DMS KARYAWAN</text>
+  <text x="320" y="152" text-anchor="middle" font-family="Arial" font-size="44" font-weight="800" fill="#071332">${row.fullName}</text>
+  <text x="320" y="194" text-anchor="middle" font-family="Arial" font-size="24" fill="#697891">${row.employeeCode} - ${row.divisionName}</text>
+  <circle cx="320" cy="330" r="118" fill="#eafaff" stroke="#bcecf5" stroke-width="3"/>
+  <text x="320" y="352" text-anchor="middle" font-family="Arial" font-size="62" font-weight="800" fill="#071332">${getProfileInitials(row.fullName || row.employeeCode)}</text>
+  <text x="320" y="508" text-anchor="middle" font-family="Arial" font-size="28" font-weight="700" fill="#071332">${row.positionName}</text>
+  <text x="320" y="546" text-anchor="middle" font-family="Arial" font-size="24" fill="#697891">${row.workLocationName} - ${row.shiftName}</text>
+  <svg x="90" y="625" width="460" height="120" viewBox="0 0 ${barcode.width} 52" preserveAspectRatio="none">
+    <rect width="${barcode.width}" height="52" fill="#ffffff"/>
+    ${barSvg}
+  </svg>
+  <text x="320" y="790" text-anchor="middle" font-family="Arial" font-size="22" font-weight="700" letter-spacing="2" fill="#071332">${barcodeValue}</text>
+  <text x="320" y="835" text-anchor="middle" font-family="Arial" font-size="20" fill="#697891">RFID: ${row.rfidUid || "Belum terdaftar"}</text>
+  <text x="320" y="884" text-anchor="middle" font-family="Arial" font-size="18" fill="#0085a0">${row.attendancePolicyName || "Multi Method"}</text>
+</svg>`.trim()
+
+  return createPortal(
+    <div className="dialogBackdrop employeeDialogBackdrop nametagPrintBackdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="dialogPanel masterDetailDialog employeeNametagDialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="employee-nametag-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="dialogCompactHeader masterDetailHeader">
+          <div className="masterDetailTitle">
+            <span className="masterDetailIcon">
+              <CreditCard size={24} />
+            </span>
+            <div>
+              <span>Kiosk Access</span>
+              <h2 id="employee-nametag-title">Nametag Karyawan</h2>
+              <p>Barcode ini dipakai untuk scan absensi di pintu kiosk.</p>
+            </div>
+          </div>
+          <button className="iconButton dialogClose" type="button" aria-label="Tutup nametag" onClick={onClose}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="employeeNametagBody">
+          <article className="employeeNametagCard" id="employee-nametag-print">
+            <div className="employeeNametagBrand">
+              <img src={dmsLogo} alt="" />
+              <div>
+                <span>DMS</span>
+                <strong>Employee Access</strong>
+              </div>
+            </div>
+            <div className="employeeNametagAvatar">
+              {row.photoUrl ? <img src={row.photoUrl} alt="" /> : <span>{getProfileInitials(row.fullName || row.employeeCode)}</span>}
+            </div>
+            <div className="employeeNametagIdentity">
+              <span>{row.employeeCode}</span>
+              <h3>{row.fullName}</h3>
+              <p>{row.positionName} - {row.divisionName}</p>
+              <small>{row.workLocationName} - {row.shiftName}</small>
+            </div>
+            <div className="employeeNametagBarcode">
+              <Code128Barcode value={barcodeValue} className="employeeBarcodeSvg" />
+              <strong>{barcodeValue}</strong>
+            </div>
+            <div className="employeeNametagMeta">
+              <span>RFID: <strong>{row.rfidUid || "Belum terdaftar"}</strong></span>
+              <span>Policy: <strong>{row.attendancePolicyName || "Multi Method"}</strong></span>
+            </div>
+          </article>
+        </div>
+
+        <div className="masterDetailActions">
+          <button className="secondaryButton" type="button" onClick={onClose}>Tutup</button>
+          <button className="secondaryButton" type="button" onClick={() => downloadTextFile(`${safeFileName}.svg`, nametagSvg, "image/svg+xml")}>
+            <Download size={16} />
+            Download SVG
+          </button>
+          <button className="primaryButton" type="button" onClick={() => window.print()}>
+            <Printer size={16} />
+            Cetak Nametag
+          </button>
         </div>
       </section>
     </div>,
@@ -12546,6 +12983,8 @@ export function App() {
         <div className="workspaceViewport withMobileNav">
           {activeView === "dashboard" ? (
             <DashboardPage activeView={activeView} />
+          ) : activeView === "kiosk-mode" ? (
+            <KioskModePage activeView={activeView} />
           ) : activeView === "attendance-live" || activeView === "attendance-requests" || activeView === "attendance-review" || activeView === "field-monitoring" || activeView === "payroll" ? (
             <AttendanceCyclePage activeView={activeView} />
           ) : activeView === "employees" ? (

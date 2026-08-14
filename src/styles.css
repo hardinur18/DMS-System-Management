@@ -9359,6 +9359,350 @@ button {
   }
 }
 
+.kioskModeLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.65fr);
+  gap: 18px;
+  margin-top: 22px;
+}
+
+.kioskTerminalPanel,
+.kioskResultPanel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: var(--shadow-card);
+  padding: 24px;
+}
+
+.kioskTerminalHeader,
+.kioskResultHeader {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 22px;
+}
+
+.kioskTerminalHeader > span,
+.kioskResultHeader > span {
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  border-radius: 18px;
+  color: var(--accent-strong);
+  background: linear-gradient(145deg, #eefcff, #ffffff);
+  border: 1px solid rgba(39, 185, 207, 0.22);
+}
+
+.kioskTerminalHeader strong,
+.kioskResultHeader strong {
+  display: block;
+  color: var(--ink);
+  font-size: 1.16rem;
+}
+
+.kioskTerminalHeader small,
+.kioskResultHeader small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.kioskTerminalGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.kioskScanField {
+  display: grid;
+  gap: 9px;
+  margin: 18px 0;
+  color: var(--ink);
+  font-weight: 900;
+}
+
+.kioskScanField input {
+  width: 100%;
+  min-height: 86px;
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  background: #ffffff;
+  color: var(--ink);
+  font-size: clamp(1.3rem, 3vw, 2.15rem);
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  padding: 0 24px;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.kioskScanField input:focus {
+  border-color: rgba(39, 185, 207, 0.72);
+  box-shadow: 0 0 0 6px rgba(39, 185, 207, 0.12);
+}
+
+.kioskPolicyPreview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.kioskPolicyPreview span,
+.kioskPolicyPill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #ffffff;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 900;
+  padding: 0 13px;
+}
+
+.kioskPolicyPill.success {
+  color: #078b5f;
+  border-color: rgba(34, 197, 94, 0.28);
+  background: #ecfdf5;
+}
+
+.kioskPolicyPill.danger {
+  color: #e11d48;
+  border-color: rgba(244, 63, 94, 0.3);
+  background: #fff1f2;
+}
+
+.kioskTerminalActions {
+  display: grid;
+  grid-template-columns: 0.45fr 0.55fr;
+  gap: 14px;
+  margin-top: 20px;
+}
+
+.kioskResultCard {
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  background: linear-gradient(145deg, #f8fbff, #ffffff);
+  padding: 22px;
+}
+
+.kioskResultCard.valid {
+  border-color: rgba(34, 197, 94, 0.28);
+  background: linear-gradient(145deg, #ecfdf5, #ffffff);
+}
+
+.kioskResultCard.review,
+.kioskResultCard.rejected {
+  border-color: rgba(245, 158, 11, 0.28);
+  background: linear-gradient(145deg, #fff7ed, #ffffff);
+}
+
+.kioskResultEvent {
+  color: var(--accent-strong);
+  font-size: 0.78rem;
+  font-weight: 1000;
+  text-transform: uppercase;
+}
+
+.kioskResultCard h3 {
+  margin: 8px 0 2px;
+  color: var(--ink);
+  font-size: 1.5rem;
+}
+
+.kioskResultCard p {
+  margin: 0;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.kioskResultMetrics {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.kioskResultMetrics span {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  border-top: 1px solid rgba(226, 232, 240, 0.9);
+  padding-top: 10px;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.kioskResultMetrics strong {
+  color: var(--ink);
+}
+
+.employeeNametagDialog {
+  max-width: 760px;
+}
+
+.employeeNametagBody {
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: linear-gradient(180deg, #f8fbff, #ffffff);
+}
+
+.employeeNametagCard {
+  width: min(360px, 100%);
+  aspect-ratio: 0.64;
+  border: 1px solid rgba(188, 236, 245, 0.9);
+  border-radius: 28px;
+  background: #ffffff;
+  box-shadow: 0 28px 70px rgba(15, 23, 42, 0.16);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.employeeNametagBrand {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+}
+
+.employeeNametagBrand img {
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+}
+
+.employeeNametagBrand span {
+  display: block;
+  color: var(--accent-strong);
+  font-size: 0.76rem;
+  font-weight: 1000;
+  text-transform: uppercase;
+}
+
+.employeeNametagBrand strong {
+  color: var(--ink);
+}
+
+.employeeNametagAvatar {
+  width: 118px;
+  height: 118px;
+  border-radius: 50%;
+  margin: 24px 0 18px;
+  border: 3px solid rgba(188, 236, 245, 0.9);
+  background: linear-gradient(145deg, #eefcff, #ffffff);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 2.1rem;
+  font-weight: 1000;
+}
+
+.employeeNametagAvatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.employeeNametagIdentity span {
+  color: var(--accent-strong);
+  font-size: 0.8rem;
+  font-weight: 1000;
+}
+
+.employeeNametagIdentity h3 {
+  margin: 5px 0;
+  color: var(--ink);
+  font-size: 1.5rem;
+}
+
+.employeeNametagIdentity p,
+.employeeNametagIdentity small {
+  margin: 0;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.employeeNametagBarcode {
+  width: 100%;
+  margin-top: auto;
+  padding-top: 20px;
+}
+
+.employeeBarcodeSvg {
+  width: 100%;
+  height: 74px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.employeeNametagBarcode strong {
+  display: block;
+  margin-top: 10px;
+  color: var(--ink);
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  word-break: break-all;
+}
+
+.employeeNametagMeta {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  margin-top: 14px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.employeeNametagMeta strong {
+  color: var(--ink);
+}
+
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+
+  .employeeNametagCard,
+  .employeeNametagCard * {
+    visibility: visible !important;
+  }
+
+  .employeeNametagCard {
+    position: fixed;
+    inset: 24px auto auto 24px;
+    width: 360px;
+    box-shadow: none;
+  }
+}
+
+@media (max-width: 920px) {
+  .kioskModeLayout,
+  .kioskTerminalGrid,
+  .kioskTerminalActions {
+    grid-template-columns: 1fr;
+  }
+
+  .kioskTerminalPanel,
+  .kioskResultPanel {
+    padding: 18px;
+    border-radius: 22px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .opsPageShell > *,
   .loginCard {
