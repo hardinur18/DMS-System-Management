@@ -29,6 +29,7 @@ import {
   Lock,
   LogOut,
   Mail,
+  MapPin,
   MessageSquare,
   Menu,
   Megaphone,
@@ -5728,7 +5729,7 @@ function KioskModePage({ activeView }: { activeView: ViewId }) {
             <span><ScanLine size={22} /></span>
             <div>
               <strong>Terminal Scan</strong>
-              <small>Scanner USB barcode/RFID biasanya mengirim kode lalu Enter otomatis.</small>
+              <small>{selectedKiosk?.name || "Pilih pintu absensi"} · {selectedKiosk?.workLocationName || "Lokasi kerja"}</small>
             </div>
           </div>
 
@@ -5748,7 +5749,7 @@ function KioskModePage({ activeView }: { activeView: ViewId }) {
           </div>
 
           <label className="kioskScanField">
-            <span>{credentialType === "barcode" ? "Scan Barcode" : "Tap RFID"}</span>
+            <span>{credentialType === "barcode" ? "Scan Barcode / Nametag" : "Tap Kartu RFID"}</span>
             <input
               ref={scanInputRef}
               value={credentialValue}
@@ -5760,22 +5761,24 @@ function KioskModePage({ activeView }: { activeView: ViewId }) {
 
           <div className="kioskPolicyPreview">
             <span className={clsx("kioskPolicyPill", mediaAllowed ? "success" : "danger")}>{mediaAllowed ? "Media aktif" : "Media diblokir"}</span>
-            <span>{selectedKiosk?.policyName || "Policy belum siap"}</span>
-            <span>{selectedKiosk?.requireFace ? "Face wajib" : "Face opsional"}</span>
-            <span>{selectedKiosk?.requireLocation ? "Lokasi kiosk aktif" : "Tanpa lokasi"}</span>
+            <span><ShieldCheck size={14} /> {selectedKiosk?.policyName || "Policy belum siap"}</span>
+            <span><ScanFace size={14} /> {selectedKiosk?.requireFace ? "Face wajib" : "Face opsional"}</span>
+            <span><MapPin size={14} /> {selectedKiosk?.requireLocation ? "Lokasi kiosk aktif" : "Tanpa lokasi"}</span>
           </div>
 
-          {selectedKiosk?.requireFace && (
-            <TextFormField
-              label="Face Score Kiosk"
-              value={faceScore}
-              onChange={(event) => setFaceScore(normalizeIntegerInput(event.target.value, 100))}
-              placeholder="92"
-              inputMode="numeric"
-            />
-          )}
+          <div className={clsx("kioskAuxGrid", !selectedKiosk?.requireFace && "single")}>
+            {selectedKiosk?.requireFace && (
+              <TextFormField
+                label="Face Score Kiosk"
+                value={faceScore}
+                onChange={(event) => setFaceScore(normalizeIntegerInput(event.target.value, 100))}
+                placeholder="92"
+                inputMode="numeric"
+              />
+            )}
 
-          <TextFormField label="Catatan Operator" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Opsional, misal scanner pintu utama" />
+            <TextFormField label="Catatan Operator" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Opsional, misal scanner pintu utama" />
+          </div>
 
           <div className="kioskTerminalActions">
             <button className="secondaryButton" type="button" onClick={() => { setCredentialValue(""); setResult(null); scanInputRef.current?.focus() }}>
@@ -5809,7 +5812,16 @@ function KioskModePage({ activeView }: { activeView: ViewId }) {
               </div>
             </div>
           ) : (
-            <TableState title="Siap menerima scan" description="Pilih kiosk, fokus field scan, lalu tempel kartu atau barcode nametag." icon={ScanLine} />
+            <div className="kioskEmptyState">
+              <span><ScanLine size={34} /></span>
+              <strong>Siap menerima scan</strong>
+              <p>Field scan sudah fokus otomatis. Tempel kartu RFID atau scan barcode nametag, lalu sistem memproses absensi.</p>
+              <div>
+                <small>1. Pilih pintu</small>
+                <small>2. Pilih media</small>
+                <small>3. Scan kartu</small>
+              </div>
+            </div>
           )}
         </aside>
       </div>

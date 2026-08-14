@@ -9361,9 +9361,10 @@ button {
 
 .kioskModeLayout {
   display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.65fr);
-  gap: 18px;
-  margin-top: 22px;
+  grid-template-columns: minmax(560px, 1fr) minmax(360px, 420px);
+  align-items: start;
+  gap: 20px;
+  margin-top: 18px;
 }
 
 .kioskTerminalPanel,
@@ -9372,7 +9373,7 @@ button {
   border-radius: var(--radius-lg);
   background: rgba(255, 255, 255, 0.94);
   box-shadow: var(--shadow-card);
-  padding: 24px;
+  padding: 22px;
 }
 
 .kioskTerminalHeader,
@@ -9380,16 +9381,17 @@ button {
   display: flex;
   align-items: center;
   gap: 14px;
-  margin-bottom: 22px;
+  margin-bottom: 18px;
 }
 
 .kioskTerminalHeader > span,
 .kioskResultHeader > span {
   display: grid;
   place-items: center;
-  width: 54px;
-  height: 54px;
-  border-radius: 18px;
+  flex: 0 0 auto;
+  width: 48px;
+  height: 48px;
+  border-radius: 16px;
   color: var(--accent-strong);
   background: linear-gradient(145deg, #eefcff, #ffffff);
   border: 1px solid rgba(39, 185, 207, 0.22);
@@ -9399,7 +9401,7 @@ button {
 .kioskResultHeader strong {
   display: block;
   color: var(--ink);
-  font-size: 1.16rem;
+  font-size: 1.08rem;
 }
 
 .kioskTerminalHeader small,
@@ -9408,33 +9410,34 @@ button {
   margin-top: 3px;
   color: var(--muted);
   font-weight: 700;
+  line-height: 1.35;
 }
 
 .kioskTerminalGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+  gap: 14px;
 }
 
 .kioskScanField {
   display: grid;
-  gap: 9px;
-  margin: 18px 0;
+  gap: 8px;
+  margin: 16px 0 14px;
   color: var(--ink);
   font-weight: 900;
 }
 
 .kioskScanField input {
   width: 100%;
-  min-height: 86px;
+  min-height: 72px;
   border: 1px solid var(--border);
-  border-radius: 24px;
+  border-radius: 20px;
   background: #ffffff;
   color: var(--ink);
-  font-size: clamp(1.3rem, 3vw, 2.15rem);
+  font-size: clamp(1.2rem, 2.2vw, 1.68rem);
   font-weight: 900;
-  letter-spacing: 0.04em;
-  padding: 0 24px;
+  letter-spacing: 0.01em;
+  padding: 0 20px;
   outline: none;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
@@ -9447,14 +9450,15 @@ button {
 .kioskPolicyPreview {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 18px;
+  gap: 8px;
+  margin-bottom: 14px;
 }
 
 .kioskPolicyPreview span,
 .kioskPolicyPill {
   display: inline-flex;
   align-items: center;
+  gap: 6px;
   min-height: 34px;
   border-radius: 999px;
   border: 1px solid var(--border);
@@ -9477,11 +9481,26 @@ button {
   background: #fff1f2;
 }
 
+.kioskAuxGrid {
+  display: grid;
+  grid-template-columns: 0.4fr 0.6fr;
+  gap: 14px;
+  align-items: end;
+}
+
+.kioskAuxGrid.single {
+  grid-template-columns: 1fr;
+}
+
 .kioskTerminalActions {
   display: grid;
   grid-template-columns: 0.45fr 0.55fr;
   gap: 14px;
-  margin-top: 20px;
+  margin-top: 18px;
+}
+
+.kioskResultPanel {
+  min-height: 100%;
 }
 
 .kioskResultCard {
@@ -9539,6 +9558,61 @@ button {
 
 .kioskResultMetrics strong {
   color: var(--ink);
+}
+
+.kioskEmptyState {
+  min-height: 390px;
+  border: 1px dashed rgba(148, 163, 184, 0.28);
+  border-radius: 24px;
+  background: linear-gradient(180deg, #f8fbff, #ffffff);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  gap: 12px;
+  padding: 24px;
+}
+
+.kioskEmptyState > span {
+  display: grid;
+  place-items: center;
+  width: 74px;
+  height: 74px;
+  border-radius: 24px;
+  color: var(--accent-strong);
+  background: linear-gradient(145deg, #e9fbff, #ffffff);
+  border: 1px solid rgba(39, 185, 207, 0.2);
+}
+
+.kioskEmptyState strong {
+  color: var(--ink);
+  font-size: 1.18rem;
+}
+
+.kioskEmptyState p {
+  max-width: 300px;
+  margin: 0;
+  color: var(--muted);
+  font-weight: 750;
+  line-height: 1.45;
+}
+
+.kioskEmptyState div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.kioskEmptyState small {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--muted);
+  font-weight: 900;
+  padding: 7px 10px;
 }
 
 .employeeNametagDialog {
