@@ -1,5 +1,10 @@
 # DMS System Plan
 
+## Dokumen Pendamping
+
+- Fundamental dan handoff context dari build awal MacBook: `docs/DMS_APP_FUNDAMENTAL_PROMPT.md`
+- UI/UX foundation: `docs/UI_UX_FOUNDATION.md`
+
 ## Arah Produk
 
 DMS System akan dibangun sebagai sistem HRIS, attendance, dan payroll cycle custom untuk operasional Strongpants. Sistem memakai satu database dengan dua aplikasi:
