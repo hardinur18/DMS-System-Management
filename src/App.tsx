@@ -5742,7 +5742,7 @@ function KioskModePage({ activeView }: { activeView: ViewId }) {
       if (lastScanKeyRef.current === scanKey) lastScanKeyRef.current = ""
     }, 1200)
 
-    if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+    focusScanField()
     if (navigator.vibrate) navigator.vibrate(25)
 
     if (normalizedCredential.length < 6) {
@@ -5801,7 +5801,7 @@ function KioskModePage({ activeView }: { activeView: ViewId }) {
 
     scanDebounceRef.current = window.setTimeout(() => {
       void processKioskScan(normalizedCredential)
-    }, 650)
+    }, 420)
   }
 
   const handleScanKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -5922,7 +5922,7 @@ function KioskModePage({ activeView }: { activeView: ViewId }) {
             </button>
             <button className="primaryButton" type="submit" disabled={saving || loading}>
               <ScanLine size={16} />
-              {saving ? "Memproses..." : "Proses Manual"}
+              {saving ? "Memproses..." : "Proses Scan"}
             </button>
           </div>
         </form>
