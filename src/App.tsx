@@ -1,5 +1,5 @@
 import { Fragment, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import type { CSSProperties, KeyboardEvent, ReactNode } from "react"
+import type { CSSProperties, ChangeEvent, KeyboardEvent, ReactNode } from "react"
 import { createPortal } from "react-dom"
 import {
   AlertCircle,
@@ -5667,6 +5667,8 @@ function KioskModePage({ activeView }: { activeView: ViewId }) {
   const [errorMessage, setErrorMessage] = useState("")
   const [toast, setToast] = useState<ToastMessage | null>(null)
   const scanInputRef = useRef<HTMLInputElement | null>(null)
+  const scanDebounceRef = useRef<number | null>(null)
+  const lastScanKeyRef = useRef("")
 
   const selectedKiosk = kiosks.find((kiosk) => kiosk.id === selectedKioskId)
   const mediaAllowed = selectedKiosk?.allowedMedia.includes(credentialType) ?? true
@@ -5698,21 +5700,59 @@ function KioskModePage({ activeView }: { activeView: ViewId }) {
     scanInputRef.current?.focus()
   }, [selectedKioskId, credentialType])
 
-  const handleSubmit = async (event?: FormEvent) => {
-    event?.preventDefault()
+  useEffect(() => {
+    return () => {
+      if (scanDebounceRef.current) window.clearTimeout(scanDebounceRef.current)
+    }
+  }, [])
+
+  const focusScanField = () => {
+    window.setTimeout(() => scanInputRef.current?.focus(), 80)
+  }
+
+  const processKioskScan = async (rawCredential = credentialValue) => {
+    if (scanDebounceRef.current) {
+      window.clearTimeout(scanDebounceRef.current)
+      scanDebounceRef.current = null
+    }
+
+    const normalizedCredential = rawCredential.trim()
+
+    if (saving || loading) return
     if (!selectedKiosk) {
       showToast({ tone: "error", title: "Pilih lokasi kerja", description: "Lokasi kerja atau pintu absensi wajib dipilih dulu." })
+      focusScanField()
       return
     }
     if (!mediaAllowed) {
       showToast({ tone: "error", title: "Media tidak aktif", description: `${credentialType.toUpperCase()} tidak aktif di policy absensi ini.` })
+      focusScanField()
       return
     }
-    if (credentialValue.trim().length < 3) {
+    if (normalizedCredential.length < 3) {
       showToast({ tone: "error", title: "Scan belum terbaca", description: "Tempel kartu atau scan barcode sampai kode masuk ke field." })
+      focusScanField()
       return
     }
 
+    const scanKey = `${selectedKiosk.id}:${credentialType}:${normalizedCredential}`
+    if (scanKey === lastScanKeyRef.current) return
+    lastScanKeyRef.current = scanKey
+    window.setTimeout(() => {
+      if (lastScanKeyRef.current === scanKey) lastScanKeyRef.current = ""
+    }, 1200)
+
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+    if (navigator.vibrate) navigator.vibrate(25)
+
+    if (normalizedCredential.length < 6) {
+      showToast({ tone: "error", title: "Kode terlalu pendek", description: "Kode barcode/RFID belum terbaca penuh." })
+      lastScanKeyRef.current = ""
+      focusScanField()
+      return
+    }
+
+    setCredentialValue(normalizedCredential)
     setSaving(true)
     setResult(null)
     try {
@@ -5721,7 +5761,7 @@ function KioskModePage({ activeView }: { activeView: ViewId }) {
         eventType: "auto",
         kioskId: selectedKiosk.source === "kiosk" ? selectedKiosk.id : null,
         credentialType,
-        credentialValue: credentialValue.trim(),
+        credentialValue: normalizedCredential,
         faceScore: selectedKiosk.requireFace ? Number(faceScore) || null : null,
         notes,
       })
@@ -5729,23 +5769,46 @@ function KioskModePage({ activeView }: { activeView: ViewId }) {
       setCredentialValue("")
       showToast({
         tone: data.log.status === "valid" ? "success" : "error",
-        title: data.log.status === "valid" ? "Absensi tersimpan" : "Masuk antrian review",
-        description: `${data.employee.code} - ${data.employee.name} ${data.log.event_type === "check_in" ? "check-in" : "check-out"}.`,
+        title: data.log.event_type === "check_in" ? "Check-in diproses" : "Check-out diproses",
+        description: `${data.employee.code} - ${data.employee.name} di ${selectedKiosk.name}.`,
       })
-      window.setTimeout(() => scanInputRef.current?.focus(), 80)
+      focusScanField()
     } catch (error) {
+      lastScanKeyRef.current = ""
       showToast({ tone: "error", title: "Scan gagal", description: getFriendlySupabaseError(error, "Absensi kiosk belum bisa diproses.") })
-      window.setTimeout(() => scanInputRef.current?.focus(), 80)
+      focusScanField()
     } finally {
       setSaving(false)
     }
+  }
+
+  const handleSubmit = (event?: FormEvent) => {
+    event?.preventDefault()
+    void processKioskScan()
+  }
+
+  const handleCredentialChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const nextValue = event.target.value
+    setCredentialValue(nextValue)
+
+    if (scanDebounceRef.current) {
+      window.clearTimeout(scanDebounceRef.current)
+      scanDebounceRef.current = null
+    }
+
+    const normalizedCredential = nextValue.trim()
+    if (normalizedCredential.length < 6 || saving || loading) return
+
+    scanDebounceRef.current = window.setTimeout(() => {
+      void processKioskScan(normalizedCredential)
+    }, 650)
   }
 
   const handleScanKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key !== "Enter") return
     event.preventDefault()
     if (saving || loading) return
-    void handleSubmit()
+    void processKioskScan()
   }
 
   return (
@@ -5753,7 +5816,7 @@ function KioskModePage({ activeView }: { activeView: ViewId }) {
       <OperationalPageHeader
         eyebrow="Management App"
         title="Kiosk Mode"
-        subtitle="Satu pintu absensi untuk scan barcode atau RFID. Sistem otomatis menentukan check-in atau check-out hari ini."
+        subtitle="Scan pertama otomatis check-in, scan berikutnya otomatis check-out di hari yang sama."
         icon={ScanLine}
         actions={(
           <button className="secondaryButton" type="button" onClick={() => void fetchKiosks()} disabled={loading}>
@@ -5785,7 +5848,16 @@ function KioskModePage({ activeView }: { activeView: ViewId }) {
           {errorMessage && <div className="formAlert error">{errorMessage}</div>}
 
           <div className="kioskTerminalGrid">
-            <SelectFormField label="Lokasi Kerja / Pintu" value={selectedKioskId} onChange={(event) => setSelectedKioskId(event.target.value)}>
+            <SelectFormField
+              label="Lokasi Kerja / Pintu"
+              value={selectedKioskId}
+              onChange={(event) => {
+                setSelectedKioskId(event.target.value)
+                setResult(null)
+                setCredentialValue("")
+                focusScanField()
+              }}
+            >
               <option value="">Pilih lokasi kerja</option>
               {kiosks.map((kiosk) => (
                 <option value={kiosk.id} key={kiosk.id}>
@@ -5793,7 +5865,16 @@ function KioskModePage({ activeView }: { activeView: ViewId }) {
                 </option>
               ))}
             </SelectFormField>
-            <SelectFormField label="Media Scan" value={credentialType} onChange={(event) => setCredentialType(event.target.value as "barcode" | "rfid")}>
+            <SelectFormField
+              label="Media Scan"
+              value={credentialType}
+              onChange={(event) => {
+                setCredentialType(event.target.value as "barcode" | "rfid")
+                setResult(null)
+                setCredentialValue("")
+                focusScanField()
+              }}
+            >
               <option value="barcode">Barcode / QR</option>
               <option value="rfid">RFID</option>
             </SelectFormField>
@@ -5804,18 +5885,18 @@ function KioskModePage({ activeView }: { activeView: ViewId }) {
             <input
               ref={scanInputRef}
               value={credentialValue}
-              onChange={(event) => setCredentialValue(event.target.value)}
+              onChange={handleCredentialChange}
               onKeyDown={handleScanKeyDown}
               placeholder={credentialType === "barcode" ? "DMS-EMP-001-XXXX" : "UID kartu RFID"}
               autoComplete="off"
               autoFocus
               enterKeyHint="done"
             />
+            <small className="kioskScanHint">Auto-submit aktif. Scanner yang mengirim Enter langsung diproses, tombol manual tetap tersedia sebagai fallback.</small>
           </label>
 
           <div className="kioskPolicyPreview">
             <span className={clsx("kioskPolicyPill", mediaAllowed ? "success" : "danger")}>{mediaAllowed ? "Media aktif" : "Media diblokir"}</span>
-            <span><ShieldCheck size={14} /> {selectedKiosk?.policyName || "Policy belum siap"}</span>
             <span><ScanFace size={14} /> {selectedKiosk?.requireFace ? "Face wajib" : "Face opsional"}</span>
             <span><MapPin size={14} /> {selectedKiosk?.requireLocation ? "Lokasi kerja aktif" : "Tanpa lokasi"}</span>
           </div>
@@ -5841,12 +5922,12 @@ function KioskModePage({ activeView }: { activeView: ViewId }) {
             </button>
             <button className="primaryButton" type="submit" disabled={saving || loading}>
               <ScanLine size={16} />
-              {saving ? "Memproses..." : "Proses Scan"}
+              {saving ? "Memproses..." : "Proses Manual"}
             </button>
           </div>
         </form>
 
-        <aside className="surfacePanel kioskResultPanel">
+        <aside className="surfacePanel kioskResultPanel" aria-live="polite">
           <div className="kioskResultHeader">
             <span><FileCheck2 size={20} /></span>
             <div>

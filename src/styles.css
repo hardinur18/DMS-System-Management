@@ -9446,6 +9446,13 @@ button {
   box-shadow: 0 0 0 6px rgba(39, 185, 207, 0.12);
 }
 
+.kioskScanHint {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
 .kioskPolicyPreview {
   display: flex;
   flex-wrap: wrap;
