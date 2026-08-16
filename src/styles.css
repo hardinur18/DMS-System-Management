@@ -9361,19 +9361,17 @@ button {
 
 .kioskModeLayout {
   display: grid;
-  grid-template-columns: minmax(560px, 1fr) minmax(360px, 420px);
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
-  gap: 20px;
+  gap: 18px;
+  width: 100%;
   margin-top: 18px;
 }
 
 .kioskTerminalPanel,
 .kioskResultPanel {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: var(--shadow-card);
-  padding: 22px;
+  padding: 28px;
+  overflow: hidden;
 }
 
 .kioskTerminalHeader,
@@ -9381,7 +9379,7 @@ button {
   display: flex;
   align-items: center;
   gap: 14px;
-  margin-bottom: 18px;
+  margin-bottom: 16px;
 }
 
 .kioskTerminalHeader > span,
@@ -9389,9 +9387,9 @@ button {
   display: grid;
   place-items: center;
   flex: 0 0 auto;
-  width: 48px;
-  height: 48px;
-  border-radius: 16px;
+  width: 46px;
+  height: 46px;
+  border-radius: 15px;
   color: var(--accent-strong);
   background: linear-gradient(145deg, #eefcff, #ffffff);
   border: 1px solid rgba(39, 185, 207, 0.22);
@@ -9415,29 +9413,30 @@ button {
 
 .kioskTerminalGrid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.28fr);
+  gap: 12px;
+  align-items: end;
 }
 
 .kioskScanField {
   display: grid;
   gap: 8px;
-  margin: 16px 0 14px;
+  margin: 16px 0 12px;
   color: var(--ink);
   font-weight: 900;
 }
 
 .kioskScanField input {
   width: 100%;
-  min-height: 72px;
+  min-height: 58px;
   border: 1px solid var(--border);
-  border-radius: 20px;
+  border-radius: 18px;
   background: #ffffff;
   color: var(--ink);
-  font-size: clamp(1.2rem, 2.2vw, 1.68rem);
+  font-size: 1.08rem;
   font-weight: 900;
-  letter-spacing: 0.01em;
-  padding: 0 20px;
+  letter-spacing: 0;
+  padding: 0 18px;
   outline: none;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
@@ -9494,20 +9493,32 @@ button {
 
 .kioskTerminalActions {
   display: grid;
-  grid-template-columns: 0.45fr 0.55fr;
-  gap: 14px;
-  margin-top: 18px;
+  grid-template-columns: minmax(180px, 0.42fr) minmax(260px, 0.58fr);
+  gap: 12px;
+  margin-top: 16px;
 }
 
 .kioskResultPanel {
-  min-height: 100%;
+  min-height: 0;
+}
+
+.kioskResultPanel .kioskResultHeader {
+  margin-bottom: 14px;
+}
+
+.kioskResultPanel:has(.kioskResultCard) .kioskResultHeader {
+  margin-bottom: 14px;
 }
 
 .kioskResultCard {
-  border: 1px solid var(--border);
-  border-radius: 24px;
-  background: linear-gradient(145deg, #f8fbff, #ffffff);
-  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #ffffff;
+  padding: 14px 16px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.62fr);
+  gap: 14px;
+  align-items: center;
 }
 
 .kioskResultCard.valid {
@@ -9529,9 +9540,9 @@ button {
 }
 
 .kioskResultCard h3 {
-  margin: 8px 0 2px;
+  margin: 5px 0 2px;
   color: var(--ink);
-  font-size: 1.5rem;
+  font-size: 1.22rem;
 }
 
 .kioskResultCard p {
@@ -9542,16 +9553,18 @@ button {
 
 .kioskResultMetrics {
   display: grid;
-  gap: 10px;
-  margin-top: 18px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 0;
 }
 
 .kioskResultMetrics span {
-  display: flex;
-  justify-content: space-between;
-  gap: 14px;
-  border-top: 1px solid rgba(226, 232, 240, 0.9);
-  padding-top: 10px;
+  display: grid;
+  gap: 3px;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.82);
+  padding: 10px 12px;
   color: var(--muted);
   font-weight: 800;
 }
@@ -9561,58 +9574,79 @@ button {
 }
 
 .kioskEmptyState {
-  min-height: 390px;
-  border: 1px dashed rgba(148, 163, 184, 0.28);
-  border-radius: 24px;
-  background: linear-gradient(180deg, #f8fbff, #ffffff);
-  display: flex;
-  flex-direction: column;
+  min-height: 82px;
+  border: 1px dashed rgba(148, 163, 184, 0.34);
+  border-radius: 18px;
+  background: #ffffff;
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) auto;
   justify-content: center;
   align-items: center;
-  text-align: center;
-  gap: 12px;
-  padding: 24px;
+  text-align: left;
+  gap: 14px;
+  padding: 14px 16px;
 }
 
 .kioskEmptyState > span {
   display: grid;
   place-items: center;
-  width: 74px;
-  height: 74px;
-  border-radius: 24px;
+  flex: 0 0 auto;
+  width: 56px;
+  height: 56px;
+  border-radius: 18px;
   color: var(--accent-strong);
   background: linear-gradient(145deg, #e9fbff, #ffffff);
   border: 1px solid rgba(39, 185, 207, 0.2);
 }
 
-.kioskEmptyState strong {
-  color: var(--ink);
-  font-size: 1.18rem;
+.kioskEmptyCopy {
+  min-width: 0;
 }
 
-.kioskEmptyState p {
-  max-width: 300px;
-  margin: 0;
+.kioskEmptyCopy strong {
+  display: block;
+  color: var(--ink);
+  font-size: 1.08rem;
+}
+
+.kioskEmptyCopy p {
+  max-width: 460px;
+  margin: 4px 0 0;
   color: var(--muted);
   font-weight: 750;
   line-height: 1.45;
 }
 
-.kioskEmptyState div {
+.kioskEmptySteps {
   display: flex;
   flex-wrap: wrap;
-  justify-content: center;
+  justify-content: flex-end;
   gap: 8px;
-  margin-top: 4px;
 }
 
-.kioskEmptyState small {
+.kioskEmptySteps small {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
   border: 1px solid var(--border);
   border-radius: 999px;
   background: #ffffff;
   color: var(--muted);
   font-weight: 900;
-  padding: 7px 10px;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
+.kioskEmptySteps b {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #eef7ff;
+  color: var(--accent-strong);
+  font-size: 0.72rem;
 }
 
 .employeeNametagDialog {
@@ -9766,14 +9800,30 @@ button {
 @media (max-width: 920px) {
   .kioskModeLayout,
   .kioskTerminalGrid,
-  .kioskTerminalActions {
+  .kioskTerminalActions,
+  .kioskAuxGrid,
+  .kioskResultCard,
+  .kioskResultMetrics {
     grid-template-columns: 1fr;
+  }
+
+  .kioskModeLayout {
+    gap: 16px;
   }
 
   .kioskTerminalPanel,
   .kioskResultPanel {
     padding: 18px;
-    border-radius: 22px;
+  }
+
+  .kioskEmptyState {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    text-align: center;
+  }
+
+  .kioskEmptySteps {
+    justify-content: center;
   }
 }
 

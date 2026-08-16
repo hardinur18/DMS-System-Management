@@ -1,5 +1,5 @@
 import { Fragment, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import type { CSSProperties, ReactNode } from "react"
+import type { CSSProperties, KeyboardEvent, ReactNode } from "react"
 import { createPortal } from "react-dom"
 import {
   AlertCircle,
@@ -536,6 +536,7 @@ interface AttendanceKioskOption {
   id: string
   kioskCode: string
   name: string
+  source: "kiosk" | "location"
   workLocationId: string
   workLocationName: string
   policyId: string
@@ -3407,6 +3408,32 @@ function generateEmployeeQrToken(employeeCode: string) {
   return `DMS-${employeeCode.trim().toUpperCase() || "EMP"}-${randomPart}`
 }
 
+function buildLocationKioskOptions(locations: any[] | null | undefined, policies: any[] | null | undefined): AttendanceKioskOption[] {
+  const activePolicies = (policies || []).filter((policy: any) => String(policy.status || "active") === "active")
+  const defaultPolicy = activePolicies[0] || (policies || [])[0]
+  const allowedMedia = Array.isArray(defaultPolicy?.allowed_media) ? defaultPolicy.allowed_media.map(String) : ["barcode", "rfid"]
+
+  return (locations || []).map((location: any) => {
+    const locationId = String(location.id || "")
+    const locationName = String(location.name || "Lokasi kerja")
+
+    return {
+      id: `location:${locationId}`,
+      kioskCode: `LOC-${locationId.slice(0, 8).toUpperCase()}`,
+      name: locationName,
+      source: "location",
+      workLocationId: locationId,
+      workLocationName: locationName,
+      policyId: String(defaultPolicy?.id || ""),
+      policyName: String(defaultPolicy?.name || "Barcode / RFID"),
+      allowedMedia,
+      requireFace: Boolean(defaultPolicy?.require_face),
+      requireLocation: true,
+      status: "active",
+    }
+  })
+}
+
 async function loadAttendanceKiosks(): Promise<AttendanceKioskOption[]> {
   const [{ data: kiosks, error: kioskError }, { data: locations, error: locationError }, { data: policies, error: policyError }] = await Promise.all([
     supabase
@@ -3423,14 +3450,19 @@ async function loadAttendanceKiosks(): Promise<AttendanceKioskOption[]> {
       .order("name", { ascending: true }),
   ])
 
-  if (kioskError) throw kioskError
   if (locationError) throw locationError
-  if (policyError) throw policyError
+  if (policyError && !isMissingKioskEmployeeSchema(policyError)) throw policyError
+  const locationFallbackOptions = buildLocationKioskOptions(locations, policyError ? [] : policies)
+
+  if (kioskError) {
+    if (isMissingKioskEmployeeSchema(kioskError)) return locationFallbackOptions
+    throw kioskError
+  }
 
   const locationMap = new Map((locations || []).map((location: any) => [String(location.id), String(location.name || "Lokasi kerja")]))
   const policyMap = new Map((policies || []).map((policy: any) => [String(policy.id), policy]))
 
-  return (kiosks || []).map((kiosk: any) => {
+  const kioskOptions = (kiosks || []).map((kiosk: any) => {
     const policy = policyMap.get(String(kiosk.policy_id || ""))
     const allowedMedia = Array.isArray(policy?.allowed_media) ? policy.allowed_media.map(String) : ["barcode", "rfid"]
 
@@ -3438,6 +3470,7 @@ async function loadAttendanceKiosks(): Promise<AttendanceKioskOption[]> {
       id: String(kiosk.id || ""),
       kioskCode: String(kiosk.kiosk_code || ""),
       name: String(kiosk.name || kiosk.kiosk_code || "Kiosk Absensi"),
+      source: "kiosk" as const,
       workLocationId: String(kiosk.work_location_id || ""),
       workLocationName: locationMap.get(String(kiosk.work_location_id || "")) || "Lokasi belum dipilih",
       policyId: String(kiosk.policy_id || ""),
@@ -3448,6 +3481,8 @@ async function loadAttendanceKiosks(): Promise<AttendanceKioskOption[]> {
       status: String(kiosk.status || "active"),
     }
   })
+
+  return kioskOptions.length ? kioskOptions : locationFallbackOptions
 }
 
 const code128Patterns = [
@@ -3559,13 +3594,19 @@ function isMissingKioskEmployeeSchema(error: unknown) {
   const errorObject = error && typeof error === "object" ? error as { message?: unknown; details?: unknown; hint?: unknown } : null
   const message = `${String(errorObject?.message || "")} ${String(errorObject?.details || "")} ${String(errorObject?.hint || "")}`.toLowerCase()
 
-  return (
-    message.includes("employees.qr_token") ||
-    message.includes("employees.rfid_uid") ||
-    message.includes("employees.attendance_policy_id") ||
-    message.includes("employees.kiosk_access_enabled") ||
-    message.includes("employees.last_card_issued_at")
-  )
+  const optionalKioskSchemaHints = [
+    "qr_token",
+    "rfid_uid",
+    "attendance_policy_id",
+    "kiosk_access_enabled",
+    "last_card_issued_at",
+    "attendance_policies",
+    "attendance_kiosks",
+    "schema cache",
+    "relationship",
+  ]
+
+  return optionalKioskSchemaHints.some((hint) => message.includes(hint))
 }
 
 function mapEmployeeRow(
@@ -5660,11 +5701,11 @@ function KioskModePage({ activeView }: { activeView: ViewId }) {
   const handleSubmit = async (event?: FormEvent) => {
     event?.preventDefault()
     if (!selectedKiosk) {
-      showToast({ tone: "error", title: "Pilih kiosk", description: "Kiosk/pintu absensi wajib dipilih dulu." })
+      showToast({ tone: "error", title: "Pilih lokasi kerja", description: "Lokasi kerja atau pintu absensi wajib dipilih dulu." })
       return
     }
     if (!mediaAllowed) {
-      showToast({ tone: "error", title: "Media tidak aktif", description: `${credentialType.toUpperCase()} tidak aktif di policy kiosk ini.` })
+      showToast({ tone: "error", title: "Media tidak aktif", description: `${credentialType.toUpperCase()} tidak aktif di policy absensi ini.` })
       return
     }
     if (credentialValue.trim().length < 3) {
@@ -5678,7 +5719,7 @@ function KioskModePage({ activeView }: { activeView: ViewId }) {
       const data = await submitFieldAttendance({
         mode: "kiosk",
         eventType: "auto",
-        kioskId: selectedKiosk.id,
+        kioskId: selectedKiosk.source === "kiosk" ? selectedKiosk.id : null,
         credentialType,
         credentialValue: credentialValue.trim(),
         faceScore: selectedKiosk.requireFace ? Number(faceScore) || null : null,
@@ -5694,13 +5735,21 @@ function KioskModePage({ activeView }: { activeView: ViewId }) {
       window.setTimeout(() => scanInputRef.current?.focus(), 80)
     } catch (error) {
       showToast({ tone: "error", title: "Scan gagal", description: getFriendlySupabaseError(error, "Absensi kiosk belum bisa diproses.") })
+      window.setTimeout(() => scanInputRef.current?.focus(), 80)
     } finally {
       setSaving(false)
     }
   }
 
+  const handleScanKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== "Enter") return
+    event.preventDefault()
+    if (saving || loading) return
+    void handleSubmit()
+  }
+
   return (
-    <section className="operationalPage">
+    <OperationalPageShell>
       <OperationalPageHeader
         eyebrow="Management App"
         title="Kiosk Mode"
@@ -5716,30 +5765,32 @@ function KioskModePage({ activeView }: { activeView: ViewId }) {
 
       <InlinePageStats
         items={[
-          `${activeKiosks.length} kiosk aktif`,
-          `${kiosks.length} pintu terdaftar`,
+          `${activeKiosks.length} lokasi aktif`,
+          `${kiosks.length} pilihan pintu`,
           selectedKiosk?.policyName || "Policy belum dipilih",
           activeView === "kiosk-mode" ? "Auto check-in/out" : "Kiosk",
         ]}
       />
 
-      <div className="kioskModeLayout">
-        <form className="kioskTerminalPanel" onSubmit={handleSubmit}>
+      <section className="kioskModeLayout">
+        <form className="surfacePanel kioskTerminalPanel" onSubmit={handleSubmit}>
           <div className="kioskTerminalHeader">
             <span><ScanLine size={22} /></span>
             <div>
               <strong>Terminal Scan</strong>
-              <small>{selectedKiosk?.name || "Pilih pintu absensi"} · {selectedKiosk?.workLocationName || "Lokasi kerja"}</small>
+              <small>{selectedKiosk?.workLocationName || "Pilih lokasi kerja"} · {selectedKiosk?.source === "kiosk" ? selectedKiosk.name : "Pintu utama"}</small>
             </div>
           </div>
 
           {errorMessage && <div className="formAlert error">{errorMessage}</div>}
 
           <div className="kioskTerminalGrid">
-            <SelectFormField label="Pintu / Lokasi" value={selectedKioskId} onChange={(event) => setSelectedKioskId(event.target.value)}>
-              <option value="">Pilih kiosk</option>
+            <SelectFormField label="Lokasi Kerja / Pintu" value={selectedKioskId} onChange={(event) => setSelectedKioskId(event.target.value)}>
+              <option value="">Pilih lokasi kerja</option>
               {kiosks.map((kiosk) => (
-                <option value={kiosk.id} key={kiosk.id}>{kiosk.name} - {kiosk.workLocationName}</option>
+                <option value={kiosk.id} key={kiosk.id}>
+                  {kiosk.source === "kiosk" ? `${kiosk.workLocationName} - ${kiosk.name}` : kiosk.workLocationName}
+                </option>
               ))}
             </SelectFormField>
             <SelectFormField label="Media Scan" value={credentialType} onChange={(event) => setCredentialType(event.target.value as "barcode" | "rfid")}>
@@ -5754,8 +5805,11 @@ function KioskModePage({ activeView }: { activeView: ViewId }) {
               ref={scanInputRef}
               value={credentialValue}
               onChange={(event) => setCredentialValue(event.target.value)}
+              onKeyDown={handleScanKeyDown}
               placeholder={credentialType === "barcode" ? "DMS-EMP-001-XXXX" : "UID kartu RFID"}
               autoComplete="off"
+              autoFocus
+              enterKeyHint="done"
             />
           </label>
 
@@ -5763,7 +5817,7 @@ function KioskModePage({ activeView }: { activeView: ViewId }) {
             <span className={clsx("kioskPolicyPill", mediaAllowed ? "success" : "danger")}>{mediaAllowed ? "Media aktif" : "Media diblokir"}</span>
             <span><ShieldCheck size={14} /> {selectedKiosk?.policyName || "Policy belum siap"}</span>
             <span><ScanFace size={14} /> {selectedKiosk?.requireFace ? "Face wajib" : "Face opsional"}</span>
-            <span><MapPin size={14} /> {selectedKiosk?.requireLocation ? "Lokasi kiosk aktif" : "Tanpa lokasi"}</span>
+            <span><MapPin size={14} /> {selectedKiosk?.requireLocation ? "Lokasi kerja aktif" : "Tanpa lokasi"}</span>
           </div>
 
           <div className={clsx("kioskAuxGrid", !selectedKiosk?.requireFace && "single")}>
@@ -5792,7 +5846,7 @@ function KioskModePage({ activeView }: { activeView: ViewId }) {
           </div>
         </form>
 
-        <aside className="kioskResultPanel">
+        <aside className="surfacePanel kioskResultPanel">
           <div className="kioskResultHeader">
             <span><FileCheck2 size={20} /></span>
             <div>
@@ -5814,20 +5868,22 @@ function KioskModePage({ activeView }: { activeView: ViewId }) {
           ) : (
             <div className="kioskEmptyState">
               <span><ScanLine size={34} /></span>
-              <strong>Siap menerima scan</strong>
-              <p>Field scan sudah fokus otomatis. Tempel kartu RFID atau scan barcode nametag, lalu sistem memproses absensi.</p>
-              <div>
-                <small>1. Pilih pintu</small>
-                <small>2. Pilih media</small>
-                <small>3. Scan kartu</small>
+              <div className="kioskEmptyCopy">
+                <strong>Siap menerima scan</strong>
+                <p>Field scan sudah fokus otomatis. Tempel kartu RFID atau scan barcode nametag, lalu sistem memproses absensi tanpa klik tombol.</p>
+              </div>
+              <div className="kioskEmptySteps">
+                <small><b>1</b> Pilih pintu</small>
+                <small><b>2</b> Pilih media</small>
+                <small><b>3</b> Scan kartu</small>
               </div>
             </div>
           )}
         </aside>
-      </div>
+      </section>
 
       <ToastViewport toast={toast} onClose={() => setToast(null)} />
-    </section>
+    </OperationalPageShell>
   )
 }
 
