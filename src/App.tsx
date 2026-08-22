@@ -5329,7 +5329,7 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
   }
 
   return (
-    <OperationalPageShell>
+        <OperationalPageShell className="kioskPageShell">
       <PageHeader
         activeView={activeView}
         subtitle="Direktori karyawan yang terhubung ke divisi, jabatan, shift, lokasi kerja, dan cycle payroll 26 hari."
@@ -5892,7 +5892,7 @@ function KioskModePage({ activeView }: { activeView: ViewId }) {
               autoFocus
               enterKeyHint="done"
             />
-            <small className="kioskScanHint">Auto-submit aktif. Scanner yang mengirim Enter langsung diproses, tombol manual tetap tersedia sebagai fallback.</small>
+            <small className="kioskScanHint">Scanner USB/RFID diproses otomatis saat kode terbaca atau Enter terkirim. Tombol manual hanya fallback.</small>
           </label>
 
           <div className="kioskPolicyPreview">
@@ -5922,7 +5922,7 @@ function KioskModePage({ activeView }: { activeView: ViewId }) {
             </button>
             <button className="primaryButton" type="submit" disabled={saving || loading}>
               <ScanLine size={16} />
-              {saving ? "Memproses..." : "Proses Scan"}
+                    {saving ? "Memproses..." : "Proses Scan"}
             </button>
           </div>
         </form>

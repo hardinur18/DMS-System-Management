@@ -9996,3 +9996,634 @@ button {
     animation: none;
   }
 }
+
+/* Kiosk mode polish: keep the page aligned with the DMS module rhythm. */
+.kioskModeLayout {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+  margin-top: 28px;
+}
+
+.kioskTerminalPanel,
+.kioskResultPanel {
+  width: 100%;
+  max-width: none;
+  border-radius: 28px;
+  border: 1px solid rgba(219, 226, 236, 0.95);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 24px 58px rgba(15, 23, 42, 0.08);
+  padding: 28px;
+}
+
+.kioskTerminalPanel,
+.kioskResultPanel {
+  display: grid;
+  gap: 18px;
+}
+
+.kioskTerminalHeader,
+.kioskResultHeader {
+  margin-bottom: 0;
+}
+
+.kioskTerminalGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 320px);
+  gap: 18px;
+  align-items: end;
+}
+
+.kioskScanField {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.kioskScanField input {
+  width: 100%;
+  min-height: 76px;
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  background: #fff;
+  padding: 0 28px;
+  color: var(--ink);
+  font-size: clamp(24px, 1.55vw, 36px);
+  font-weight: 850;
+  letter-spacing: 0;
+  outline: none;
+  box-shadow: inset 0 0 0 1px rgba(39, 185, 207, 0.08);
+  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+.kioskScanField input:focus {
+  border-color: rgba(39, 185, 207, 0.72);
+  box-shadow: 0 0 0 7px rgba(39, 185, 207, 0.14), inset 0 0 0 1px rgba(39, 185, 207, 0.12);
+}
+
+.kioskScanHint {
+  display: block;
+  color: #6b7b94;
+  font-size: 0.86rem;
+  font-weight: 750;
+  line-height: 1.45;
+}
+
+.kioskPolicyPreview {
+  margin: 0;
+}
+
+.kioskAuxGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+}
+
+.kioskTerminalActions {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.42fr) minmax(260px, 1fr);
+  gap: 16px;
+  margin-top: 0;
+}
+
+.kioskTerminalActions .primaryButton,
+.kioskTerminalActions .secondaryButton {
+  min-height: 58px;
+}
+
+.kioskEmptyState {
+  min-height: 132px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  padding: 22px 24px;
+  border: 1px dashed rgba(190, 205, 226, 0.9);
+  border-radius: 24px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(248, 252, 255, 0.94));
+  text-align: left;
+}
+
+.kioskEmptyCopy p {
+  margin: 6px 0 0;
+  max-width: 640px;
+}
+
+.kioskEmptySteps {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.kioskEmptySteps small {
+  min-height: 36px;
+  padding: 0 13px;
+}
+
+@media (max-width: 920px) {
+  .kioskModeLayout,
+  .kioskTerminalGrid,
+  .kioskTerminalActions,
+  .kioskAuxGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .kioskModeLayout {
+    margin-top: 18px;
+    gap: 16px;
+  }
+
+  .kioskTerminalPanel,
+  .kioskResultPanel {
+    padding: 18px;
+    border-radius: 24px;
+  }
+
+  .kioskScanField input {
+    min-height: 64px;
+    padding: 0 18px;
+    font-size: 1.45rem;
+    border-radius: 20px;
+  }
+
+  .kioskEmptyState {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    text-align: center;
+  }
+
+  .kioskEmptySteps {
+    justify-content: center;
+  }
+}
+
+/* Kiosk Mode: final DMS module lock */
+.kioskModeLayout {
+  width: 100%;
+  max-width: 1440px;
+  margin: 24px 0 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 22px;
+  align-items: stretch;
+}
+
+.kioskTerminalPanel,
+.kioskResultPanel {
+  width: 100%;
+  margin: 0;
+  box-sizing: border-box;
+  border: 1px solid rgba(211, 222, 235, 0.92);
+  border-radius: 30px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 28px 76px rgba(16, 31, 62, 0.09);
+}
+
+.kioskTerminalPanel {
+  padding: 30px;
+  display: grid;
+  gap: 22px;
+}
+
+.kioskResultPanel {
+  padding: 28px 30px;
+  display: grid;
+  gap: 18px;
+}
+
+.kioskTerminalHeader,
+.kioskResultHeader {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 0;
+}
+
+.kioskTerminalHeader > span,
+.kioskResultHeader > span,
+.kioskEmptyState > span {
+  width: 58px;
+  height: 58px;
+  flex: 0 0 58px;
+  display: grid;
+  place-items: center;
+  border-radius: 18px;
+  color: #0787a4;
+  background: #effcff;
+  border: 1px solid #c9f4fb;
+  box-shadow: none;
+}
+
+.kioskTerminalHeader strong,
+.kioskResultHeader strong {
+  display: block;
+  color: #101a33;
+  font-size: 24px;
+  line-height: 1.1;
+}
+
+.kioskTerminalHeader small,
+.kioskResultHeader small {
+  display: block;
+  margin-top: 4px;
+  color: #687a94;
+  font-size: 15px;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.kioskTerminalGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(250px, 360px);
+  gap: 18px 22px;
+  align-items: end;
+}
+
+.kioskScanField {
+  display: block;
+  min-width: 0;
+}
+
+.kioskScanField > span {
+  display: block;
+  margin-bottom: 10px;
+  color: #111a33;
+  font-size: 14px;
+  font-weight: 850;
+  line-height: 1.25;
+}
+
+.kioskScanField input {
+  width: 100%;
+  min-height: 72px;
+  box-sizing: border-box;
+  border-radius: 24px;
+  padding: 0 28px;
+  font-size: clamp(26px, 2vw, 36px);
+  font-weight: 850;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.kioskScanField input:focus {
+  border-color: rgba(40, 190, 212, 0.72);
+  box-shadow: 0 0 0 6px rgba(40, 190, 212, 0.12);
+}
+
+.kioskScanHint {
+  display: block;
+  margin-top: 10px;
+  color: #71829a;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.kioskPolicyPreview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.kioskAuxGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+
+.kioskAuxGrid:not(.single) {
+  grid-template-columns: minmax(220px, 320px) minmax(0, 1fr);
+}
+
+.kioskTerminalActions {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.72fr) minmax(260px, 1fr);
+  gap: 16px;
+  align-items: center;
+}
+
+.kioskTerminalActions .secondaryButton,
+.kioskTerminalActions .primaryButton {
+  width: 100%;
+  min-height: 62px;
+  justify-content: center;
+}
+
+.kioskEmptyState {
+  min-height: auto;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px 24px;
+  padding: 22px 24px;
+  border: 1px dashed rgba(201, 216, 232, 0.92);
+  border-radius: 24px;
+  background: #fff;
+  text-align: left;
+}
+
+.kioskEmptyState h3 {
+  margin: 0 0 4px;
+  color: #101a33;
+  font-size: 24px;
+  line-height: 1.15;
+}
+
+.kioskEmptyState p {
+  margin: 0;
+  max-width: 760px;
+  font-size: 16px;
+  line-height: 1.45;
+}
+
+.kioskEmptySteps {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.kioskResultCard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.78fr);
+  gap: 18px;
+  align-items: stretch;
+}
+
+@media (max-width: 1100px) {
+  .kioskModeLayout,
+  .kioskTerminalGrid,
+  .kioskAuxGrid:not(.single),
+  .kioskTerminalActions,
+  .kioskResultCard,
+  .kioskEmptyState {
+    grid-template-columns: 1fr;
+  }
+
+  .kioskEmptyState {
+    text-align: center;
+  }
+
+  .kioskEmptyState > span {
+    margin: 0 auto;
+  }
+
+  .kioskEmptySteps {
+    justify-content: center;
+  }
+}
+
+@media (max-width: 720px) {
+  .kioskModeLayout {
+    margin-top: 18px;
+    gap: 16px;
+  }
+
+  .kioskTerminalPanel,
+  .kioskResultPanel {
+    padding: 20px;
+    border-radius: 24px;
+  }
+
+  .kioskTerminalHeader,
+  .kioskResultHeader {
+    align-items: flex-start;
+  }
+
+  .kioskTerminalHeader strong,
+  .kioskResultHeader strong,
+  .kioskEmptyState h3 {
+    font-size: 21px;
+  }
+
+  .kioskScanField input {
+    min-height: 68px;
+    padding: 0 20px;
+    font-size: 24px;
+  }
+
+  .kioskTerminalActions .secondaryButton,
+  .kioskTerminalActions .primaryButton {
+    min-height: 58px;
+  }
+}
+
+/* Kiosk Mode: scoped page foundation */
+.kioskPageShell {
+  width: min(100%, 1540px);
+  margin-inline: auto;
+}
+
+.kioskPageShell .kioskModeLayout {
+  width: 100%;
+  max-width: none;
+  margin: 24px 0 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.12fr) minmax(360px, 0.72fr);
+  gap: 22px;
+  align-items: start;
+}
+
+.kioskPageShell .kioskTerminalPanel,
+.kioskPageShell .kioskResultPanel {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  box-sizing: border-box;
+  border: 1px solid rgba(211, 222, 235, 0.92);
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 26px 72px rgba(15, 31, 61, 0.08);
+}
+
+.kioskPageShell .kioskTerminalPanel {
+  padding: 28px;
+  display: grid;
+  gap: 20px;
+}
+
+.kioskPageShell .kioskResultPanel {
+  padding: 26px 28px;
+  display: grid;
+  gap: 18px;
+  position: sticky;
+  top: 24px;
+}
+
+.kioskPageShell .kioskTerminalHeader,
+.kioskPageShell .kioskResultHeader {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+
+.kioskPageShell .kioskTerminalHeader > span,
+.kioskPageShell .kioskResultHeader > span,
+.kioskPageShell .kioskEmptyState > span {
+  width: 58px;
+  height: 58px;
+  flex: 0 0 58px;
+  display: grid;
+  place-items: center;
+  border-radius: 18px;
+  color: #0b7f99;
+  background: linear-gradient(145deg, rgba(235, 251, 255, 0.98), rgba(245, 252, 255, 0.82));
+  border: 1px solid rgba(179, 234, 245, 0.9);
+}
+
+.kioskPageShell .kioskTerminalHeader strong,
+.kioskPageShell .kioskResultHeader strong {
+  display: block;
+  font-size: 22px;
+  line-height: 1.12;
+  color: #08132f;
+}
+
+.kioskPageShell .kioskTerminalHeader small,
+.kioskPageShell .kioskResultHeader small {
+  display: block;
+  margin-top: 4px;
+  color: #65738e;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.kioskPageShell .kioskTerminalGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+  gap: 18px;
+  align-items: end;
+}
+
+.kioskPageShell .kioskScanField {
+  display: grid;
+  gap: 10px;
+}
+
+.kioskPageShell .kioskScanField > span {
+  color: #101936;
+  font-size: 17px;
+  font-weight: 900;
+}
+
+.kioskPageShell .kioskScanField input {
+  width: 100%;
+  min-height: 78px;
+  border-radius: 24px;
+  padding: 0 28px;
+  font-size: clamp(28px, 2vw, 36px);
+  font-weight: 900;
+  letter-spacing: 0;
+  color: #08132f;
+}
+
+.kioskPageShell .kioskScanHint {
+  color: #65738e;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.kioskPageShell .kioskPolicyPreview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.kioskPageShell .kioskAuxGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.58fr) minmax(0, 1fr);
+  gap: 16px;
+}
+
+.kioskPageShell .kioskAuxGrid.single {
+  grid-template-columns: 1fr;
+}
+
+.kioskPageShell .kioskTerminalActions {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.58fr) minmax(260px, 1fr);
+  gap: 16px;
+}
+
+.kioskPageShell .kioskEmptyState {
+  min-height: 320px;
+  border: 1px dashed rgba(205, 220, 235, 0.95);
+  border-radius: 24px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 18px;
+  text-align: center;
+  padding: 34px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(246, 251, 254, 0.8));
+}
+
+.kioskPageShell .kioskEmptyState > span {
+  margin: 0 auto;
+}
+
+.kioskPageShell .kioskEmptyCopy {
+  max-width: 460px;
+}
+
+.kioskPageShell .kioskEmptyCopy strong {
+  display: block;
+  color: #08132f;
+  font-size: 24px;
+  line-height: 1.16;
+}
+
+.kioskPageShell .kioskEmptyCopy p {
+  margin: 8px 0 0;
+  color: #65738e;
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1.38;
+}
+
+.kioskPageShell .kioskEmptySteps {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+@media (max-width: 1280px) {
+  .kioskPageShell .kioskModeLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .kioskPageShell .kioskResultPanel {
+    position: static;
+  }
+}
+
+@media (max-width: 760px) {
+  .kioskPageShell .kioskTerminalPanel,
+  .kioskPageShell .kioskResultPanel {
+    border-radius: 22px;
+    padding: 20px;
+  }
+
+  .kioskPageShell .kioskTerminalHeader,
+  .kioskPageShell .kioskResultHeader {
+    align-items: flex-start;
+  }
+
+  .kioskPageShell .kioskTerminalGrid,
+  .kioskPageShell .kioskAuxGrid,
+  .kioskPageShell .kioskTerminalActions {
+    grid-template-columns: 1fr;
+  }
+
+  .kioskPageShell .kioskScanField input {
+    min-height: 64px;
+    font-size: 24px;
+    padding: 0 18px;
+  }
+}
