@@ -31,6 +31,8 @@ Tujuan bisnis utamanya:
 - Karyawan tidak boleh approve atau mengoreksi absensinya sendiri.
 - Semua mutasi penting harus masuk audit log.
 - Data dummy boleh dipakai untuk UI awal, tapi harus diberi label jelas dan diganti data backend sebelum staging/production.
+- Loading data memakai skeleton loading dengan shimmer effect; jangan mengganti seluruh UI page bila yang menunggu hanya data database.
+- Login memakai session persistence; pindah page/modul tidak boleh memaksa user login ulang selama session Supabase masih valid.
 
 ## Current Repo Reality
 
@@ -38,11 +40,19 @@ Repo saat ini adalah foundation Management App:
 
 - Stack: React, TypeScript, Vite, Supabase.
 - Branch utama remote: `development`.
-- UI shell sudah ada: login screen, sidebar, dashboard, users, role permission, master data, audit log, dan modul operasional.
+- UI shell sudah ada: login screen, sidebar, dashboard, users, role permission, master data, audit log, kiosk, dan modul operasional.
+- Login sudah memakai Supabase Auth dengan session restore.
+- Access profile memakai `app_users`, role, division, dan `role_permissions`.
+- User management production diarahkan lewat Edge Function `app-users`.
+- Role Permission sudah diarahkan lewat Edge Function `role-permissions`.
 - Master Data sudah terhubung ke Supabase untuk roles, divisions, positions, work locations, shifts, dan payroll components.
-- Banyak modul lain masih dummy/mock: users, audit log, attendance, payroll, kasbon, reports.
-- Login masih dummy client-side dan belum memakai Supabase Auth.
-- Migration kedua masih dev-mode dan membuka CRUD ke `anon`. Ini harus diganti sebelum staging/production.
+- Attendance, field app, face enrollment, overtime review, payroll processing, dan kiosk sudah punya schema/function foundation.
+- Biofinger AT-301 sudah dipilih untuk fingerprint attendance. Device pertama terverifikasi lokal di IP `192.168.1.201`, serial `GED7244800117`, fondasi schema/script read-only ada di `docs/BIOFINGER_AT301_INTEGRATION.md`, dan target tanpa PC admin memakai ADMS cloud receiver di `scripts/biofinger_adms_receiver.mjs`.
+- UI foundation punya `FoundationSkeleton` dan `FoundationTableSkeletonRows` untuk loading data shimmer.
+- Auth foundation memakai Supabase session persistence dengan `getSession`, `onAuthStateChange`, token auto-refresh, dan cache access profile untuk startup UX.
+- Kasbon dan reports masih plan/draft; tabel `cash_advances` dan `cash_advance_payments` belum ada di migration.
+- Beberapa config draft UI lama masih ada untuk fallback module, tetapi nav utama dibatasi `productionReadyViews`.
+- RLS production sudah tersedia di migration, tetapi deployment live harus diverifikasi sebelum staging/production.
 
 ## Product Surfaces
 
@@ -131,6 +141,9 @@ Tabel berikutnya yang perlu dibangun:
 - `employee_salary_profiles`
 - `employee_work_assignments`
 - `employee_face_profiles`
+- `attendance_devices`
+- `employee_attendance_device_links`
+- `biofinger_attendance_events`
 - `attendance_events`
 - `attendance_reviews`
 - `leave_requests`
@@ -340,10 +353,12 @@ Prioritas utama:
 
 Current repo state:
 - React + TypeScript + Vite + Supabase.
-- Master Data sudah connect ke Supabase.
-- Users, Role Permission, Audit Log, Attendance, Payroll, Kasbon masih banyak dummy.
-- Login masih dummy dan harus diganti Supabase Auth.
-- Ada migration dev yang membuka anon CRUD, jangan pakai untuk production.
+- Supabase Auth sudah dipakai untuk login dan session restore.
+- `app_users` menjadi access profile untuk Management App dan Employee/field scope.
+- Master Data, Users, Role Permission, Audit Log, Employees, Attendance, Payroll, Face Enrollment, Overtime, dan Kiosk sudah punya jalur Supabase/Edge Function.
+- `VITE_USE_APP_USERS_FUNCTION=true` harus aktif setelah Edge Function `app-users` deploy.
+- Kasbon dan reports masih draft/plan; jangan anggap siap production.
+- Ada migration dev lama untuk bootstrap; production harus memakai RLS/function-only policy yang sudah disiapkan.
 
 Cara kerja:
 - Mulai dengan `git status`.
@@ -356,13 +371,13 @@ Cara kerja:
 - Update markdown plan jika keputusan produk berubah.
 
 Tugas pertama yang disarankan:
-1. Buat README setup lokal.
-2. Ganti login dummy dengan Supabase Auth.
-3. Tambahkan session restore.
-4. Connect Users page ke `app_users`.
-5. Ganti dev anon RLS dengan policy berbasis permission.
-6. Connect Role Permission page ke database.
-7. Connect Audit Log page ke `audit_logs`.
+1. Buat README setup lokal dan checklist deploy.
+2. Verifikasi Edge Functions live dan set `VITE_USE_APP_USERS_FUNCTION=true`.
+3. Verifikasi RLS production/function-only policy di Supabase live.
+4. Seed/claim owner user live dan cek permission menu.
+5. Tambahkan migration kasbon (`cash_advances`, `cash_advance_payments`) sebelum payroll deduction dipakai.
+6. Pecah `src/App.tsx` per modul setelah behavior inti stabil.
+7. Tambahkan test untuk auth permission, attendance validation, payroll processing, dan kasbon deduction.
 ```
 
 ## Definition of Done for Next Milestone
@@ -372,6 +387,8 @@ Milestone pertama dianggap selesai jika:
 - Login memakai Supabase Auth.
 - Session tetap hidup setelah refresh.
 - Logout benar-benar sign out dari Supabase.
+- Pindah modul tidak meminta login ulang selama session masih valid.
+- Loading state memakai skeleton shimmer untuk data dari Supabase, bukan text titik atau full-page skeleton tanpa kebutuhan.
 - Master Data tampil dari Supabase.
 - Users tampil dari `app_users`.
 - Role Permission tampil dari `role_permissions`.

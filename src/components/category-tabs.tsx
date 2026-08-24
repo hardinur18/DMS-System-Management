@@ -6,7 +6,7 @@ export interface CategoryTabItem<TId extends string> {
   id: TId
   label: ReactNode
   icon?: LucideIcon
-  count?: number
+  count?: ReactNode
 }
 
 export function CategoryTabs<TId extends string>({

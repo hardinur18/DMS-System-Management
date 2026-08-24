@@ -1,0 +1,22 @@
+[Unit]
+Description=DMS Biofinger ADMS Receiver
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/dms-biofinger-adms
+EnvironmentFile=/etc/dms-biofinger-adms.env
+ExecStart=/usr/bin/npm start
+Restart=always
+RestartSec=5
+User=dms-biofinger
+Group=dms-biofinger
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/dms-biofinger-adms
+
+[Install]
+WantedBy=multi-user.target

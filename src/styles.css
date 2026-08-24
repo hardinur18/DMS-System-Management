@@ -952,6 +952,1209 @@ button {
   align-self: center;
 }
 
+.biofingerFilterPanel {
+  display: grid;
+  grid-template-columns: minmax(320px, 1.35fr) minmax(220px, 0.56fr) auto;
+  align-items: end;
+}
+
+.biofingerScopePanel {
+  --biofinger-scope-h: 50px;
+  display: grid;
+  grid-template-columns: minmax(260px, 0.72fr) minmax(440px, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 16px 40px -34px rgba(15, 23, 42, 0.34);
+  backdrop-filter: blur(12px) saturate(142%);
+}
+
+.biofingerScopeIntro {
+  display: grid;
+  min-width: 0;
+  align-self: stretch;
+}
+
+.biofingerPanelLabel {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+.biofingerScopePicker {
+  display: grid;
+  height: 100%;
+  min-height: var(--biofinger-scope-h);
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.biofingerScopePicker .biofingerDeviceIdentity {
+  display: none;
+}
+
+.biofingerScopePicker .foundationSelect,
+.biofingerScopePicker .foundationSelectButton {
+  height: 100%;
+  min-height: var(--biofinger-scope-h);
+}
+
+.biofingerScopePicker .foundationSelectButton {
+  border-radius: 14px;
+  box-shadow: none;
+}
+
+.biofingerScopeStats {
+  display: grid;
+  height: 100%;
+  min-height: var(--biofinger-scope-h);
+  min-width: 0;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 14px;
+  background: rgba(248, 250, 252, 0.62);
+}
+
+.biofingerScopeStats div {
+  display: grid;
+  min-height: var(--biofinger-scope-h);
+  align-content: center;
+  gap: 3px;
+  padding: 8px 12px;
+  border-right: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.biofingerScopeStats div:last-child {
+  border-right: 0;
+}
+
+.biofingerScopeStats span {
+  color: #738197;
+  font-size: 0.66rem;
+  font-weight: 760;
+}
+
+.biofingerScopeStats strong {
+  min-width: 0;
+  color: var(--ops-ink);
+  font-size: 0.8rem;
+  font-weight: 840;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.biofingerScopePanel > .secondaryButton {
+  height: 100%;
+  min-height: var(--biofinger-scope-h);
+  align-self: stretch;
+  padding-inline: 16px;
+  border-radius: 14px;
+}
+
+.biofingerWorkspaceTabs {
+  min-width: 0;
+}
+
+.foundationSkeleton {
+  position: relative;
+  display: inline-block;
+  width: 86px;
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  vertical-align: middle;
+  background: rgba(226, 232, 240, 0.72);
+}
+
+.foundationSkeleton::after {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.74), transparent);
+  content: "";
+  transform: translateX(-120%);
+  animation: foundationSkeletonShimmer 1.25s ease-in-out infinite;
+}
+
+.foundationSkeleton.inline {
+  width: 92px;
+  height: 12px;
+}
+
+.foundationSkeleton.inline.wide {
+  width: 118px;
+}
+
+.foundationSkeleton.metricValue {
+  width: 44px;
+  height: 24px;
+}
+
+.foundationSkeleton.metricValue.wide {
+  width: 84px;
+}
+
+.foundationSkeleton.scopeValue {
+  width: 128px;
+  height: 12px;
+}
+
+.foundationSkeleton.scopeValue.short {
+  width: 76px;
+}
+
+.foundationSkeleton.stepValue {
+  width: 104px;
+  height: 13px;
+}
+
+.foundationSkeleton.caption {
+  width: 132px;
+  height: 9px;
+}
+
+.foundationSkeleton.selectValue {
+  width: 168px;
+  height: 14px;
+}
+
+.foundationSkeleton.tabCount {
+  width: 18px;
+  height: 14px;
+}
+
+.foundationSkeleton.avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 14px;
+}
+
+.foundationSkeleton.text {
+  display: block;
+  width: 96px;
+  height: 11px;
+}
+
+.foundationSkeleton.text.medium {
+  width: 132px;
+}
+
+.foundationSkeleton.text.wide {
+  width: 190px;
+}
+
+.foundationSkeleton.status {
+  width: 78px;
+  height: 22px;
+}
+
+.foundationSkeleton.button {
+  width: 74px;
+  height: 36px;
+  justify-self: end;
+  border-radius: 12px;
+}
+
+.foundationSkeleton.table {
+  display: block;
+  width: 100%;
+  max-width: 148px;
+  height: 12px;
+}
+
+.foundationSkeleton.table.short {
+  max-width: 34px;
+}
+
+.foundationSkeleton.table.dot {
+  width: 22px;
+  height: 22px;
+  justify-self: end;
+  border-radius: 999px;
+}
+
+.biofingerMappingTableScroller {
+  --table-row-min-h: 58px;
+  --table-cell-x: 16px;
+  --table-cell-y: 9px;
+  --table-min-width: 1180px;
+}
+
+.biofingerTableSelect .foundationSelectButton {
+  height: 42px;
+  min-height: 42px;
+  gap: 9px;
+  padding: 0 10px;
+  border-style: dashed;
+  border-color: rgba(34, 174, 202, 0.36);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(236, 253, 255, 0.88), rgba(248, 250, 252, 0.82));
+  font-size: 0.8rem;
+  font-weight: 760;
+  box-shadow: none;
+}
+
+.biofingerTableSelect.mapped .foundationSelectButton {
+  border-style: solid;
+  border-color: rgba(16, 185, 129, 0.24);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(240, 253, 244, 0.58));
+}
+
+.biofingerTableSelect .foundationSelectButton:hover:not(:disabled) {
+  border-color: rgba(34, 174, 202, 0.58);
+  background: #ffffff;
+  transform: translateY(-1px);
+}
+
+.biofingerTableSelect .foundationSelectButton:focus-visible,
+.biofingerTableSelect .foundationSelectButton[aria-expanded="true"] {
+  border-style: solid;
+  box-shadow: 0 0 0 3px rgba(34, 174, 202, 0.13);
+}
+
+.biofingerTableSelect .foundationSelectValue {
+  display: block;
+}
+
+.biofingerTableSelect .foundationSelectChevron {
+  width: 15px;
+  height: 15px;
+  color: #64748b;
+}
+
+.biofingerEmployeeSelectValue {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+}
+
+.biofingerEmployeeSelectAvatar {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 11px;
+  color: #0e7490;
+  background: rgba(34, 174, 202, 0.12);
+}
+
+.biofingerTableSelect.mapped .biofingerEmployeeSelectAvatar {
+  color: #087f5b;
+  background: rgba(16, 185, 129, 0.13);
+}
+
+.biofingerEmployeeSelectCopy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.biofingerEmployeeSelectCopy strong,
+.biofingerEmployeeSelectCopy small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.biofingerEmployeeSelectCopy strong {
+  color: var(--ops-ink);
+  font-size: 0.78rem;
+  font-weight: 850;
+  line-height: 1.1;
+}
+
+.biofingerEmployeeSelectCopy small {
+  color: #738197;
+  font-size: 0.66rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.biofingerEmployeeOptionLabel {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.biofingerEmployeeOptionHeader {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+}
+
+.biofingerEmployeeOptionName {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ops-ink);
+  font-size: 0.82rem;
+  font-weight: 850;
+  line-height: 1.08;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.foundationSelectOption:hover:not(:disabled) .biofingerEmployeeOptionName,
+.foundationSelectOption.selected .biofingerEmployeeOptionName {
+  color: var(--blue-ink);
+}
+
+.biofingerEmployeeOptionLabel small {
+  min-width: 0;
+  overflow: hidden;
+  color: #7c8ca3;
+  font-size: 0.68rem;
+  font-weight: 720;
+  line-height: 1.08;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.biofingerEmployeeOptionStatus {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 999px;
+  background: #94a3b8;
+  box-shadow: 0 0 0 3px rgba(100, 116, 139, 0.1);
+}
+
+.biofingerEmployeeOptionStatus.active {
+  background: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.12);
+}
+
+.biofingerEventText {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  color: #64748b;
+  font-weight: 860;
+  letter-spacing: 0;
+}
+
+.biofingerEventText::before {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 999px;
+  background: #94a3b8;
+  box-shadow: 0 0 0 4px rgba(100, 116, 139, 0.1);
+  content: "";
+}
+
+.biofingerEventText.check_in {
+  color: #087f5b;
+}
+
+.biofingerEventText.check_in::before {
+  background: #10b981;
+  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.12);
+}
+
+.biofingerEventText.check_out {
+  color: #b45309;
+}
+
+.biofingerEventText.check_out::before {
+  background: #f59e0b;
+  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.13);
+}
+
+.biofingerSyncPanel {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+}
+
+.biofingerSyncHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.biofingerSyncHeader h2 {
+  margin: 0;
+  color: var(--ops-ink);
+  font-size: 1.04rem;
+  font-weight: 850;
+  letter-spacing: 0;
+}
+
+.biofingerSyncHeader p {
+  margin: 5px 0 0;
+  color: var(--ops-muted);
+  font-size: 0.83rem;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.biofingerSyncSteps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: var(--ops-radius-sm);
+  background: rgba(255, 255, 255, 0.64);
+}
+
+.biofingerSyncStep {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 11px;
+  min-height: 94px;
+  padding: 17px 18px;
+  border-right: 1px solid rgba(15, 23, 42, 0.07);
+  background: transparent;
+}
+
+.biofingerSyncStep:last-child {
+  border-right: 0;
+}
+
+.biofingerSyncStep::after {
+  position: absolute;
+  right: -8px;
+  top: 33px;
+  z-index: 1;
+  width: 16px;
+  height: 16px;
+  border-top: 1px solid rgba(15, 23, 42, 0.07);
+  border-right: 1px solid rgba(15, 23, 42, 0.07);
+  background: rgba(255, 255, 255, 0.64);
+  content: "";
+  transform: rotate(45deg);
+}
+
+.biofingerSyncStep:last-child::after {
+  display: none;
+}
+
+.biofingerSyncStep span {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 15px;
+  color: #526179;
+  background: rgba(15, 23, 42, 0.06);
+}
+
+.biofingerSyncStep.complete span {
+  color: #087f5b;
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.biofingerSyncStep small,
+.biofingerSyncStep strong,
+.biofingerSyncStep em {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.biofingerSyncStep small {
+  color: var(--ops-muted);
+  font-size: 0.74rem;
+  font-weight: 740;
+}
+
+.biofingerSyncStep strong {
+  margin-top: 5px;
+  color: var(--ops-ink);
+  font-size: 0.9rem;
+  font-weight: 850;
+}
+
+.biofingerSyncStep em {
+  margin-top: 4px;
+  color: #7c8ca3;
+  font-size: 0.72rem;
+  font-style: normal;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.biofingerDeviceRegistryPanel {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+}
+
+.biofingerDeviceRegistryList {
+  display: grid;
+  gap: 8px;
+}
+
+.biofingerDeviceRegistryRow {
+  display: grid;
+  grid-template-columns: minmax(360px, 1.35fr) minmax(190px, 0.58fr) minmax(190px, 0.56fr) minmax(124px, 0.34fr) 92px;
+  align-items: stretch;
+  gap: 14px;
+  min-height: 66px;
+  padding: 9px 14px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.biofingerDeviceRegistryRow.biofingerDataLoadingRow {
+  grid-template-columns: minmax(0, 1fr);
+  color: var(--ops-muted);
+}
+
+.biofingerDeviceRegistrySkeletonRow {
+  pointer-events: none;
+}
+
+.biofingerDeviceSkeletonCopy {
+  display: grid;
+  gap: 9px;
+}
+
+.foundationTableSkeletonRow td {
+  height: 58px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--ops-line);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.foundationTableSkeletonGrid {
+  display: grid;
+  align-items: center;
+  gap: 18px;
+}
+
+.biofingerDeviceIdentity {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  align-self: center;
+  height: 100%;
+}
+
+.biofingerDeviceIdentity > span {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 14px;
+  color: var(--blue-ink);
+  background: rgba(34, 174, 202, 0.1);
+}
+
+.biofingerDeviceIdentity > .foundationSkeleton.avatar {
+  display: block;
+  background: rgba(226, 232, 240, 0.72);
+}
+
+.biofingerDeviceIdentity strong,
+.biofingerDeviceIdentity small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.biofingerDeviceIdentity > div::before {
+  display: block;
+  margin-bottom: 3px;
+  color: #738197;
+  content: "Device";
+  font-size: 0.68rem;
+  font-weight: 760;
+  line-height: 1;
+}
+
+.biofingerDeviceIdentity strong {
+  color: var(--ops-ink);
+  font-size: 0.84rem;
+  font-weight: 850;
+  line-height: 1.08;
+}
+
+.biofingerDeviceIdentity small {
+  margin-top: 2px;
+  color: var(--ops-muted);
+  font-size: 0.7rem;
+  font-weight: 650;
+  line-height: 1.08;
+}
+
+.biofingerRegistryMeta {
+  display: grid;
+  min-width: 0;
+  height: 100%;
+  align-content: center;
+  gap: 4px;
+}
+
+.biofingerRegistryMeta > span {
+  color: #738197;
+  font-size: 0.68rem;
+  font-weight: 760;
+  line-height: 1;
+}
+
+.biofingerRegistryMeta strong {
+  min-width: 0;
+  color: var(--ops-ink);
+  font-size: 0.84rem;
+  font-weight: 820;
+  line-height: 1.08;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.biofingerDeviceStatusText {
+  display: inline-flex;
+  min-height: 20px;
+  align-items: center;
+  gap: 7px;
+  color: #64748b;
+  font-size: 0.76rem;
+  font-weight: 820;
+  line-height: 1;
+  text-transform: capitalize;
+}
+
+.biofingerDeviceStatusText::before {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 999px;
+  background: #94a3b8;
+  box-shadow: 0 0 0 3px rgba(100, 116, 139, 0.1);
+  content: "";
+}
+
+.biofingerDeviceStatusText.active {
+  color: #087f5b;
+}
+
+.biofingerDeviceStatusText.active::before {
+  background: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.12);
+}
+
+.biofingerDeviceStatusText.maintenance {
+  color: #b45309;
+}
+
+.biofingerDeviceStatusText.maintenance::before {
+  background: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.12);
+}
+
+.biofingerDeviceStatusText.inactive {
+  color: #be123c;
+}
+
+.biofingerDeviceStatusText.inactive::before {
+  background: #f43f5e;
+  box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.11);
+}
+
+.biofingerLinkStatusText {
+  display: inline-flex;
+  min-height: 20px;
+  align-items: center;
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 850;
+  line-height: 1;
+  text-transform: capitalize;
+}
+
+.biofingerLinkStatusText.active {
+  color: #087f5b;
+}
+
+.biofingerLinkStatusText.pending {
+  color: #b45309;
+}
+
+.biofingerLinkStatusText.ignored {
+  color: #64748b;
+}
+
+.biofingerLinkStatusText.inactive {
+  color: #be123c;
+}
+
+.biofingerMappingChip {
+  display: grid;
+  width: 100%;
+  min-height: 42px;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  padding: 6px 10px;
+  border: 1px dashed rgba(34, 174, 202, 0.36);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(236, 253, 255, 0.86), rgba(248, 250, 252, 0.82));
+  color: var(--ops-ink);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.biofingerMappingChip:hover:not(:disabled) {
+  border-color: rgba(34, 174, 202, 0.58);
+  background: #ffffff;
+  box-shadow: 0 14px 28px -24px rgba(14, 116, 144, 0.42);
+  transform: translateY(-1px);
+}
+
+.biofingerMappingChip:focus-visible {
+  border-style: solid;
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(34, 174, 202, 0.13);
+}
+
+.biofingerMappingChip:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.biofingerMappingChip.mapped {
+  border-style: solid;
+  border-color: rgba(16, 185, 129, 0.24);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(240, 253, 244, 0.58));
+}
+
+.biofingerMappingChipIcon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 11px;
+  color: #0e7490;
+  background: rgba(34, 174, 202, 0.12);
+}
+
+.biofingerMappingChip.mapped .biofingerMappingChipIcon {
+  color: #087f5b;
+  background: rgba(16, 185, 129, 0.13);
+}
+
+.biofingerMappingChipCopy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.biofingerMappingChipCopy strong,
+.biofingerMappingChipCopy small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.biofingerMappingChipCopy strong {
+  color: var(--ops-ink);
+  font-size: 0.78rem;
+  font-weight: 850;
+  line-height: 1.1;
+}
+
+.biofingerMappingChipCopy small {
+  color: #738197;
+  font-size: 0.66rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.dialogBackdrop.biofingerDrawerBackdrop {
+  align-items: stretch;
+  justify-content: flex-end;
+  overflow: hidden;
+  padding: 0;
+  background:
+    linear-gradient(90deg, rgba(15, 23, 42, 0.18), rgba(15, 23, 42, 0.3)),
+    rgba(15, 23, 42, 0.18);
+  backdrop-filter: blur(10px) saturate(120%);
+}
+
+.dialogPanel.biofingerMappingDrawer {
+  display: flex;
+  width: min(640px, calc(100vw - 96px));
+  max-height: 100dvh;
+  min-height: 100dvh;
+  flex-direction: column;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border: 0;
+  border-left: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 0;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: -28px 0 64px -42px rgba(15, 23, 42, 0.72);
+  animation: biofingerDrawerIn 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.dialogPanel.biofingerMappingDrawer .dialogClose {
+  top: 18px;
+  right: 18px;
+}
+
+.biofingerDrawerHeader {
+  flex: 0 0 auto;
+  padding: 28px 30px 20px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.biofingerDrawerHeader h2 {
+  margin: 9px 38px 0 0;
+  color: var(--ops-ink);
+  font-size: 1.38rem;
+  font-weight: 880;
+  letter-spacing: 0;
+  line-height: 1.1;
+}
+
+.biofingerDrawerHeader p {
+  margin: 7px 38px 0 0;
+  color: var(--ops-muted);
+  font-size: 0.82rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.biofingerDrawerBody {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 14px;
+  overflow-y: auto;
+  padding: 18px 30px;
+  scrollbar-width: thin;
+}
+
+.biofingerDrawerSection {
+  display: grid;
+  gap: 11px;
+}
+
+.biofingerDrawerSection h3 {
+  margin: 0;
+  color: #627089;
+  font-size: 0.72rem;
+  font-weight: 850;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.biofingerDrawerFacts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 16px;
+  background: rgba(248, 250, 252, 0.7);
+}
+
+.biofingerDrawerFacts div {
+  display: grid;
+  min-height: 58px;
+  align-content: center;
+  gap: 5px;
+  padding: 11px 13px;
+  border-right: 1px solid rgba(148, 163, 184, 0.15);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+}
+
+.biofingerDrawerFacts div:nth-child(2n) {
+  border-right: 0;
+}
+
+.biofingerDrawerFacts div:nth-last-child(-n + 2) {
+  border-bottom: 0;
+}
+
+.biofingerDrawerFacts span,
+.biofingerDrawerDevice small,
+.biofingerDrawerCurrentMapping small,
+.biofingerDrawerSelectedEmployee small,
+.biofingerDrawerEvent small {
+  color: #738197;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.biofingerDrawerFacts strong,
+.biofingerDrawerDevice strong,
+.biofingerDrawerCurrentMapping strong,
+.biofingerDrawerSelectedEmployee strong,
+.biofingerDrawerEvent strong {
+  min-width: 0;
+  color: var(--ops-ink);
+  font-size: 0.84rem;
+  font-weight: 850;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.biofingerDrawerDevice,
+.biofingerDrawerCurrentMapping {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 11px;
+  padding: 13px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.biofingerDrawerDevice > span,
+.biofingerDrawerCurrentMapping > span {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 14px;
+  color: var(--blue-ink);
+  background: rgba(34, 174, 202, 0.1);
+}
+
+.biofingerDrawerCurrentMapping.mapped > span {
+  color: #087f5b;
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.biofingerDrawerDevice > div,
+.biofingerDrawerCurrentMapping > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.biofingerDrawerSelectField {
+  gap: 7px;
+}
+
+.biofingerDrawerSelectField > span {
+  color: #627089;
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+.biofingerDrawerSelectedEmployee {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 11px;
+  border: 1px solid rgba(16, 185, 129, 0.18);
+  border-radius: 13px;
+  background: rgba(240, 253, 244, 0.6);
+}
+
+.biofingerDrawerSelectedEmployee small {
+  justify-self: end;
+}
+
+.biofingerDrawerNotice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 9px;
+  padding: 11px 12px;
+  border-radius: 14px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  line-height: 1.36;
+}
+
+.biofingerDrawerNotice.warning {
+  color: #92400e;
+  background: rgba(245, 158, 11, 0.11);
+}
+
+.biofingerDrawerNotice.danger {
+  color: #be123c;
+  background: rgba(244, 63, 94, 0.1);
+}
+
+.biofingerDrawerEvents {
+  display: grid;
+  gap: 8px;
+}
+
+.biofingerDrawerEvent {
+  display: grid;
+  grid-template-columns: minmax(82px, 0.66fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+  padding: 8px 11px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 13px;
+  background: rgba(248, 250, 252, 0.68);
+}
+
+.biofingerDrawerEvent small {
+  justify-self: end;
+}
+
+.biofingerDrawerEmpty {
+  display: block;
+  padding: 16px;
+  border: 1px dashed rgba(148, 163, 184, 0.28);
+  border-radius: 14px;
+  color: #738197;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.biofingerDrawerActions {
+  display: grid;
+  flex: 0 0 auto;
+  grid-template-columns: 1fr auto auto auto;
+  gap: 9px;
+  padding: 16px 30px 22px;
+  border-top: 1px solid rgba(148, 163, 184, 0.18);
+  background: #ffffff;
+}
+
+.biofingerDrawerActions .secondaryButton,
+.biofingerDrawerActions .primaryButton {
+  min-height: 42px;
+  border-radius: 14px;
+  padding-inline: 14px;
+}
+
+.biofingerDeviceRegistryRow > .secondaryButton {
+  width: 92px;
+  min-height: 38px;
+  align-self: center;
+  justify-content: center;
+  padding: 0 12px;
+  border-radius: 14px;
+}
+
+.biofingerDeviceDialog {
+  display: flex;
+  width: min(720px, calc(100vw - 48px));
+  max-height: calc(100dvh - 48px);
+  flex-direction: column;
+  border-radius: 30px;
+  background: rgba(255, 255, 255, 0.98);
+}
+
+.biofingerDeviceDialog .dialogCompactHeader {
+  flex: 0 0 auto;
+  padding: 24px 28px 18px;
+  border-bottom: 1px solid var(--ops-line);
+}
+
+.dialogEyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--blue-ink);
+  font-size: 0.72rem;
+  font-weight: 850;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.biofingerDeviceDialog .dialogCompactHeader h2 {
+  margin: 10px 0 0;
+  color: var(--ops-ink);
+  font-size: 1.32rem;
+  font-weight: 880;
+  letter-spacing: 0;
+}
+
+.biofingerDeviceDialog .dialogCompactHeader p {
+  margin: 7px 0 0;
+  color: var(--ops-muted);
+  font-size: 0.84rem;
+  font-weight: 650;
+}
+
+.biofingerDeviceDialogBody {
+  display: grid;
+  gap: 15px;
+  padding: 20px 28px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.biofingerDeviceDialog .formField {
+  gap: 8px;
+}
+
+.biofingerDeviceDialog .formField > span {
+  color: #738197;
+  font-size: 0.76rem;
+  font-weight: 780;
+}
+
+.biofingerDeviceFacts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.biofingerDeviceFacts div {
+  display: grid;
+  gap: 5px;
+  min-height: 70px;
+  padding: 13px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 16px;
+  background: rgba(248, 250, 252, 0.72);
+}
+
+.biofingerDeviceFacts span {
+  color: #738197;
+  font-size: 0.72rem;
+  font-weight: 760;
+}
+
+.biofingerDeviceFacts strong {
+  min-width: 0;
+  color: var(--ops-ink);
+  font-size: 0.85rem;
+  font-weight: 820;
+  overflow-wrap: anywhere;
+}
+
+.biofingerDeviceDialogActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 28px 24px;
+  border-top: 1px solid var(--ops-line);
+  background: #ffffff;
+}
+
 .dateFilterControl {
   display: grid;
   grid-template-columns: auto auto minmax(148px, 1fr);
@@ -1238,6 +2441,180 @@ button {
   color: var(--ink);
   font-size: var(--font-ui);
   font-weight: 650;
+}
+
+.foundationSelect {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+.foundationSelectButton {
+  display: grid;
+  width: 100%;
+  min-height: var(--ops-control-h);
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  border: 1px solid rgba(15, 23, 42, 0.13);
+  border-radius: var(--ops-radius-sm);
+  background: #ffffff;
+  color: var(--ink);
+  font-size: var(--font-ui);
+  font-weight: 760;
+  text-align: left;
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.02);
+  cursor: pointer;
+  transition: border-color 160ms ease, box-shadow 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.foundationSelectButton:hover:not(:disabled) {
+  border-color: rgba(34, 174, 202, 0.34);
+  color: var(--blue-ink);
+}
+
+.foundationSelectButton:focus-visible,
+.foundationSelectButton[aria-expanded="true"] {
+  border-color: rgba(34, 174, 202, 0.66);
+  box-shadow: var(--ring), 0 10px 24px -20px rgba(15, 23, 42, 0.5);
+  outline: 0;
+}
+
+.foundationSelectChevron {
+  color: #526179;
+  transition: transform 160ms ease;
+}
+
+.foundationSelectButton[aria-expanded="true"] .foundationSelectChevron {
+  transform: rotate(180deg);
+}
+
+.foundationSelectButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.foundationSelectValue {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.foundationSelectValue.placeholder {
+  color: #7c8ca3;
+}
+
+.foundationSelectMenu {
+  z-index: 2600;
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: var(--ops-radius-sm);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 24px 56px -24px rgba(15, 23, 42, 0.42), 0 8px 22px -16px rgba(15, 23, 42, 0.26);
+  backdrop-filter: blur(14px) saturate(150%);
+}
+
+.foundationSelectSearch {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  gap: 9px;
+  padding: 0 11px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 14px;
+  color: #66758b;
+  background: #f8fafc;
+}
+
+.foundationSelectSearch input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  color: var(--ops-ink);
+  background: transparent;
+  font-size: 0.84rem;
+  font-weight: 680;
+}
+
+.foundationSelectList {
+  display: grid;
+  gap: 3px;
+  max-height: min(310px, calc(100vh - 190px));
+  overflow: auto;
+  padding-right: 2px;
+  scrollbar-width: thin;
+}
+
+.foundationSelectOption {
+  display: grid;
+  width: 100%;
+  min-height: 44px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 13px;
+  background: transparent;
+  color: var(--ops-ink);
+  text-align: left;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease, transform 150ms ease;
+}
+
+.foundationSelectOption:hover:not(:disabled),
+.foundationSelectOption.selected {
+  color: var(--blue-ink);
+  background: rgba(34, 174, 202, 0.09);
+}
+
+.foundationSelectOption:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.foundationSelectOption:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.foundationSelectOptionText {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.foundationSelectOptionText strong,
+.foundationSelectOptionText small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.foundationSelectOptionText strong {
+  font-size: 0.84rem;
+  font-weight: 780;
+}
+
+.foundationSelectOptionText small {
+  color: #738197;
+  font-size: 0.74rem;
+  font-weight: 650;
+}
+
+.foundationSelectEmpty {
+  display: block;
+  padding: 16px 10px;
+  color: #738197;
+  font-size: 0.82rem;
+  font-weight: 680;
+  text-align: center;
 }
 
 .uiSelectTrigger {
@@ -5833,6 +7210,26 @@ button {
   }
 }
 
+@keyframes biofingerDrawerIn {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes foundationSkeletonShimmer {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(120%);
+  }
+}
+
 @keyframes bottomSheetIn {
   from {
     opacity: 0;
@@ -8413,6 +9810,68 @@ button {
 
   .filterPanel {
     grid-template-columns: 1fr;
+  }
+
+  .biofingerFilterPanel,
+  .biofingerScopePanel,
+  .biofingerScopePicker,
+  .biofingerScopeStats,
+  .biofingerSyncSteps,
+  .biofingerDeviceRegistryRow,
+  .biofingerDeviceFacts,
+  .biofingerDrawerFacts,
+  .biofingerDrawerEvent,
+  .biofingerDrawerActions {
+    grid-template-columns: 1fr;
+  }
+
+  .dialogPanel.biofingerMappingDrawer {
+    width: 100vw;
+  }
+
+  .biofingerDrawerHeader,
+  .biofingerDrawerBody,
+  .biofingerDrawerActions {
+    padding-inline: 18px;
+  }
+
+  .biofingerDrawerEvent small,
+  .biofingerDrawerSelectedEmployee small {
+    justify-self: start;
+  }
+
+  .biofingerDeviceDialog {
+    width: min(100%, calc(100vw - 28px));
+  }
+
+  .biofingerDeviceDialogActions {
+    display: grid;
+  }
+
+  .biofingerSyncHeader {
+    display: grid;
+  }
+
+  .biofingerScopeStats div {
+    border-right: 0;
+    border-bottom: 1px solid rgba(15, 23, 42, 0.07);
+  }
+
+  .biofingerScopeStats div:last-child {
+    border-bottom: 0;
+  }
+
+  .biofingerSyncStep {
+    border-right: 0;
+    border-bottom: 1px solid rgba(15, 23, 42, 0.07);
+  }
+
+  .biofingerSyncStep:last-child {
+    border-bottom: 0;
+  }
+
+  .biofingerSyncStep::after {
+    display: none;
   }
 
   .filterField,

@@ -16,6 +16,12 @@
     "android:open": "capacitor open android",
     "android:apk": "export JAVA_HOME=\"${JAVA_HOME:-$PWD/.local-tools/jdk/current}\"; export ANDROID_HOME=\"${ANDROID_HOME:-$PWD/.local-tools/android-sdk}\"; npm run build && capacitor sync android && cd android && ./gradlew assembleDebug",
     "db:migrate": "node scripts/run-migration.mjs",
+    "biofinger:sync": "python scripts/biofinger_sync.py",
+    "biofinger:import": "node scripts/import-biofinger-jsonl.mjs",
+    "biofinger:adms": "node scripts/biofinger_adms_receiver.mjs",
+    "biofinger:env:setup": "powershell -ExecutionPolicy Bypass -File scripts/setup-biofinger-env.ps1",
+    "biofinger:auto": "powershell -ExecutionPolicy Bypass -File scripts/run-biofinger-sync.ps1",
+    "biofinger:task:register": "powershell -ExecutionPolicy Bypass -File scripts/register-biofinger-sync-task.ps1",
     "supabase:functions:deploy": "supabase functions deploy app-users --project-ref heibhxempixiiqmalyuf && supabase functions deploy role-permissions --project-ref heibhxempixiiqmalyuf && supabase functions deploy attendance-review --project-ref heibhxempixiiqmalyuf && supabase functions deploy field-attendance --project-ref heibhxempixiiqmalyuf && supabase functions deploy overtime-review --project-ref heibhxempixiiqmalyuf && supabase functions deploy payroll-processing --project-ref heibhxempixiiqmalyuf && supabase functions deploy employee-face-profiles --project-ref heibhxempixiiqmalyuf"
   },
   "dependencies": {
@@ -32,6 +38,7 @@
     "@capacitor/cli": "^8.5.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "@types/trusted-types": "^2.0.7",
     "@vitejs/plugin-react": "^5.2.0",
     "pg": "^8.22.0",
     "typescript": "^5.6.3",

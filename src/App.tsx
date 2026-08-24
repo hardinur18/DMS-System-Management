@@ -22,6 +22,7 @@ import {
   ExternalLink,
   FileBarChart,
   FileCheck2,
+  Fingerprint,
   KeyRound,
   LayoutDashboard,
   LocateFixed,
@@ -62,6 +63,8 @@ import dmsLogo from "../assets/brand/dms-logo.jpeg"
 import { CategoryTabs } from "./components/category-tabs"
 import { ConfirmDialog } from "./components/confirm-dialog"
 import { ClickableTableRow, DataTablePagination, RowActionButton, RowActionMenu, RowActionMenuItem, TableNumberCell, TableText } from "./components/data-table"
+import { FoundationSkeleton, FoundationTableSkeletonRows } from "./components/foundation-loading"
+import { FoundationSelect } from "./components/foundation-select"
 import { DateFormField, SegmentedFormField, SelectFormField, SwitchFormField, TextFormField } from "./components/form-field"
 import { AutoStatusBadge, StatusBadge as UiStatusBadge } from "./components/status-badge"
 import {
@@ -78,6 +81,7 @@ type ViewId =
   | "dashboard"
   | "attendance-live"
   | "kiosk-mode"
+  | "biofinger"
   | "employees"
   | "attendance-requests"
   | "attendance-review"
@@ -390,7 +394,7 @@ interface EmployeePortalData {
   recentLogs: EmployeePortalAttendanceLog[]
 }
 
-type ModuleViewId = Exclude<ViewId, "dashboard" | "kiosk-mode" | "master-data" | "users" | "role-permission" | "audit-log" | "profile">
+type ModuleViewId = Exclude<ViewId, "dashboard" | "kiosk-mode" | "biofinger" | "master-data" | "users" | "role-permission" | "audit-log" | "profile">
 
 interface ModuleKpi {
   label: string
@@ -546,6 +550,101 @@ interface AttendanceKioskOption {
   requireLocation: boolean
   status: string
 }
+
+type BiofingerLinkStatus = "pending" | "active" | "ignored" | "inactive"
+type BiofingerImportStatus = "pending" | "mapped" | "converted" | "ignored" | "error"
+type BiofingerWorkspaceTab = "overview" | "devices" | "mapping" | "events"
+
+const BIOFINGER_ALL_DEVICES = "all"
+
+interface BiofingerDeviceRow {
+  id: string
+  deviceCode: string
+  name: string
+  vendor: string
+  model: string
+  serialNumber: string
+  macAddress: string
+  ipAddress: string
+  port: number
+  workLocationId: string
+  workLocationName: string
+  status: string
+  lastSeenAt: string
+  lastSyncAt: string
+  syncCursorAt: string
+  notes: string
+}
+
+interface BiofingerWorkLocationOption {
+  id: string
+  code: string
+  name: string
+  isActive: boolean
+}
+
+interface BiofingerEmployeeOption {
+  id: string
+  employeeCode: string
+  fullName: string
+  status: EmployeeStatus
+}
+
+interface BiofingerUserLinkRow {
+  id: string
+  attendanceDeviceId: string
+  employeeId: string
+  employeeCode: string
+  employeeName: string
+  externalUserId: string
+  externalUid: number | null
+  externalName: string
+  privilege: number | null
+  status: BiofingerLinkStatus
+  matchedBy: string
+  lastSeenAt: string
+  lastSyncedAt: string
+  notes: string
+}
+
+interface BiofingerEventRow {
+  id: string
+  attendanceDeviceId: string
+  externalUserId: string
+  employeeId: string
+  employeeCode: string
+  employeeName: string
+  deviceEventAt: string
+  attendanceDate: string
+  punch: number | null
+  statusCode: number | null
+  normalizedEventType: "check_in" | "check_out" | "unknown"
+  importStatus: BiofingerImportStatus
+  sourceHash: string
+}
+
+interface BiofingerData {
+  schemaReady: boolean
+  devices: BiofingerDeviceRow[]
+  links: BiofingerUserLinkRow[]
+  events: BiofingerEventRow[]
+  eventCount: number
+  employees: BiofingerEmployeeOption[]
+  workLocations: BiofingerWorkLocationOption[]
+}
+
+type BiofingerDataUpdater = BiofingerData | ((current: BiofingerData) => BiofingerData)
+
+function createEmptyBiofingerData(): BiofingerData {
+  return { schemaReady: true, devices: [], links: [], events: [], eventCount: 0, employees: [], workLocations: [] }
+}
+
+let biofingerDataCache: BiofingerData | null = null
+let biofingerSelectedDeviceCache = ""
+let biofingerActiveTabCache: BiofingerWorkspaceTab = "overview"
+let biofingerStatusFilterCache: "all" | BiofingerLinkStatus = "all"
+let biofingerSearchTermCache = ""
+let biofingerPageSizeCache = 25
 
 interface FaceEnrollmentTarget {
   id?: string
@@ -769,6 +868,7 @@ const navItems: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, group: "" },
   { id: "attendance-live", label: "Live Absensi", icon: Megaphone, group: "Operasional" },
   { id: "kiosk-mode", label: "Kiosk Mode", icon: ScanLine, group: "Operasional" },
+  { id: "biofinger", label: "Biofinger", icon: Fingerprint, group: "Operasional" },
   { id: "employees", label: "Karyawan", icon: UserPlus, group: "Operasional" },
   { id: "attendance-requests", label: "Rekap Absensi", icon: CalendarCheck2, group: "Operasional" },
   { id: "attendance-review", label: "Approval", icon: ClipboardList, group: "Operasional" },
@@ -787,6 +887,7 @@ const productionReadyViews = new Set<ViewId>([
   "dashboard",
   "attendance-live",
   "kiosk-mode",
+  "biofinger",
   "employees",
   "attendance-requests",
   "attendance-review",
@@ -803,6 +904,7 @@ const viewPermissionMap: Partial<Record<ViewId, string>> = {
   dashboard: "dashboard.view",
   "attendance-live": "attendance.view",
   "kiosk-mode": "attendance.view",
+  biofinger: "biofinger.view",
   employees: "employees.view",
   "attendance-requests": "attendance.review",
   "attendance-review": "attendance.review",
@@ -818,6 +920,7 @@ const viewPermissionMap: Partial<Record<ViewId, string>> = {
 
 function canAccessView(profile: AppAccessProfile, view: ViewId) {
   if (view === "profile") return true
+  if (view === "biofinger") return profile.permissions.includes("biofinger.view") || profile.permissions.includes("attendance.view")
   const permission = viewPermissionMap[view]
   return !permission || profile.permissions.includes(permission)
 }
@@ -864,6 +967,8 @@ const permissionDefinitions: PermissionDefinition[] = [
   { key: "employees.manage", label: "Kelola Karyawan", group: "Karyawan", description: "Tambah, ubah, nonaktifkan, dan hapus data karyawan." },
   { key: "attendance.view", label: "Lihat Absensi", group: "Absensi", description: "Monitoring absensi GPS dan face verification." },
   { key: "attendance.review", label: "Review Absensi", group: "Absensi", description: "Approve/reject absensi bermasalah." },
+  { key: "biofinger.view", label: "Lihat Biofinger", group: "Absensi", description: "Melihat device, user mesin, dan raw event fingerprint." },
+  { key: "biofinger.manage", label: "Kelola Biofinger", group: "Absensi", description: "Mapping user Biofinger ke karyawan DMS dan proses import." },
   { key: "overtime.view", label: "Lihat Lembur", group: "Payroll", description: "Melihat kandidat lembur dari check-out melewati jam shift." },
   { key: "overtime.review", label: "Review Lembur", group: "Payroll", description: "Approve/reject lembur sebelum masuk payroll." },
   { key: "payroll.view", label: "Lihat Payroll", group: "Payroll", description: "Melihat cycle 26 hari, draft gaji, bonus, dan potongan." },
@@ -886,16 +991,18 @@ const rolePermissionMap: Record<(typeof dmsRoles)[number], string[]> = {
     "employees.manage",
     "attendance.view",
     "attendance.review",
+    "biofinger.view",
+    "biofinger.manage",
     "overtime.view",
     "overtime.review",
     "payroll.view",
     "cash_advance.manage",
     "audit_logs.view",
   ],
-  Finance: ["dashboard.view", "master_data.view", "employees.view", "overtime.view", "overtime.review", "payroll.view", "payroll.process", "cash_advance.manage", "audit_logs.view"],
-  Supervisor: ["dashboard.view", "users.view", "employees.view", "attendance.view", "attendance.review", "overtime.view", "master_data.view"],
-  Admin: ["dashboard.view", "users.view", "users.create", "master_data.view", "master_data.manage", "employees.view", "employees.manage", "attendance.view", "audit_logs.view"],
-  Viewer: ["dashboard.view", "users.view", "master_data.view", "employees.view", "attendance.view", "payroll.view"],
+  Finance: ["dashboard.view", "master_data.view", "employees.view", "attendance.view", "biofinger.view", "overtime.view", "overtime.review", "payroll.view", "payroll.process", "cash_advance.manage", "audit_logs.view"],
+  Supervisor: ["dashboard.view", "users.view", "employees.view", "attendance.view", "attendance.review", "biofinger.view", "overtime.view", "master_data.view"],
+  Admin: ["dashboard.view", "users.view", "users.create", "master_data.view", "master_data.manage", "employees.view", "employees.manage", "attendance.view", "attendance.review", "biofinger.view", "biofinger.manage", "audit_logs.view"],
+  Viewer: ["dashboard.view", "users.view", "master_data.view", "employees.view", "attendance.view", "biofinger.view", "payroll.view"],
 }
 
 const statusLabel: Record<AttendanceStatus, string> = {
@@ -1938,6 +2045,10 @@ function formatCurrency(value: number) {
   }).format(value)
 }
 
+function formatNumber(value: number) {
+  return new Intl.NumberFormat("id-ID").format(value)
+}
+
 function formatPayrollDate(value: string) {
   if (!value) return "-"
   return new Intl.DateTimeFormat("id-ID", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(value))
@@ -2259,11 +2370,11 @@ function PageHeader({
   )
 }
 
-function InlinePageStats({ items }: { items: string[] }) {
+function InlinePageStats({ items }: { items: ReactNode[] }) {
   return (
     <div className="inlinePageStats" aria-label="Ringkasan data">
-      {items.map((item) => (
-        <span key={item}>{item}</span>
+      {items.map((item, index) => (
+        <span key={index}>{item}</span>
       ))}
     </div>
   )
@@ -3607,6 +3718,247 @@ function isMissingKioskEmployeeSchema(error: unknown) {
   ]
 
   return optionalKioskSchemaHints.some((hint) => message.includes(hint))
+}
+
+function isMissingBiofingerSchema(error: unknown) {
+  const errorObject = error && typeof error === "object" ? error as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown } : null
+  const message = `${String(errorObject?.code || "")} ${String(errorObject?.message || "")} ${String(errorObject?.details || "")} ${String(errorObject?.hint || "")}`.toLowerCase()
+  const schemaHints = [
+    "attendance_devices",
+    "employee_attendance_device_links",
+    "biofinger_attendance_events",
+    "biofinger_event_id",
+    "attendance_device_id",
+    "schema cache",
+    "relation",
+  ]
+
+  return schemaHints.some((hint) => message.includes(hint))
+}
+
+function mapBiofingerLinkStatus(value: unknown): BiofingerLinkStatus {
+  if (value === "active" || value === "ignored" || value === "inactive") return value
+  return "pending"
+}
+
+function mapBiofingerImportStatus(value: unknown): BiofingerImportStatus {
+  if (value === "mapped" || value === "converted" || value === "ignored" || value === "error") return value
+  return "pending"
+}
+
+function mapBiofingerEventType(value: unknown): "check_in" | "check_out" | "unknown" {
+  if (value === "check_in" || value === "check_out") return value
+  return "unknown"
+}
+
+function formatBiofingerEventType(value: BiofingerEventRow["normalizedEventType"]) {
+  if (value === "check_in") return "Masuk"
+  if (value === "check_out") return "Pulang"
+  return "Unknown"
+}
+
+function BiofingerEventText({ type }: { type: BiofingerEventRow["normalizedEventType"] }) {
+  return <span className={clsx("biofingerEventText", type)}>{formatBiofingerEventType(type)}</span>
+}
+
+function BiofingerDeviceStatusText({ status }: { status: string }) {
+  const normalized = status.trim().toLowerCase()
+  const tone = normalized === "active" ? "active" : normalized === "maintenance" ? "maintenance" : normalized === "inactive" ? "inactive" : "neutral"
+  return <span className={clsx("biofingerDeviceStatusText", tone)}>{status || "unknown"}</span>
+}
+
+function BiofingerLinkStatusText({ status }: { status: BiofingerLinkStatus }) {
+  return <span className={clsx("biofingerLinkStatusText", status)}>{status}</span>
+}
+
+function BiofingerEmployeeMappingChip({
+  row,
+  disabled,
+  onClick,
+}: {
+  row: BiofingerUserLinkRow
+  disabled: boolean
+  onClick: () => void
+}) {
+  const mapped = Boolean(row.employeeId)
+
+  return (
+    <button className={clsx("biofingerMappingChip", mapped && "mapped")} type="button" disabled={disabled} data-row-action="true" onClick={onClick}>
+      <span className="biofingerMappingChipIcon">{mapped ? <UserRoundCheck size={15} /> : <UserPlus size={15} />}</span>
+      <span className="biofingerMappingChipCopy">
+        <strong>{mapped ? row.employeeName || "Karyawan dipilih" : "Belum mapped"}</strong>
+        <small>{mapped ? row.employeeCode || "Mapped manual" : `Klik untuk mapping User ID ${row.externalUserId}`}</small>
+      </span>
+    </button>
+  )
+}
+
+async function loadBiofingerData(): Promise<BiofingerData> {
+  const [devicesResult, linksResult, eventsResult, employeesResult, workLocationsResult] = await Promise.all([
+    supabase
+      .from("attendance_devices")
+      .select("id, device_code, name, vendor, model, serial_number, mac_address, ip_address, port, work_location_id, status, last_seen_at, last_sync_at, sync_cursor_at, notes")
+      .order("name", { ascending: true }),
+    supabase
+      .from("employee_attendance_device_links")
+      .select("id, employee_id, attendance_device_id, external_user_id, external_uid, external_name, privilege, status, matched_by, last_seen_at, last_synced_at, notes")
+      .order("external_user_id", { ascending: true }),
+    supabase
+      .from("biofinger_attendance_events")
+      .select("id, attendance_device_id, external_user_id, employee_id, device_event_at, attendance_date, punch, status_code, normalized_event_type, import_status, source_hash", { count: "exact" })
+      .order("device_event_at", { ascending: false })
+      .limit(200),
+    supabase
+      .from("employees")
+      .select("id, employee_code, full_name, status")
+      .is("deleted_at", null)
+      .order("employee_code", { ascending: true }),
+    supabase
+      .from("work_locations")
+      .select("id, code, name, is_active")
+      .order("sort_order", { ascending: true })
+      .order("code", { ascending: true }),
+  ])
+
+  const biofingerSchemaError = devicesResult.error || linksResult.error || eventsResult.error
+  if (biofingerSchemaError) {
+    if (isMissingBiofingerSchema(biofingerSchemaError)) {
+      return { schemaReady: false, devices: [], links: [], events: [], eventCount: 0, employees: [], workLocations: [] }
+    }
+    throw biofingerSchemaError
+  }
+  if (employeesResult.error) throw employeesResult.error
+  if (workLocationsResult.error) throw workLocationsResult.error
+
+  const employees = (employeesResult.data || []).map((row: Record<string, unknown>) => ({
+    id: String(row.id || ""),
+    employeeCode: String(row.employee_code || ""),
+    fullName: String(row.full_name || ""),
+    status: mapEmployeeStatus(row.status),
+  }))
+  const employeeMap = new Map(employees.map((employee) => [employee.id, employee]))
+  const workLocations = (workLocationsResult.data || []).map((row: Record<string, unknown>) => ({
+    id: String(row.id || ""),
+    code: String(row.code || ""),
+    name: String(row.name || ""),
+    isActive: row.is_active !== false,
+  }))
+  const workLocationMap = new Map(workLocations.map((location) => [location.id, location]))
+
+  const devices = (devicesResult.data || []).map((row: Record<string, unknown>) => ({
+    workLocationId: String(row.work_location_id || ""),
+    workLocationName: workLocationMap.get(String(row.work_location_id || ""))?.name || "",
+    id: String(row.id || ""),
+    deviceCode: String(row.device_code || ""),
+    name: String(row.name || row.device_code || "Biofinger"),
+    vendor: String(row.vendor || "Biofinger"),
+    model: String(row.model || ""),
+    serialNumber: String(row.serial_number || ""),
+    macAddress: String(row.mac_address || ""),
+    ipAddress: String(row.ip_address || ""),
+    port: Number(row.port || 4370),
+    status: String(row.status || "active"),
+    lastSeenAt: String(row.last_seen_at || ""),
+    lastSyncAt: String(row.last_sync_at || ""),
+    syncCursorAt: String(row.sync_cursor_at || ""),
+    notes: String(row.notes || ""),
+  }))
+
+  const links = (linksResult.data || []).map((row: Record<string, unknown>) => {
+    const employeeId = row.employee_id ? String(row.employee_id) : ""
+    const employee = employeeMap.get(employeeId)
+
+    return {
+      id: String(row.id || ""),
+      attendanceDeviceId: String(row.attendance_device_id || ""),
+      employeeId,
+      employeeCode: employee?.employeeCode || "",
+      employeeName: employee?.fullName || "",
+      externalUserId: String(row.external_user_id || ""),
+      externalUid: row.external_uid === null || row.external_uid === undefined ? null : Number(row.external_uid),
+      externalName: String(row.external_name || ""),
+      privilege: row.privilege === null || row.privilege === undefined ? null : Number(row.privilege),
+      status: mapBiofingerLinkStatus(row.status),
+      matchedBy: String(row.matched_by || "manual"),
+      lastSeenAt: String(row.last_seen_at || ""),
+      lastSyncedAt: String(row.last_synced_at || ""),
+      notes: String(row.notes || ""),
+    }
+  })
+
+  const events = (eventsResult.data || []).map((row: Record<string, unknown>) => {
+    const employeeId = row.employee_id ? String(row.employee_id) : ""
+    const employee = employeeMap.get(employeeId)
+
+    return {
+      id: String(row.id || ""),
+      attendanceDeviceId: String(row.attendance_device_id || ""),
+      externalUserId: String(row.external_user_id || ""),
+      employeeId,
+      employeeCode: employee?.employeeCode || "",
+      employeeName: employee?.fullName || "",
+      deviceEventAt: String(row.device_event_at || ""),
+      attendanceDate: String(row.attendance_date || ""),
+      punch: row.punch === null || row.punch === undefined ? null : Number(row.punch),
+      statusCode: row.status_code === null || row.status_code === undefined ? null : Number(row.status_code),
+      normalizedEventType: mapBiofingerEventType(row.normalized_event_type),
+      importStatus: mapBiofingerImportStatus(row.import_status),
+      sourceHash: String(row.source_hash || ""),
+    }
+  })
+
+  return { schemaReady: true, devices, links, events, eventCount: eventsResult.count ?? events.length, employees, workLocations }
+}
+
+async function updateBiofingerUserLink(row: BiofingerUserLinkRow, employeeId: string, status?: BiofingerLinkStatus) {
+  const nextStatus = status || (employeeId ? "active" : "pending")
+  if (nextStatus === "active" && !employeeId) {
+    throw new Error("Pilih karyawan DMS sebelum mengaktifkan mapping Biofinger.")
+  }
+
+  const { error } = await supabase
+    .from("employee_attendance_device_links")
+    .update({
+      employee_id: employeeId || null,
+      status: nextStatus,
+      matched_by: "manual",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", row.id)
+
+  if (error) throw error
+
+  const eventPayload = nextStatus === "active"
+    ? { employee_id: employeeId, import_status: "mapped", updated_at: new Date().toISOString() }
+    : { employee_id: null, import_status: nextStatus === "ignored" ? "ignored" : "pending", updated_at: new Date().toISOString() }
+
+  const eventUpdate = await supabase
+    .from("biofinger_attendance_events")
+    .update(eventPayload)
+    .eq("attendance_device_id", row.attendanceDeviceId)
+    .eq("external_user_id", row.externalUserId)
+    .in("import_status", ["pending", "mapped", "ignored"])
+
+  if (eventUpdate.error) throw eventUpdate.error
+}
+
+async function updateBiofingerDeviceRegistry(deviceId: string, values: { name: string; workLocationId: string; status: string }) {
+  const name = values.name.trim()
+  if (!name) {
+    throw new Error("Nama display device wajib diisi.")
+  }
+
+  const { error } = await supabase
+    .from("attendance_devices")
+    .update({
+      name,
+      work_location_id: values.workLocationId || null,
+      status: values.status || "active",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", deviceId)
+
+  if (error) throw error
 }
 
 function mapEmployeeRow(
@@ -5965,6 +6317,1052 @@ function KioskModePage({ activeView }: { activeView: ViewId }) {
 
       <ToastViewport toast={toast} onClose={() => setToast(null)} />
     </OperationalPageShell>
+  )
+}
+
+function BiofingerPage({ activeView, profile }: { activeView: ViewId; profile: AppAccessProfile }) {
+  const [data, setData] = useState<BiofingerData>(() => biofingerDataCache ?? createEmptyBiofingerData())
+  const [selectedDeviceId, setSelectedDeviceId] = useState(() => biofingerSelectedDeviceCache || (biofingerDataCache ? biofingerDataCache.devices.length === 1 ? biofingerDataCache.devices[0].id : BIOFINGER_ALL_DEVICES : ""))
+  const [activeBiofingerTab, setActiveBiofingerTab] = useState<BiofingerWorkspaceTab>(() => biofingerActiveTabCache)
+  const [statusFilter, setStatusFilter] = useState<"all" | BiofingerLinkStatus>(() => biofingerStatusFilterCache)
+  const [searchTerm, setSearchTerm] = useState(() => biofingerSearchTermCache)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(() => biofingerPageSizeCache)
+  const [editingDeviceId, setEditingDeviceId] = useState("")
+  const [mappingDetailId, setMappingDetailId] = useState("")
+  const [mappingDraftEmployeeId, setMappingDraftEmployeeId] = useState("")
+  const [deviceFormValues, setDeviceFormValues] = useState({ name: "", workLocationId: "", status: "active" })
+  const [loading, setLoading] = useState(() => !biofingerDataCache)
+  const [savingId, setSavingId] = useState("")
+  const [savingDeviceId, setSavingDeviceId] = useState("")
+  const [errorMessage, setErrorMessage] = useState("")
+  const [toast, setToast] = useState<ToastMessage | null>(null)
+  const canManage = hasPermission(profile, "biofinger.manage") || hasPermission(profile, "attendance.review") || hasPermission(profile, "employees.manage")
+
+  const showToast = (message: Omit<ToastMessage, "id">) => {
+    setToast({ id: Date.now(), ...message })
+  }
+
+  const commitBiofingerData = useCallback((next: BiofingerDataUpdater) => {
+    setData((current) => {
+      const resolved = typeof next === "function" ? (next as (current: BiofingerData) => BiofingerData)(current) : next
+      biofingerDataCache = resolved
+      return resolved
+    })
+  }, [])
+
+  const refreshData = useCallback(async () => {
+    setLoading(true)
+    setErrorMessage("")
+
+    try {
+      const nextData = await loadBiofingerData()
+      commitBiofingerData(nextData)
+      setSelectedDeviceId((current) => {
+        if (current === BIOFINGER_ALL_DEVICES) return current
+        if (current && nextData.devices.some((device) => device.id === current)) return current
+        return nextData.devices.length === 1 ? nextData.devices[0].id : BIOFINGER_ALL_DEVICES
+      })
+    } catch (error) {
+      setErrorMessage(getFriendlySupabaseError(error, "Data Biofinger belum bisa dimuat."))
+    } finally {
+      setLoading(false)
+    }
+  }, [commitBiofingerData])
+
+  useEffect(() => {
+    if (biofingerDataCache) return
+    void refreshData()
+  }, [refreshData])
+
+  useEffect(() => {
+    biofingerSelectedDeviceCache = selectedDeviceId
+  }, [selectedDeviceId])
+
+  useEffect(() => {
+    biofingerActiveTabCache = activeBiofingerTab
+  }, [activeBiofingerTab])
+
+  useEffect(() => {
+    biofingerStatusFilterCache = statusFilter
+  }, [statusFilter])
+
+  useEffect(() => {
+    biofingerSearchTermCache = searchTerm
+  }, [searchTerm])
+
+  useEffect(() => {
+    biofingerPageSizeCache = pageSize
+  }, [pageSize])
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [searchTerm, selectedDeviceId, statusFilter, pageSize])
+
+  const biofingerDataLoading = loading && !biofingerDataCache
+  const biofingerDataValue = (value: ReactNode, className?: string) => biofingerDataLoading ? <FoundationSkeleton className={className} /> : value
+  const biofingerInlineLoadingStats = (count: number) => Array.from({ length: count }).map((_, index) => <FoundationSkeleton className={clsx("inline", index === 0 && "wide")} key={index} />)
+  const normalizedTerm = searchTerm.trim().toLowerCase()
+  const isAllDeviceSelected = !selectedDeviceId || selectedDeviceId === BIOFINGER_ALL_DEVICES
+  const selectedDevice = data.devices.find((device) => device.id === selectedDeviceId)
+  const editingDevice = data.devices.find((device) => device.id === editingDeviceId) || null
+  const mappingDetailRow = data.links.find((row) => row.id === mappingDetailId) || null
+  const mappingDetailDevice = mappingDetailRow ? data.devices.find((device) => device.id === mappingDetailRow.attendanceDeviceId) || null : null
+  const mappingDraftEmployee = data.employees.find((employee) => employee.id === mappingDraftEmployeeId) || null
+  const mappingEmployeeConflict = mappingDetailRow && mappingDraftEmployeeId
+    ? data.links.find((row) => row.id !== mappingDetailRow.id && row.employeeId === mappingDraftEmployeeId && row.status === "active") || null
+    : null
+  const deviceLinks = !isAllDeviceSelected ? data.links.filter((row) => row.attendanceDeviceId === selectedDeviceId) : data.links
+  const filteredLinks = deviceLinks.filter((row) => {
+    const matchesStatus = statusFilter === "all" || row.status === statusFilter
+    const searchableText = [
+      row.externalUserId,
+      row.externalName,
+      row.employeeCode,
+      row.employeeName,
+      row.status,
+    ].join(" ").toLowerCase()
+
+    return matchesStatus && (!normalizedTerm || searchableText.includes(normalizedTerm))
+  })
+  const safePageSize = Math.min(50, Math.max(1, pageSize))
+  const pageCount = Math.max(1, Math.ceil(filteredLinks.length / safePageSize))
+  const safeCurrentPage = Math.min(Math.max(1, currentPage), pageCount)
+  const paginatedLinks = filteredLinks.slice((safeCurrentPage - 1) * safePageSize, safeCurrentPage * safePageSize)
+  const deviceEvents = !isAllDeviceSelected ? data.events.filter((event) => event.attendanceDeviceId === selectedDeviceId) : data.events
+  const mappingDetailEvents = mappingDetailRow
+    ? data.events.filter((event) => event.attendanceDeviceId === mappingDetailRow.attendanceDeviceId && event.externalUserId === mappingDetailRow.externalUserId).slice(0, 6)
+    : []
+  const activeLinks = data.links.filter((row) => row.status === "active" && row.employeeId).length
+  const pendingLinks = data.links.filter((row) => row.status === "pending").length
+  const ignoredLinks = data.links.filter((row) => row.status === "ignored").length
+  const scopedActiveLinks = deviceLinks.filter((row) => row.status === "active" && row.employeeId).length
+  const scopedPendingLinks = deviceLinks.filter((row) => row.status === "pending").length
+  const mappedEvents = data.events.filter((event) => event.employeeId).length
+  const totalRawEvents = data.eventCount || data.events.length
+  const syncSteps = [
+    {
+      label: "Baca Mesin",
+      value: biofingerDataValue(isAllDeviceSelected ? `${formatNumber(data.devices.length)} device ready` : selectedDevice ? `${selectedDevice.ipAddress}:${selectedDevice.port}` : "Belum pilih", "stepValue"),
+      description: "Local agent AT-301",
+      icon: Fingerprint,
+      complete: !biofingerDataLoading && data.devices.length > 0,
+    },
+    {
+      label: "Import User",
+      value: biofingerDataValue(`${formatNumber(deviceLinks.length)} ID synced`, "stepValue"),
+      description: biofingerDataValue(`${formatNumber(scopedPendingLinks)} menunggu mapping`, "caption"),
+      icon: Download,
+      complete: !biofingerDataLoading && deviceLinks.length > 0,
+    },
+    {
+      label: "Mapping DMS",
+      value: biofingerDataValue(`${formatNumber(scopedActiveLinks)} mapped`, "stepValue"),
+      description: "User ID ke karyawan",
+      icon: UserRoundCheck,
+      complete: !biofingerDataLoading && scopedActiveLinks > 0,
+    },
+    {
+      label: "Staging Event",
+      value: biofingerDataValue(`${formatNumber(isAllDeviceSelected ? totalRawEvents : deviceEvents.length)} log`, "stepValue"),
+      description: "Siap proses absensi",
+      icon: Database,
+      complete: !biofingerDataLoading && (isAllDeviceSelected ? totalRawEvents : deviceEvents.length) > 0,
+    },
+  ]
+  const deviceOptions = biofingerDataLoading
+    ? [{ value: "", label: <FoundationSkeleton className="selectValue" />, searchLabel: "memuat device", disabled: true }]
+    : [
+      { value: BIOFINGER_ALL_DEVICES, label: "Semua device", searchLabel: "semua device", description: `${formatNumber(data.devices.length)} device registry` },
+      ...data.devices.map((device) => ({
+        value: device.id,
+        label: device.name,
+        searchLabel: `${device.name} ${device.workLocationName} ${device.serialNumber} ${device.deviceCode} ${device.ipAddress}`,
+        description: `${device.workLocationName || "Belum pilih lokasi"} / ${device.serialNumber || device.deviceCode}`,
+      })),
+    ]
+  const workLocationOptions = [
+    { value: "", label: "Belum pilih lokasi", searchLabel: "belum pilih lokasi" },
+    ...data.workLocations.map((location) => ({
+      value: location.id,
+      label: location.name,
+      searchLabel: `${location.code} ${location.name}`,
+      description: `${location.code || "LOC"} / ${location.isActive ? "Aktif" : "Nonaktif"}`,
+    })),
+  ]
+  const deviceStatusOptions = [
+    { value: "active", label: "Active", searchLabel: "active aktif" },
+    { value: "maintenance", label: "Maintenance", searchLabel: "maintenance perawatan" },
+    { value: "inactive", label: "Inactive", searchLabel: "inactive nonaktif" },
+  ]
+  const statusOptions: Array<{ value: "all" | BiofingerLinkStatus; label: string; searchLabel: string }> = [
+    { value: "all", label: "Semua Status", searchLabel: "semua status" },
+    { value: "pending", label: "Pending", searchLabel: "pending belum mapped" },
+    { value: "active", label: "Active", searchLabel: "active mapped" },
+    { value: "ignored", label: "Ignored", searchLabel: "ignored diabaikan" },
+    { value: "inactive", label: "Inactive", searchLabel: "inactive nonaktif" },
+  ]
+  const employeeOptions = [
+    { value: "", label: "Pilih karyawan DMS", searchLabel: "pilih karyawan dms" },
+    ...data.employees.map((employee) => ({
+      value: employee.id,
+      label: (
+        <span className="biofingerEmployeeOptionLabel">
+          <span className="biofingerEmployeeOptionHeader">
+            <span className="biofingerEmployeeOptionName">{employee.fullName}</span>
+            <span className={clsx("biofingerEmployeeOptionStatus", employee.status === "active" && "active")} title={employee.status === "active" ? "Aktif" : employee.status} aria-label={employee.status === "active" ? "Aktif" : employee.status} />
+          </span>
+          <small>{employee.employeeCode}</small>
+        </span>
+      ),
+      searchLabel: `${employee.employeeCode} ${employee.fullName} ${employee.status}`,
+    })),
+  ]
+  const biofingerTabs: Array<{ id: BiofingerWorkspaceTab; label: string; icon: LucideIcon; count?: ReactNode }> = [
+    { id: "overview", label: "Overview", icon: LayoutDashboard, count: biofingerDataLoading ? <FoundationSkeleton className="tabCount" /> : data.devices.length },
+    { id: "devices", label: "Device", icon: Fingerprint, count: biofingerDataLoading ? <FoundationSkeleton className="tabCount" /> : data.devices.length },
+    { id: "mapping", label: "Mapping User", icon: UserRoundCheck, count: biofingerDataLoading ? <FoundationSkeleton className="tabCount" /> : deviceLinks.length },
+    { id: "events", label: "Raw Event", icon: Database, count: biofingerDataLoading ? <FoundationSkeleton className="tabCount" /> : isAllDeviceSelected ? totalRawEvents : deviceEvents.length },
+  ]
+  const selectedDeviceTitle = biofingerDataLoading ? "Memuat data device" : selectedDevice ? selectedDevice.name : "Semua device Biofinger"
+  const selectedDeviceSubtitle = biofingerDataLoading
+    ? "Device registry dari Supabase"
+    : selectedDevice
+    ? `${selectedDevice.workLocationName || "Belum pilih lokasi"} / ${selectedDevice.ipAddress}:${selectedDevice.port} / ${selectedDevice.status}`
+    : `${formatNumber(data.devices.length)} device registry / ${formatNumber(data.workLocations.length)} lokasi kerja`
+
+  const resetFilters = () => {
+    setSearchTerm("")
+    setStatusFilter("all")
+    setSelectedDeviceId(BIOFINGER_ALL_DEVICES)
+  }
+
+  const openDeviceDialog = (device: BiofingerDeviceRow) => {
+    setEditingDeviceId(device.id)
+    setDeviceFormValues({
+      name: device.name,
+      workLocationId: device.workLocationId,
+      status: device.status,
+    })
+  }
+
+  const closeDeviceDialog = () => {
+    if (savingDeviceId) return
+    setEditingDeviceId("")
+  }
+
+  const openMappingDrawer = (row: BiofingerUserLinkRow) => {
+    setMappingDetailId(row.id)
+    setMappingDraftEmployeeId(row.employeeId)
+  }
+
+  const closeMappingDrawer = () => {
+    if (savingId) return
+    setMappingDetailId("")
+    setMappingDraftEmployeeId("")
+  }
+
+  const handleDeviceSave = async () => {
+    if (!editingDevice) return
+    setSavingDeviceId(editingDevice.id)
+    try {
+      await updateBiofingerDeviceRegistry(editingDevice.id, deviceFormValues)
+      const nextName = deviceFormValues.name.trim()
+      const workLocation = data.workLocations.find((location) => location.id === deviceFormValues.workLocationId)
+      commitBiofingerData((current) => ({
+        ...current,
+        devices: current.devices.map((device) => device.id === editingDevice.id
+          ? {
+            ...device,
+            name: nextName,
+            workLocationId: deviceFormValues.workLocationId,
+            workLocationName: workLocation?.name || "",
+            status: deviceFormValues.status || "active",
+          }
+          : device),
+      }))
+      showToast({
+        tone: "success",
+        title: "Device diperbarui",
+        description: `${nextName} sudah tersimpan di registry Biofinger.`,
+      })
+      setEditingDeviceId("")
+    } catch (error) {
+      showToast({ tone: "error", title: "Gagal update device", description: getFriendlySupabaseError(error, "Device registry belum bisa disimpan.") })
+    } finally {
+      setSavingDeviceId("")
+    }
+  }
+
+  const handleEmployeeChange = async (row: BiofingerUserLinkRow, employeeId: string) => {
+    setSavingId(row.id)
+    try {
+      await updateBiofingerUserLink(row, employeeId, employeeId ? "active" : "pending")
+      const employee = data.employees.find((item) => item.id === employeeId)
+      const nextStatus: BiofingerLinkStatus = employeeId ? "active" : "pending"
+      const syncedAt = new Date().toISOString()
+      commitBiofingerData((current) => ({
+        ...current,
+        links: current.links.map((link) => link.id === row.id
+          ? {
+            ...link,
+            employeeId,
+            employeeCode: employee?.employeeCode || "",
+            employeeName: employee?.fullName || "",
+            status: nextStatus,
+            matchedBy: "manual",
+            lastSyncedAt: syncedAt,
+          }
+          : link),
+        events: current.events.map((event) => event.attendanceDeviceId === row.attendanceDeviceId && event.externalUserId === row.externalUserId
+          ? {
+            ...event,
+            employeeId,
+            employeeCode: employee?.employeeCode || "",
+            employeeName: employee?.fullName || "",
+            importStatus: employeeId ? "mapped" : "pending",
+          }
+          : event),
+      }))
+      showToast({
+        tone: "success",
+        title: employeeId ? "Mapping aktif" : "Mapping dikosongkan",
+        description: employeeId ? `${row.externalUserId} sudah terhubung ke karyawan DMS.` : `${row.externalUserId} kembali ke pending.`,
+      })
+      return true
+    } catch (error) {
+      showToast({ tone: "error", title: "Gagal mapping Biofinger", description: getFriendlySupabaseError(error, "Mapping belum bisa disimpan.") })
+      return false
+    } finally {
+      setSavingId("")
+    }
+  }
+
+  const handleMappingDrawerSubmit = async () => {
+    if (!mappingDetailRow) return
+    if (mappingEmployeeConflict) {
+      showToast({
+        tone: "error",
+        title: "Karyawan sudah terpakai",
+        description: `${mappingDraftEmployee?.fullName || "Karyawan ini"} sudah aktif di User ID ${mappingEmployeeConflict.externalUserId}.`,
+      })
+      return
+    }
+
+    const saved = await handleEmployeeChange(mappingDetailRow, mappingDraftEmployeeId)
+    if (saved) closeMappingDrawer()
+  }
+
+  const handleStatusChange = async (row: BiofingerUserLinkRow, status: BiofingerLinkStatus) => {
+    setSavingId(row.id)
+    try {
+      const employeeId = status === "active" ? row.employeeId : ""
+      await updateBiofingerUserLink(row, employeeId, status)
+      const nextImportStatus: BiofingerImportStatus = status === "ignored" ? "ignored" : employeeId ? "mapped" : "pending"
+      const syncedAt = new Date().toISOString()
+      commitBiofingerData((current) => ({
+        ...current,
+        links: current.links.map((link) => link.id === row.id
+          ? {
+            ...link,
+            employeeId,
+            employeeCode: status === "active" ? link.employeeCode : "",
+            employeeName: status === "active" ? link.employeeName : "",
+            status,
+            matchedBy: "manual",
+            lastSyncedAt: syncedAt,
+          }
+          : link),
+        events: current.events.map((event) => event.attendanceDeviceId === row.attendanceDeviceId && event.externalUserId === row.externalUserId
+          ? {
+            ...event,
+            employeeId,
+            employeeCode: status === "active" ? event.employeeCode : "",
+            employeeName: status === "active" ? event.employeeName : "",
+            importStatus: nextImportStatus,
+          }
+          : event),
+      }))
+      showToast({
+        tone: "success",
+        title: status === "ignored" ? "User diabaikan" : "Status mapping diperbarui",
+        description: `${row.externalUserId} sekarang ${status}.`,
+      })
+    } catch (error) {
+      showToast({ tone: "error", title: "Gagal ubah status", description: getFriendlySupabaseError(error, "Status mapping belum bisa disimpan.") })
+    } finally {
+      setSavingId("")
+    }
+  }
+
+  return (
+    <OperationalPageShell>
+      <PageHeader
+        activeView={activeView}
+        subtitle="Mapping user fingerprint AT-301 ke master karyawan DMS sebelum raw event dikonversi ke absensi payroll."
+        actions={
+          <button className="secondaryButton" type="button" onClick={() => void refreshData()} disabled={loading}>
+            <RefreshCcw size={17} />
+            Refresh Data
+          </button>
+        }
+        meta={
+          <InlinePageStats
+            items={biofingerDataLoading
+              ? biofingerInlineLoadingStats(4)
+              : [
+                `${formatNumber(data.links.length)} ID mesin`,
+                `${formatNumber(activeLinks)} mapped`,
+                `${formatNumber(pendingLinks)} pending`,
+                `${formatNumber(totalRawEvents)} raw event`,
+              ]}
+          />
+        }
+      />
+
+      {!data.schemaReady ? (
+        <OperationalTableCard>
+          <TableState
+            title="Migration Biofinger belum diterapkan"
+            description="Apply migration 20260824000100_biofinger_attendance_foundation.sql sebelum mapping device bisa dipakai di Supabase."
+            icon={Fingerprint}
+            tone="danger"
+          />
+        </OperationalTableCard>
+      ) : (
+        <>
+          <OperationalKpiGrid>
+            <OperationalKpiCard label="Total Device" value={biofingerDataValue(data.devices.length, "metricValue")} detail="Registry mesin AT-301" icon={Fingerprint} tone="blue" />
+            <OperationalKpiCard label="User Mapped" value={biofingerDataValue(activeLinks, "metricValue")} detail="Siap jadi absensi" icon={UserRoundCheck} tone="green" />
+            <OperationalKpiCard label="Belum Mapping" value={biofingerDataValue(pendingLinks, "metricValue")} detail="Perlu pilih karyawan" icon={AlertTriangle} tone="amber" />
+            <OperationalKpiCard label="Event Staging" value={biofingerDataValue(formatNumber(totalRawEvents), "metricValue wide")} detail={!biofingerDataLoading && ignoredLinks ? `${ignoredLinks} user ignored` : "Raw log mesin"} icon={FileBarChart} tone="violet" />
+          </OperationalKpiGrid>
+
+          <section className="surfacePanel biofingerScopePanel">
+            <div className="biofingerScopeIntro">
+              <span className="biofingerPanelLabel">Filter Aktif</span>
+              <div className="biofingerScopePicker">
+                <div className="biofingerDeviceIdentity">
+                  <span><Fingerprint size={17} /></span>
+                  <div>
+                    <strong>{selectedDeviceTitle}</strong>
+                    <small>{selectedDeviceSubtitle}</small>
+                  </div>
+                </div>
+                <FoundationSelect
+                  label="Filter device Biofinger"
+                  value={selectedDeviceId}
+                  options={deviceOptions}
+                  disabled={biofingerDataLoading}
+                  onChange={setSelectedDeviceId}
+                />
+              </div>
+            </div>
+            <div className="biofingerScopeStats">
+              <div>
+                <span>Lokasi Kerja</span>
+                <strong>{biofingerDataValue(selectedDevice ? selectedDevice.workLocationName || "Belum pilih lokasi" : `${formatNumber(data.workLocations.length)} lokasi`, "scopeValue")}</strong>
+              </div>
+              <div>
+                <span>Mapping Scope</span>
+                <strong>{biofingerDataValue(`${formatNumber(scopedActiveLinks)} / ${formatNumber(deviceLinks.length)} active`, "scopeValue")}</strong>
+              </div>
+              <div>
+                <span>Pending</span>
+                <strong>{biofingerDataValue(`${formatNumber(scopedPendingLinks)} user`, "scopeValue short")}</strong>
+              </div>
+              <div>
+                <span>Raw Event</span>
+                <strong>{biofingerDataValue(`${formatNumber(isAllDeviceSelected ? totalRawEvents : deviceEvents.length)} log`, "scopeValue short")}</strong>
+              </div>
+            </div>
+            {selectedDevice && (
+              <button className="secondaryButton" type="button" disabled={!canManage} onClick={() => openDeviceDialog(selectedDevice)}>
+                <Settings size={16} />
+                Setting Device
+              </button>
+            )}
+          </section>
+
+          <div className="biofingerWorkspaceTabs">
+            <CategoryTabs
+              items={biofingerTabs}
+              activeId={activeBiofingerTab}
+              ariaLabel="Area kerja Biofinger"
+              onChange={setActiveBiofingerTab}
+            />
+          </div>
+
+          {activeBiofingerTab === "overview" && (
+            <section className="surfacePanel biofingerSyncPanel">
+              <div className="biofingerSyncHeader">
+                <div>
+                  <h2>Sync Pipeline</h2>
+                  <p>{biofingerDataLoading ? "Menunggu data sinkronisasi dari Supabase." : selectedDevice ? `${selectedDevice.name} / ${selectedDevice.ipAddress}:${selectedDevice.port} / last sync ${formatUserDateTime(selectedDevice.lastSyncAt, "Belum sync")}` : `${formatNumber(data.devices.length)} device / sample terakhir / last sync mengikuti masing-masing device.`}</p>
+                </div>
+                <InlinePageStats items={biofingerDataLoading ? biofingerInlineLoadingStats(2) : [`${formatNumber(mappedEvents)} sample mapped`, `${formatNumber(data.events.length)} sample tampil`]} />
+              </div>
+              <div className="biofingerSyncSteps">
+                {syncSteps.map((step) => {
+                  const Icon = step.icon
+                  return (
+                    <div className={clsx("biofingerSyncStep", step.complete && "complete")} key={step.label}>
+                      <span><Icon size={17} /></span>
+                      <div>
+                        <small>{step.label}</small>
+                        <strong>{step.value}</strong>
+                        <em>{step.description}</em>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </section>
+          )}
+
+          {activeBiofingerTab === "devices" && (
+            <section className="surfacePanel biofingerDeviceRegistryPanel">
+              <div className="biofingerSyncHeader">
+                <div>
+                  <h2>Device Registry</h2>
+                  <p>Nama display, lokasi kerja, koneksi, dan status mesin Biofinger.</p>
+                </div>
+                <InlinePageStats items={biofingerDataLoading ? biofingerInlineLoadingStats(2) : [`${data.devices.length} device`, `${data.workLocations.length} lokasi kerja`]} />
+              </div>
+              <div className="biofingerDeviceRegistryList">
+                {biofingerDataLoading && (
+                  Array.from({ length: 2 }).map((_, index) => (
+                    <div className="biofingerDeviceRegistryRow biofingerDeviceRegistrySkeletonRow" key={index} aria-hidden="true">
+                      <div className="biofingerDeviceIdentity">
+                        <FoundationSkeleton className="avatar" />
+                        <div className="biofingerDeviceSkeletonCopy">
+                          <FoundationSkeleton className="text wide" />
+                          <FoundationSkeleton className="text medium" />
+                        </div>
+                      </div>
+                      <FoundationSkeleton className="text medium" />
+                      <FoundationSkeleton className="text medium" />
+                      <FoundationSkeleton className="status" />
+                      <FoundationSkeleton className="button" />
+                    </div>
+                  ))
+                )}
+                {!biofingerDataLoading && data.devices.length === 0 && (
+                  <div className="biofingerDeviceRegistryRow biofingerDataLoadingRow">
+                    <div className="biofingerDeviceIdentity">
+                      <span><Search size={17} /></span>
+                      <div>
+                        <strong>Belum ada device</strong>
+                        <small>Tambahkan registry Biofinger AT-301 sebelum mapping user.</small>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {!biofingerDataLoading && data.devices.map((device) => (
+                  <div className="biofingerDeviceRegistryRow" key={device.id}>
+                    <div className="biofingerDeviceIdentity">
+                      <span><Fingerprint size={17} /></span>
+                      <div>
+                        <strong>{device.name}</strong>
+                        <small>{device.deviceCode} / {device.model || "AT-301"} / {device.serialNumber || "Serial belum ada"}</small>
+                      </div>
+                    </div>
+                    <div className="biofingerRegistryMeta">
+                      <span>Lokasi Kerja</span>
+                      <strong>{device.workLocationName || "Belum pilih lokasi"}</strong>
+                    </div>
+                    <div className="biofingerRegistryMeta">
+                      <span>Koneksi</span>
+                      <strong>{device.ipAddress}:{device.port}</strong>
+                    </div>
+                    <div className="biofingerRegistryMeta">
+                      <span>Status</span>
+                      <BiofingerDeviceStatusText status={device.status} />
+                    </div>
+                    <button className="secondaryButton" type="button" disabled={!canManage} onClick={() => openDeviceDialog(device)}>
+                      <Pencil size={16} />
+                      Edit
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {activeBiofingerTab === "mapping" && (
+            <>
+              <OperationalFilterPanel className="biofingerFilterPanel">
+                <div className="filterField">
+                  <label>Search</label>
+                  <div className="uiInput inputWithIcon compact">
+                    <Search size={16} />
+                    <input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Cari User ID, nama mesin, atau karyawan..." />
+                  </div>
+                </div>
+                <div className="filterField">
+                  <label>Status</label>
+                  <FoundationSelect
+                    label="Status mapping Biofinger"
+                    value={statusFilter}
+                    options={statusOptions}
+                    searchable={false}
+                    onChange={(nextValue) => setStatusFilter(nextValue as typeof statusFilter)}
+                  />
+                </div>
+                <button className="secondaryButton" type="button" onClick={resetFilters}>Reset Filter</button>
+              </OperationalFilterPanel>
+
+              <OperationalTableCard>
+                <div className="tableHeader">
+                  <div>
+                    <h2>Mapping User Biofinger</h2>
+                    <p>{biofingerDataLoading ? "Mengambil user mesin dan mapping karyawan dari Supabase." : selectedDevice ? `${selectedDevice.ipAddress}:${selectedDevice.port} / ${selectedDevice.status} / sync ${formatUserDateTime(selectedDevice.lastSyncAt, "Belum sync")}` : "Semua device / mapping user mesin ke karyawan DMS."}</p>
+                  </div>
+                  <InlinePageStats items={biofingerDataLoading ? biofingerInlineLoadingStats(3) : [`${filteredLinks.length} user`, `${scopedActiveLinks} active`, `${scopedPendingLinks} pending`]} />
+                </div>
+                <div className="tableScroller uiDataTableScroller uiDataTableHasColumns biofingerMappingTableScroller">
+                  <table>
+                    <colgroup>
+                      <col className="tableNumberColumn" />
+                      <col style={{ width: "170px" }} />
+                      <col style={{ width: "260px" }} />
+                      <col style={{ width: "320px" }} />
+                      <col style={{ width: "130px" }} />
+                      <col style={{ width: "160px" }} />
+                      <col className="tableActionColumn" />
+                    </colgroup>
+                    <thead>
+                      <tr>
+                        <th className="tableNumberHeader">No</th>
+                        <th>User ID Mesin</th>
+                        <th>Nama di Mesin</th>
+                        <th>Karyawan DMS</th>
+                        <th>Status</th>
+                        <th>Sync</th>
+                        <th className="tableActionHeader">Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {biofingerDataLoading && <FoundationTableSkeletonRows colSpan={7} columns={7} />}
+                      {!biofingerDataLoading && errorMessage && (
+                        <tr>
+                          <td className="tableStateCell" colSpan={7}>
+                            <TableState title="Gagal memuat Biofinger" description={errorMessage} icon={AlertTriangle} tone="danger" />
+                          </td>
+                        </tr>
+                      )}
+                      {!biofingerDataLoading && !errorMessage && filteredLinks.length === 0 && (
+                        <tr>
+                          <td className="tableStateCell" colSpan={7}>
+                            <TableState title="Belum ada user Biofinger" description="Import user AT-301 ke staging sebelum mapping ke karyawan DMS." icon={Search} />
+                          </td>
+                        </tr>
+                      )}
+                      {!biofingerDataLoading && !errorMessage && paginatedLinks.map((row, index) => (
+                        <ClickableTableRow key={row.id} label={`Mapping Biofinger ${row.externalUserId}`} onOpen={() => openMappingDrawer(row)}>
+                          <td className="tableNumberCell"><TableNumberCell value={(safeCurrentPage - 1) * safePageSize + index + 1} /></td>
+                          <td><TableText primary={row.externalUserId} secondary={row.externalUid === null ? "UID -" : `UID ${row.externalUid}`} /></td>
+                          <td><TableText primary={row.externalName || "Tanpa nama"} secondary={row.privilege === 14 ? "Admin device" : `Privilege ${row.privilege ?? "-"}`} /></td>
+                          <td>
+                            <BiofingerEmployeeMappingChip row={row} disabled={!canManage || savingId === row.id} onClick={() => openMappingDrawer(row)} />
+                          </td>
+                          <td><BiofingerLinkStatusText status={row.status} /></td>
+                          <td><TableText primary={formatUserDateTime(row.lastSyncedAt, "-")} secondary={row.matchedBy} /></td>
+                          <td className="tableActionCell">
+                            <div className="rowActions">
+                              <RowActionMenu label={`Aksi mapping ${row.externalUserId}`}>
+                                <RowActionMenuItem disabled={!canManage || savingId === row.id} onClick={() => openMappingDrawer(row)}>
+                                  <Pencil size={15} />
+                                  Edit Mapping
+                                </RowActionMenuItem>
+                              </RowActionMenu>
+                            </div>
+                          </td>
+                        </ClickableTableRow>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {!biofingerDataLoading && (
+                  <DataTablePagination page={safeCurrentPage} pageSize={safePageSize} totalRows={filteredLinks.length} onPageChange={setCurrentPage} onPageSizeChange={setPageSize} />
+                )}
+              </OperationalTableCard>
+            </>
+          )}
+
+          {activeBiofingerTab === "events" && (
+            <OperationalTableCard>
+              <div className="tableHeader">
+                <div>
+                  <h2>Raw Event Terakhir</h2>
+                  <p>{biofingerDataLoading ? "Mengambil sample event fingerprint dari Supabase." : selectedDevice ? `${selectedDevice.name} / event sample dari mesin ini.` : "Semua device / 200 sample terakhir dari staging Biofinger."}</p>
+                </div>
+                <InlinePageStats items={biofingerDataLoading ? biofingerInlineLoadingStats(2) : [`${deviceEvents.length} event sample`, selectedDevice?.deviceCode || "Semua device"]} />
+              </div>
+              <div className="tableScroller uiDataTableScroller uiDataTableHasColumns">
+                <table>
+                  <colgroup>
+                    <col className="tableNumberColumn" />
+                    <col style={{ width: "150px" }} />
+                    <col style={{ width: "190px" }} />
+                    <col style={{ width: "240px" }} />
+                    <col style={{ width: "150px" }} />
+                    <col style={{ width: "140px" }} />
+                    <col style={{ width: "150px" }} />
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      <th className="tableNumberHeader">No</th>
+                      <th>User ID</th>
+                      <th>Waktu Mesin</th>
+                      <th>Karyawan</th>
+                      <th>Event</th>
+                      <th>Status Import</th>
+                      <th>Hash</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {biofingerDataLoading && <FoundationTableSkeletonRows colSpan={7} columns={7} />}
+                    {!biofingerDataLoading && errorMessage && (
+                      <tr>
+                        <td className="tableStateCell" colSpan={7}>
+                          <TableState title="Gagal memuat raw event" description={errorMessage} icon={AlertTriangle} tone="danger" />
+                        </td>
+                      </tr>
+                    )}
+                    {!biofingerDataLoading && !errorMessage && deviceEvents.length === 0 && (
+                      <tr>
+                        <td className="tableStateCell" colSpan={7}>
+                          <TableState title="Belum ada raw event" description="Import JSONL AT-301 ke staging untuk melihat event fingerprint." icon={Fingerprint} />
+                        </td>
+                      </tr>
+                    )}
+                    {!biofingerDataLoading && !errorMessage && deviceEvents.map((event, index) => (
+                      <tr key={event.id}>
+                        <td className="tableNumberCell"><TableNumberCell value={index + 1} /></td>
+                        <td><TableText primary={event.externalUserId} secondary={`Punch ${event.punch ?? "-"}`} /></td>
+                        <td><TableText primary={formatUserDateTime(event.deviceEventAt, "-")} secondary={event.attendanceDate} /></td>
+                        <td><TableText primary={event.employeeName || "Belum mapped"} secondary={event.employeeCode || "Pending"} /></td>
+                        <td><TableText primary={<BiofingerEventText type={event.normalizedEventType} />} secondary={`Status ${event.statusCode ?? "-"}`} /></td>
+                        <td><ModuleStatusBadge value={event.importStatus} /></td>
+                        <td><TableText primary={formatShortId(event.sourceHash, "HASH")} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </OperationalTableCard>
+          )}
+        </>
+      )}
+
+      <BiofingerDeviceDialog
+        device={editingDevice}
+        values={deviceFormValues}
+        workLocationOptions={workLocationOptions}
+        statusOptions={deviceStatusOptions}
+        saving={Boolean(savingDeviceId)}
+        canManage={canManage}
+        onChange={(values) => setDeviceFormValues((current) => ({ ...current, ...values }))}
+        onClose={closeDeviceDialog}
+        onSubmit={() => void handleDeviceSave()}
+      />
+
+      <BiofingerMappingDrawer
+        row={mappingDetailRow}
+        device={mappingDetailDevice}
+        events={mappingDetailEvents}
+        employeeOptions={employeeOptions}
+        selectedEmployeeId={mappingDraftEmployeeId}
+        selectedEmployee={mappingDraftEmployee}
+        conflictRow={mappingEmployeeConflict}
+        saving={Boolean(mappingDetailRow && savingId === mappingDetailRow.id)}
+        canManage={canManage}
+        onChangeEmployee={setMappingDraftEmployeeId}
+        onClose={closeMappingDrawer}
+        onSubmit={() => void handleMappingDrawerSubmit()}
+        onIgnore={(row) => {
+          setMappingDraftEmployeeId("")
+          void handleStatusChange(row, "ignored")
+        }}
+        onPending={(row) => {
+          setMappingDraftEmployeeId("")
+          void handleStatusChange(row, "pending")
+        }}
+      />
+
+      <ToastViewport toast={toast} onClose={() => setToast(null)} />
+    </OperationalPageShell>
+  )
+}
+
+function BiofingerMappingDrawer({
+  row,
+  device,
+  events,
+  employeeOptions,
+  selectedEmployeeId,
+  selectedEmployee,
+  conflictRow,
+  saving,
+  canManage,
+  onChangeEmployee,
+  onClose,
+  onSubmit,
+  onIgnore,
+  onPending,
+}: {
+  row: BiofingerUserLinkRow | null
+  device: BiofingerDeviceRow | null
+  events: BiofingerEventRow[]
+  employeeOptions: Array<{ value: string; label: ReactNode; searchLabel: string }>
+  selectedEmployeeId: string
+  selectedEmployee: BiofingerEmployeeOption | null
+  conflictRow: BiofingerUserLinkRow | null
+  saving: boolean
+  canManage: boolean
+  onChangeEmployee: (employeeId: string) => void
+  onClose: () => void
+  onSubmit: () => void
+  onIgnore: (row: BiofingerUserLinkRow) => void
+  onPending: (row: BiofingerUserLinkRow) => void
+}) {
+  if (!row) return null
+
+  const nextStatus: BiofingerLinkStatus = selectedEmployeeId ? "active" : "pending"
+  const hasMappingChange = selectedEmployeeId !== row.employeeId || row.status !== nextStatus
+  const replaceWarning = Boolean(row.employeeId && selectedEmployeeId && selectedEmployeeId !== row.employeeId)
+  const saveDisabled = !canManage || saving || Boolean(conflictRow) || !hasMappingChange || (!selectedEmployeeId && !row.employeeId)
+
+  return createPortal(
+    <div className="dialogBackdrop biofingerDrawerBackdrop" role="presentation" onMouseDown={saving ? undefined : onClose}>
+      <aside
+        className="dialogPanel biofingerMappingDrawer"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="biofinger-mapping-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <button className="iconButton dialogClose" type="button" aria-label="Tutup detail mapping" disabled={saving} onClick={onClose}>
+          <X size={18} />
+        </button>
+
+        <div className="biofingerDrawerHeader">
+          <span className="dialogEyebrow"><UserRoundCheck size={15} /> Mapping Control</span>
+          <h2 id="biofinger-mapping-title">User ID {row.externalUserId}</h2>
+          <p>{row.externalName || "Tanpa nama di mesin"} / {device?.name || "Device belum terdaftar"}</p>
+        </div>
+
+        <div className="biofingerDrawerBody">
+          <section className="biofingerDrawerSection">
+            <h3>Identitas Mesin</h3>
+            <div className="biofingerDrawerFacts">
+              <div>
+                <span>User ID</span>
+                <strong>{row.externalUserId}</strong>
+              </div>
+              <div>
+                <span>UID</span>
+                <strong>{row.externalUid ?? "-"}</strong>
+              </div>
+              <div>
+                <span>Privilege</span>
+                <strong>{row.privilege === 14 ? "Admin device" : row.privilege ?? "-"}</strong>
+              </div>
+              <div>
+                <span>Status</span>
+                <BiofingerLinkStatusText status={row.status} />
+              </div>
+            </div>
+          </section>
+
+          <section className="biofingerDrawerSection">
+            <h3>Device</h3>
+            <div className="biofingerDrawerDevice">
+              <span><Fingerprint size={16} /></span>
+              <div>
+                <strong>{device?.name || "Device tidak ditemukan"}</strong>
+                <small>{device ? `${device.ipAddress}:${device.port} / ${device.workLocationName || "Belum pilih lokasi"}` : row.attendanceDeviceId}</small>
+              </div>
+            </div>
+          </section>
+
+          <section className="biofingerDrawerSection">
+            <h3>Mapping DMS</h3>
+            <div className={clsx("biofingerDrawerCurrentMapping", row.employeeId && "mapped")}>
+              <span>{row.employeeId ? <UserRoundCheck size={17} /> : <UserPlus size={17} />}</span>
+              <div>
+                <strong>{row.employeeId ? row.employeeName || "Karyawan dipilih" : "Belum terhubung ke karyawan"}</strong>
+                <small>{row.employeeId ? row.employeeCode || "Mapped manual" : "Pilih karyawan lalu simpan untuk mengaktifkan mapping."}</small>
+              </div>
+            </div>
+
+            <label className="formField biofingerDrawerSelectField">
+              <span>Karyawan DMS</span>
+              <FoundationSelect
+                label={`Pilih karyawan untuk User ID ${row.externalUserId}`}
+                value={selectedEmployeeId}
+                options={employeeOptions}
+                disabled={!canManage || saving}
+                onChange={onChangeEmployee}
+              />
+            </label>
+
+            {selectedEmployee && (
+              <div className="biofingerDrawerSelectedEmployee">
+                <span className="biofingerEmployeeOptionStatus active" />
+                <strong>{selectedEmployee.fullName}</strong>
+                <small>{selectedEmployee.employeeCode}</small>
+              </div>
+            )}
+
+            {replaceWarning && (
+              <div className="biofingerDrawerNotice warning">
+                <AlertTriangle size={16} />
+                <span>Mapping akan diganti dari {row.employeeName || row.employeeCode} ke {selectedEmployee?.fullName || "karyawan baru"}.</span>
+              </div>
+            )}
+
+            {conflictRow && (
+              <div className="biofingerDrawerNotice danger">
+                <AlertCircle size={16} />
+                <span>Karyawan ini sudah aktif di User ID {conflictRow.externalUserId}. Pilih karyawan lain atau kosongkan mapping lama dulu.</span>
+              </div>
+            )}
+          </section>
+
+          <section className="biofingerDrawerSection">
+            <h3>Event Terakhir</h3>
+            <div className="biofingerDrawerEvents">
+              {events.length === 0 && <span className="biofingerDrawerEmpty">Belum ada sample event untuk User ID ini.</span>}
+              {events.map((event) => (
+                <div className="biofingerDrawerEvent" key={event.id}>
+                  <BiofingerEventText type={event.normalizedEventType} />
+                  <strong>{formatUserDateTime(event.deviceEventAt, "-")}</strong>
+                  <small>Raw {event.importStatus}</small>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+
+        <div className="biofingerDrawerActions">
+          <button className="secondaryButton" type="button" disabled={saving} onClick={onClose}>Batal</button>
+          <button className="secondaryButton" type="button" disabled={!canManage || saving || row.status === "pending"} onClick={() => onPending(row)}>
+            <RotateCcw size={16} />
+            Pending
+          </button>
+          <button className="secondaryButton dangerSoftButton" type="button" disabled={!canManage || saving || row.status === "ignored"} onClick={() => onIgnore(row)}>
+            <Archive size={16} />
+            Ignore
+          </button>
+          <button className="primaryButton" type="button" disabled={saveDisabled} onClick={onSubmit}>
+            <FileCheck2 size={17} />
+            {saving ? "Menyimpan..." : selectedEmployeeId ? "Simpan Mapping" : "Kosongkan Mapping"}
+          </button>
+        </div>
+      </aside>
+    </div>,
+    document.body,
+  )
+}
+
+function BiofingerDeviceDialog({
+  device,
+  values,
+  workLocationOptions,
+  statusOptions,
+  saving,
+  canManage,
+  onChange,
+  onClose,
+  onSubmit,
+}: {
+  device: BiofingerDeviceRow | null
+  values: { name: string; workLocationId: string; status: string }
+  workLocationOptions: Array<{ value: string; label: string; searchLabel: string; description?: string }>
+  statusOptions: Array<{ value: string; label: string; searchLabel: string }>
+  saving: boolean
+  canManage: boolean
+  onChange: (values: Partial<{ name: string; workLocationId: string; status: string }>) => void
+  onClose: () => void
+  onSubmit: () => void
+}) {
+  if (!device) return null
+
+  return (
+    <div className="dialogBackdrop" role="presentation" onMouseDown={saving ? undefined : onClose}>
+      <section
+        className="dialogPanel biofingerDeviceDialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="biofinger-device-dialog-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <button className="iconButton dialogClose" type="button" aria-label="Tutup setting device" disabled={saving} onClick={onClose}>
+          <X size={18} />
+        </button>
+
+        <div className="dialogCompactHeader">
+          <span className="dialogEyebrow"><Fingerprint size={15} /> Device Registry</span>
+          <h2 id="biofinger-device-dialog-title">Edit Device Biofinger</h2>
+          <p>{device.deviceCode} / {device.serialNumber || "Serial belum ada"} / {device.ipAddress}:{device.port}</p>
+        </div>
+
+        <div className="biofingerDeviceDialogBody">
+          <label className="formField">
+            <span>Nama Display</span>
+            <input className="uiInput" value={values.name} disabled={!canManage || saving} onChange={(event) => onChange({ name: event.target.value })} placeholder="Gudang A - AT-301" />
+          </label>
+
+          <label className="formField">
+            <span>Lokasi Kerja</span>
+            <FoundationSelect
+              label={`Lokasi kerja untuk ${device.deviceCode}`}
+              value={values.workLocationId}
+              options={workLocationOptions}
+              disabled={!canManage || saving}
+              onChange={(nextValue) => onChange({ workLocationId: nextValue })}
+            />
+          </label>
+
+          <label className="formField">
+            <span>Status Device</span>
+            <FoundationSelect
+              label={`Status device ${device.deviceCode}`}
+              value={values.status}
+              options={statusOptions}
+              searchable={false}
+              disabled={!canManage || saving}
+              onChange={(nextValue) => onChange({ status: nextValue })}
+            />
+          </label>
+
+          <div className="biofingerDeviceFacts">
+            <div>
+              <span>Model</span>
+              <strong>{device.model || "AT-301"}</strong>
+            </div>
+            <div>
+              <span>MAC</span>
+              <strong>{device.macAddress || "-"}</strong>
+            </div>
+            <div>
+              <span>Last Sync</span>
+              <strong>{formatUserDateTime(device.lastSyncAt, "Belum sync")}</strong>
+            </div>
+          </div>
+        </div>
+
+        <div className="dialogActions biofingerDeviceDialogActions">
+          <button className="secondaryButton" type="button" disabled={saving} onClick={onClose}>Batal</button>
+          <button className="primaryButton" type="button" disabled={!canManage || saving || !values.name.trim()} onClick={onSubmit}>
+            <FileCheck2 size={17} />
+            {saving ? "Menyimpan..." : "Simpan Device"}
+          </button>
+        </div>
+      </section>
+    </div>
   )
 }
 
@@ -13134,6 +14532,8 @@ export function App() {
             <DashboardPage activeView={activeView} />
           ) : activeView === "kiosk-mode" ? (
             <KioskModePage activeView={activeView} />
+          ) : activeView === "biofinger" ? (
+            <BiofingerPage activeView={activeView} profile={accessProfile} />
           ) : activeView === "attendance-live" || activeView === "attendance-requests" || activeView === "attendance-review" || activeView === "field-monitoring" || activeView === "payroll" ? (
             <AttendanceCyclePage activeView={activeView} />
           ) : activeView === "employees" ? (

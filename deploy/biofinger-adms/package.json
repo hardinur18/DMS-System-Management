@@ -1,0 +1,15 @@
+{
+  "name": "dms-biofinger-adms-receiver",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "node biofinger_adms_receiver.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.112.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -115,7 +115,8 @@ Komponen yang perlu dibuat sejak awal:
 - `TableCard`
 - `StatusBadge`
 - `EmptyState`
-- `LoadingSkeleton`
+- `FoundationSkeleton`
+- `FoundationTableSkeletonRows`
 - `ConfirmDialog`
 - `FormDrawer`
 - `DetailDrawer`
@@ -165,6 +166,7 @@ Komponen operasional reusable:
 - Data table memakai `TableText`, `TableNumberCell`, `RowActionMenu`, dan `RowActionMenuItem` di `src/components/data-table.tsx`.
 - Row table yang membuka detail memakai `ClickableTableRow` di `src/components/data-table.tsx`.
 - Pagination table memakai `DataTablePagination` di `src/components/data-table.tsx`.
+- Loading data memakai `FoundationSkeleton` dan `FoundationTableSkeletonRows` di `src/components/foundation-loading.tsx`.
 
 Standar tab kategori:
 
@@ -172,6 +174,26 @@ Standar tab kategori:
 - Mobile memakai horizontal scroll tanpa scrollbar visual.
 - Active state memakai border, soft gradient layer, shadow kecil, dan count badge aktif.
 - Tab tidak boleh dibungkus card tambahan bila hanya berfungsi sebagai selector ringan.
+
+## Modul UI Loading
+
+Pattern resmi loading DMS adalah **skeleton loading** dengan **shimmer effect**.
+
+Komponen foundation:
+
+- `FoundationSkeleton`: placeholder kecil untuk value KPI, inline stats, tab count, dropdown value, text, badge, avatar, dan tombol.
+- `FoundationTableSkeletonRows`: placeholder row table untuk data yang sedang diambil dari Supabase.
+
+Aturan penggunaan:
+
+- Skeleton hanya dipakai untuk bagian yang sumbernya dari database/API, bukan untuk mengganti seluruh UI page.
+- Page shell, header, action button, tab, filter, table header, dan struktur layout harus tetap tampil.
+- Saat first load, value data boleh skeleton shimmer, tetapi layout final tidak boleh hilang.
+- Saat user pindah page lalu kembali, pakai cache state terakhir dan jangan menampilkan loading ulang bila data sudah pernah dimuat.
+- Manual `Refresh Data` boleh mengambil data baru, tetapi jangan mengosongkan UI lama kecuali datanya benar-benar belum pernah ada.
+- Jangan memakai text `...` sebagai loading data. Gunakan skeleton shimmer.
+- Jangan memakai progress bar besar untuk table/dashboard data biasa. Progress bar hanya untuk proses panjang yang punya tahapan nyata.
+- Empty state hanya muncul setelah request selesai dan hasil data memang kosong.
 
 ## Master Data Form Mapping
 
@@ -235,6 +257,21 @@ Page Pengguna & Akses memakai data live Supabase:
 - Page `Profil Saya` wajib menampilkan profile login aktif, role, divisi, security session, reset password, dan tombol logout.
 - Logout tersedia dari sidebar user card, topbar mobile, dan page profil. Jangan bergantung pada tombol floating tersembunyi.
 - Toast sukses/error wajib dipakai untuk feedback user.
+
+## Auth Session Persistence
+
+Pattern resmi auth DMS adalah **session persistence** atau **persistent login**.
+
+Aturan implementasi:
+
+- Supabase client wajib memakai `autoRefreshToken: true`, `persistSession: true`, dan `detectSessionInUrl: true`.
+- App bootstrap wajib memanggil `supabase.auth.getSession()` sebelum memutuskan user perlu login.
+- App wajib subscribe `supabase.auth.onAuthStateChange()` agar sign in, token refresh, password recovery, dan sign out tersinkron.
+- Pindah page/modul tidak boleh mereset `session`, `accessProfile`, atau memaksa login ulang.
+- Refresh browser boleh menampilkan auth loading singkat, lalu restore session jika token masih valid.
+- Sign out adalah satu-satunya aksi user yang menghapus session dan cache profile secara sengaja.
+- Cache access profile boleh dipakai untuk startup UX, tetapi akses/permission tetap harus direfresh dari `app_users` dan `role_permissions`.
+- Session expired, user locked, user tanpa profile, atau status bukan `active` harus diarahkan ke login/access denied sesuai konteks.
 
 Production readiness:
 
