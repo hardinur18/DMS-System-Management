@@ -7496,114 +7496,128 @@ function BiofingerDeviceDialog({
           <X size={18} />
         </button>
 
-        <div className="dialogCompactHeader">
-          <span className="dialogEyebrow"><Fingerprint size={15} /> Device Registry</span>
-          <h2 id="biofinger-device-dialog-title">{dialogTitle}</h2>
-          <p>{isCreate ? "Daftarkan serial mesin dulu, lalu arahkan cloud server di mesin ke receiver DMS." : `${device?.deviceCode || deviceCode} / ${device?.serialNumber || serialNumber || "Serial belum ada"} / ${device ? formatBiofingerConnection(device) : "ADMS Cloud"}`}</p>
+        <div className="dialogCompactHeader biofingerDeviceDialogHeader">
+          <div className="biofingerDeviceDialogHeading">
+            <span className="dialogEyebrow"><Fingerprint size={15} /> Device Registry</span>
+            <h2 id="biofinger-device-dialog-title">{dialogTitle}</h2>
+          </div>
+          <p>{isCreate ? "Daftarkan identitas mesin, lalu arahkan cloud server AT-301 ke receiver DMS." : `${device?.deviceCode || deviceCode} / ${device?.serialNumber || serialNumber || "Serial belum ada"} / ${device ? formatBiofingerConnection(device) : "ADMS Cloud"}`}</p>
         </div>
 
         <div className="biofingerDeviceDialogBody">
-          <div className="biofingerDeviceFormGrid">
-            <label className="formField">
-              <span>Nama Display</span>
-              <input className="uiInput" value={values.name} disabled={!canManage || saving} onChange={(event) => onChange({ name: event.target.value })} placeholder="Biofinger Gudang A" />
-            </label>
-
-            <label className="formField">
-              <span>Kode Device</span>
-              <input className="uiInput" value={values.deviceCode} disabled={!canManage || saving} onChange={(event) => onChange({ deviceCode: normalizeBiofingerDeviceCode(event.target.value) })} placeholder="BIO-AT301-002" />
-            </label>
-
-            <label className="formField">
-              <span>Serial Number</span>
-              <input className="uiInput" value={values.serialNumber} disabled={!canManage || saving} onChange={(event) => onChange({ serialNumber: normalizeBiofingerSerial(event.target.value) })} placeholder="GEDxxxxxxxxx" />
-            </label>
-
-            <label className="formField">
-              <span>Model</span>
-              <input className="uiInput" value={values.model} disabled={!canManage || saving} onChange={(event) => onChange({ model: event.target.value })} placeholder="AT-301" />
-            </label>
-
-            <label className="formField">
-              <span>Lokasi Kerja</span>
-              <FoundationSelect
-                label={`Lokasi kerja untuk ${deviceCode}`}
-                value={values.workLocationId}
-                options={workLocationOptions}
-                disabled={!canManage || saving}
-                onChange={(nextValue) => onChange({ workLocationId: nextValue })}
-              />
-            </label>
-
-            <label className="formField">
-              <span>Status Device</span>
-              <FoundationSelect
-                label={`Status device ${deviceCode}`}
-                value={values.status}
-                options={statusOptions}
-                searchable={false}
-                disabled={!canManage || saving}
-                onChange={(nextValue) => onChange({ status: nextValue })}
-              />
-            </label>
-
-            <label className="formField">
-              <span>IP Lokal Mesin</span>
-              <input className="uiInput" value={values.ipAddress} disabled={!canManage || saving} onChange={(event) => onChange({ ipAddress: event.target.value.trim() })} placeholder="Opsional, contoh 192.168.1.202" inputMode="decimal" />
-            </label>
-
-            <label className="formField">
-              <span>Port Device</span>
-              <input className="uiInput" value={values.port} disabled={!canManage || saving} onChange={(event) => onChange({ port: normalizeIntegerInput(event.target.value, 65535) })} placeholder="4370" inputMode="numeric" />
-            </label>
-          </div>
-
-          <label className="formField biofingerDeviceNotesField">
-            <span>Catatan</span>
-            <input className="uiInput" value={values.notes} disabled={!canManage || saving} onChange={(event) => onChange({ notes: event.target.value })} placeholder="Contoh: Mesin gudang A dekat pintu loading" />
-          </label>
-
-          <section className="biofingerDeviceSetupCard">
-            <div className="biofingerDeviceSetupHeader">
-              <span><Settings size={16} /></span>
+          <section className="biofingerDeviceFormCard">
+            <div className="biofingerDeviceSectionHeader">
               <div>
-                <strong>Setting di Mesin AT-301</strong>
-                <small>Menu COMM. Settings / Pengaturan Server cloud</small>
+                <span>Data Registry</span>
+                <strong>Identitas device</strong>
               </div>
+              <small>Serial wajib sama dengan serial di mesin.</small>
             </div>
-            <div className="biofingerDeviceSetupGrid">
-              <button type="button" onClick={() => onCopySetting(BIOFINGER_ADMS_RECEIVER_HOST, "Alamat server")}>
-                <span>Alamat server</span>
-                <strong>{BIOFINGER_ADMS_RECEIVER_HOST}</strong>
-                <Copy size={14} />
-              </button>
-              <button type="button" onClick={() => onCopySetting(BIOFINGER_ADMS_RECEIVER_PORT, "Port receiver")}>
-                <span>Port</span>
-                <strong>{BIOFINGER_ADMS_RECEIVER_PORT}</strong>
-                <Copy size={14} />
-              </button>
-              <div><span>Server Mode</span><strong>ADMS</strong></div>
-              <div><span>HTTPS</span><strong>Off</strong></div>
-              <div><span>Proxy</span><strong>Off</strong></div>
-              <div><span>Identitas</span><strong>{serialNumber || "Isi serial dulu"}</strong></div>
+
+            <div className="biofingerDeviceFormGrid">
+              <label className="formField">
+                <span>Nama Display</span>
+                <input className="uiInput" value={values.name} disabled={!canManage || saving} onChange={(event) => onChange({ name: event.target.value })} placeholder="Biofinger Gudang A" />
+              </label>
+
+              <label className="formField">
+                <span>Kode Device</span>
+                <input className="uiInput" value={values.deviceCode} disabled={!canManage || saving} onChange={(event) => onChange({ deviceCode: normalizeBiofingerDeviceCode(event.target.value) })} placeholder="BIO-AT301-002" />
+              </label>
+
+              <label className="formField">
+                <span>Serial Number</span>
+                <input className="uiInput" value={values.serialNumber} disabled={!canManage || saving} onChange={(event) => onChange({ serialNumber: normalizeBiofingerSerial(event.target.value) })} placeholder="GEDxxxxxxxxx" />
+              </label>
+
+              <label className="formField">
+                <span>Model</span>
+                <input className="uiInput" value={values.model} disabled={!canManage || saving} onChange={(event) => onChange({ model: event.target.value })} placeholder="AT-301" />
+              </label>
+
+              <label className="formField">
+                <span>Lokasi Kerja</span>
+                <FoundationSelect
+                  label={`Lokasi kerja untuk ${deviceCode}`}
+                  value={values.workLocationId}
+                  options={workLocationOptions}
+                  disabled={!canManage || saving}
+                  onChange={(nextValue) => onChange({ workLocationId: nextValue })}
+                />
+              </label>
+
+              <label className="formField">
+                <span>Status Device</span>
+                <FoundationSelect
+                  label={`Status device ${deviceCode}`}
+                  value={values.status}
+                  options={statusOptions}
+                  searchable={false}
+                  disabled={!canManage || saving}
+                  onChange={(nextValue) => onChange({ status: nextValue })}
+                />
+              </label>
+
+              <label className="formField">
+                <span>IP Lokal Mesin</span>
+                <input className="uiInput" value={values.ipAddress} disabled={!canManage || saving} onChange={(event) => onChange({ ipAddress: event.target.value.trim() })} placeholder="Opsional, contoh 192.168.1.202" inputMode="decimal" />
+              </label>
+
+              <label className="formField">
+                <span>Port Device</span>
+                <input className="uiInput" value={values.port} disabled={!canManage || saving} onChange={(event) => onChange({ port: normalizeIntegerInput(event.target.value, 65535) })} placeholder="4370" inputMode="numeric" />
+              </label>
             </div>
-            <p>Setelah device disimpan, serial aktif di registry menjadi allowlist receiver. Saat mesin online, status last seen dan raw event akan bergerak otomatis.</p>
+
+            <label className="formField biofingerDeviceNotesField">
+              <span>Catatan</span>
+              <input className="uiInput" value={values.notes} disabled={!canManage || saving} onChange={(event) => onChange({ notes: event.target.value })} placeholder="Contoh: Mesin gudang A dekat pintu loading" />
+            </label>
           </section>
 
-          <div className="biofingerDeviceFacts">
-            <div>
-              <span>Receiver</span>
-              <strong>{BIOFINGER_ADMS_RECEIVER_HOST}:{BIOFINGER_ADMS_RECEIVER_PORT}</strong>
+          <aside className="biofingerDeviceSidePanel">
+            <section className="biofingerDeviceSetupCard">
+              <div className="biofingerDeviceSetupHeader">
+                <span><Settings size={16} /></span>
+                <div>
+                  <strong>Setting di Mesin AT-301</strong>
+                  <small>Menu COMM. Settings / Pengaturan Server cloud</small>
+                </div>
+              </div>
+              <div className="biofingerDeviceSetupGrid">
+                <button type="button" onClick={() => onCopySetting(BIOFINGER_ADMS_RECEIVER_HOST, "Alamat server")}>
+                  <span>Alamat server</span>
+                  <strong>{BIOFINGER_ADMS_RECEIVER_HOST}</strong>
+                  <Copy size={14} />
+                </button>
+                <button type="button" onClick={() => onCopySetting(BIOFINGER_ADMS_RECEIVER_PORT, "Port receiver")}>
+                  <span>Port</span>
+                  <strong>{BIOFINGER_ADMS_RECEIVER_PORT}</strong>
+                  <Copy size={14} />
+                </button>
+                <div><span>Server Mode</span><strong>ADMS</strong></div>
+                <div><span>HTTPS</span><strong>Off</strong></div>
+                <div><span>Proxy</span><strong>Off</strong></div>
+                <div><span>Identitas</span><strong>{serialNumber || "Isi serial dulu"}</strong></div>
+              </div>
+              <p>Setelah device disimpan, serial aktif di registry menjadi allowlist receiver. Saat mesin online, status last seen dan raw event akan bergerak otomatis.</p>
+            </section>
+
+            <div className="biofingerDeviceFacts">
+              <div>
+                <span>Receiver</span>
+                <strong>{BIOFINGER_ADMS_RECEIVER_HOST}:{BIOFINGER_ADMS_RECEIVER_PORT}</strong>
+              </div>
+              <div>
+                <span>MAC</span>
+                <strong>{device?.macAddress || "-"}</strong>
+              </div>
+              <div>
+                <span>Last Seen</span>
+                <strong>{device ? formatUserDateTime(device.lastSeenAt, "Belum online") : "Menunggu mesin online"}</strong>
+              </div>
             </div>
-            <div>
-              <span>MAC</span>
-              <strong>{device?.macAddress || "-"}</strong>
-            </div>
-            <div>
-              <span>Last Seen</span>
-              <strong>{device ? formatUserDateTime(device.lastSeenAt, "Belum online") : "Menunggu mesin online"}</strong>
-            </div>
-          </div>
+          </aside>
         </div>
 
         <div className="dialogActions biofingerDeviceDialogActions">
