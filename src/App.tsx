@@ -6457,6 +6457,7 @@ function BiofingerPage({ activeView, profile }: { activeView: ViewId; profile: A
   const [pageSize, setPageSize] = useState(() => biofingerPageSizeCache)
   const [editingDeviceId, setEditingDeviceId] = useState("")
   const [deviceDialogMode, setDeviceDialogMode] = useState<"" | "create" | "edit">("")
+  const [deviceGuideOpen, setDeviceGuideOpen] = useState(false)
   const [mappingDetailId, setMappingDetailId] = useState("")
   const [mappingDraftEmployeeId, setMappingDraftEmployeeId] = useState("")
   const [deviceFormValues, setDeviceFormValues] = useState<BiofingerDeviceFormValues>(() => createEmptyBiofingerDeviceForm())
@@ -7001,6 +7002,10 @@ function BiofingerPage({ activeView, profile }: { activeView: ViewId; profile: A
                 </div>
                 <div className="biofingerDeviceHeaderActions">
                   <InlinePageStats items={biofingerDataLoading ? biofingerInlineLoadingStats(2) : [`${data.devices.length} device`, `${data.workLocations.length} lokasi kerja`]} />
+                  <button className="secondaryButton" type="button" onClick={() => setDeviceGuideOpen(true)}>
+                    <ClipboardList size={16} />
+                    Panduan Setup
+                  </button>
                   <button className="primaryButton" type="button" disabled={!canManage || biofingerDataLoading} onClick={openCreateDeviceDialog}>
                     <UserPlus size={16} />
                     Tambah Device
@@ -7250,6 +7255,12 @@ function BiofingerPage({ activeView, profile }: { activeView: ViewId; profile: A
         onClose={closeDeviceDialog}
         onCopySetting={handleCopyBiofingerSetting}
         onSubmit={() => void handleDeviceSave()}
+      />
+
+      <BiofingerDeviceGuideDrawer
+        open={deviceGuideOpen}
+        onClose={() => setDeviceGuideOpen(false)}
+        onCopySetting={handleCopyBiofingerSetting}
       />
 
       <BiofingerMappingDrawer
@@ -7627,6 +7638,143 @@ function BiofingerDeviceDialog({
             {saving ? "Menyimpan..." : isCreate ? "Tambah Device" : "Simpan Device"}
           </button>
         </div>
+      </section>
+    </div>
+  )
+}
+
+function BiofingerDeviceGuideDrawer({
+  open,
+  onClose,
+  onCopySetting,
+}: {
+  open: boolean
+  onClose: () => void
+  onCopySetting: (value: string, label: string) => void
+}) {
+  if (!open) return null
+
+  const guideSteps = [
+    {
+      title: "Ambil serial mesin",
+      text: "Buka web device di jaringan lokal, masuk ke Dev Status, lalu salin nilai Serial Number. Contoh format serial: GED7244800117.",
+      meta: "Serial mesin, bukan User ID karyawan.",
+    },
+    {
+      title: "Daftarkan di DMS",
+      text: "Buka Biofinger > Device > Tambah Device, isi nama display, kode device, serial number, lokasi kerja, dan status Active.",
+      meta: "Serial harus sama persis dengan mesin.",
+    },
+    {
+      title: "Arahkan cloud server AT-301",
+      text: "Di mesin buka COMM. Settings > Pengaturan Server cloud, gunakan Server Mode ADMS, HTTPS Off, Proxy Off, alamat server dan port receiver DMS.",
+      meta: "Mesin harus punya internet via LAN atau WiFi.",
+    },
+    {
+      title: "Validasi device online",
+      text: "Setelah disimpan dan mesin online, cek Device Registry untuk Last Seen. Raw Event dan Mapping User akan bergerak saat mesin mengirim data.",
+      meta: "Refresh data hanya jika perlu cek data terbaru.",
+    },
+  ]
+
+  const troubleshootingItems = [
+    "Kalau raw event belum masuk, cek internet mesin dan pastikan server/port tidak salah.",
+    "Kalau receiver menolak device, cek serial di form DMS sama persis dengan Serial Number mesin.",
+    "Kalau device belum aktif, pastikan status registry Active atau Maintenance.",
+    "Allowlist receiver membaca registry DMS otomatis, biasanya butuh maksimal sekitar 1 menit.",
+  ]
+
+  return (
+    <div className="dialogBackdrop biofingerDrawerBackdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="dialogPanel biofingerGuideDrawer"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="biofinger-device-guide-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <button className="iconButton dialogClose" type="button" aria-label="Tutup panduan setup device" onClick={onClose}>
+          <X size={18} />
+        </button>
+
+        <header className="biofingerDrawerHeader biofingerGuideHeader">
+          <span className="dialogEyebrow"><ClipboardList size={15} /> Panduan Operasional</span>
+          <h2 id="biofinger-device-guide-title">Setup Device Biofinger</h2>
+          <p>Gunakan panduan ini saat tambah mesin AT-301 baru agar serial, registry DMS, dan receiver cloud tersambung rapi.</p>
+        </header>
+
+        <div className="biofingerGuideBody">
+          <section className="biofingerGuideOverview">
+            <div>
+              <span><Fingerprint size={18} /></span>
+              <strong>Flow singkat</strong>
+              <small>Ambil serial mesin, tambah registry DMS, setting ADMS, lalu cek raw event.</small>
+            </div>
+            <div>
+              <span><Database size={18} /></span>
+              <strong>Sumber kebenaran</strong>
+              <small>Device valid diambil dari tabel registry device DMS.</small>
+            </div>
+          </section>
+
+          <section className="biofingerGuideLayout">
+            <div className="biofingerGuideSteps">
+              {guideSteps.map((step, index) => (
+                <article className="biofingerGuideStep" key={step.title}>
+                  <span>{String(index + 1).padStart(2, "0")}</span>
+                  <div>
+                    <h3>{step.title}</h3>
+                    <p>{step.text}</p>
+                    <small>{step.meta}</small>
+                  </div>
+                </article>
+              ))}
+            </div>
+
+            <aside className="biofingerGuideAside">
+              <section className="biofingerGuideSettingCard">
+                <div className="biofingerDeviceSetupHeader">
+                  <span><Settings size={16} /></span>
+                  <div>
+                    <strong>Setting wajib di mesin</strong>
+                    <small>COMM. Settings / Pengaturan Server cloud</small>
+                  </div>
+                </div>
+                <div className="biofingerGuideSettingList">
+                  <button type="button" onClick={() => onCopySetting(BIOFINGER_ADMS_RECEIVER_HOST, "Alamat server")}>
+                    <span>Alamat server</span>
+                    <strong>{BIOFINGER_ADMS_RECEIVER_HOST}</strong>
+                    <Copy size={14} />
+                  </button>
+                  <button type="button" onClick={() => onCopySetting(BIOFINGER_ADMS_RECEIVER_PORT, "Port receiver")}>
+                    <span>Port</span>
+                    <strong>{BIOFINGER_ADMS_RECEIVER_PORT}</strong>
+                    <Copy size={14} />
+                  </button>
+                  <div><span>Server Mode</span><strong>ADMS</strong></div>
+                  <div><span>HTTPS</span><strong>Off</strong></div>
+                  <div><span>Proxy</span><strong>Off</strong></div>
+                </div>
+              </section>
+
+              <section className="biofingerGuideTroubleshoot">
+                <h3>Troubleshooting cepat</h3>
+                <ul>
+                  {troubleshootingItems.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </section>
+            </aside>
+          </section>
+        </div>
+
+        <footer className="biofingerGuideActions">
+          <button className="primaryButton" type="button" onClick={onClose}>
+            <FileCheck2 size={16} />
+            Mengerti
+          </button>
+        </footer>
       </section>
     </div>
   )
