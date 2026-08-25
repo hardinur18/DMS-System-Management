@@ -117,6 +117,8 @@ Komponen yang perlu dibuat sejak awal:
 - `EmptyState`
 - `FoundationSkeleton`
 - `FoundationTableSkeletonRows`
+- `FoundationDialog`
+- `FoundationRefreshButton`
 - `ConfirmDialog`
 - `FormDrawer`
 - `DetailDrawer`
@@ -154,6 +156,21 @@ Standar dialog form:
 - Header mobile compact dan memakai safe-area.
 - Input/select/date control mengikuti tinggi, radius, focus ring, dan tipografi foundation.
 - Form create/edit harus memakai komponen form foundation, bukan markup input manual.
+
+Modul dialog reusable:
+
+- `FoundationDialog` berada di `src/components/foundation-dialog.tsx`.
+- Dialog web operasional memakai layout landscape, overlay full viewport, close button ringan, dan body/action sticky sesuai kebutuhan konten.
+- Mode panduan memakai `mode="guide"` agar desktop tampil lebar landscape dan mobile menjadi bottom sheet yang center, tidak nempel kanan.
+- `FoundationDialogCloseButton` dipakai untuk tombol X konsisten tanpa background dekoratif berlebihan.
+- Jangan membuat dialog form/panduan dengan ukuran portrait desktop kecuali kontennya memang pendek.
+
+Modul refresh reusable:
+
+- `FoundationRefreshButton` berada di `src/components/foundation-refresh-button.tsx`.
+- Semua tombol refresh data backend memakai komponen ini agar loading icon/spin, disabled state, dan label konsisten.
+- Refresh tidak boleh menghapus UI lama bila cache data sudah ada; hanya update data dari backend.
+- Untuk proses domain selain refresh, gunakan button biasa dengan loading label yang spesifik, misalnya `Proses Absensi`.
 
 ## Modul UI Operasional
 

@@ -21,6 +21,7 @@ export function AutoStatusBadge({ value }: { value: string | number }) {
     normalized.includes("approved") ||
     normalized.includes("checkout") ||
     normalized.includes("online") ||
+    normalized.includes("converted") ||
     normalized.includes("ready") ||
     normalized.includes("success")
       ? "valid"
@@ -29,12 +30,14 @@ export function AutoStatusBadge({ value }: { value: string | number }) {
         normalized.includes("draft") ||
         normalized.includes("idle") ||
         normalized.includes("active") ||
+        normalized.includes("mapped") ||
         normalized.includes("dicicil") ||
         normalized.includes("invite")
         ? "pending"
         : normalized.includes("failed") ||
           normalized.includes("locked") ||
           normalized.includes("ditolak") ||
+          normalized.includes("error") ||
           normalized.includes("over")
           ? "failed"
           : "missing"

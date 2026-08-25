@@ -779,7 +779,7 @@ button {
   margin: 13px 0 0;
   color: var(--ops-muted);
   font-size: 1rem;
-  font-weight: 700;
+  font-weight: 500;
   line-height: 1.5;
 }
 
@@ -1380,6 +1380,7 @@ button {
 
 .biofingerSyncHeader {
   display: flex;
+  min-width: 0;
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
@@ -1387,9 +1388,35 @@ button {
 
 .biofingerDeviceHeaderActions {
   display: flex;
+  min-width: 0;
   align-items: center;
   justify-content: flex-end;
   gap: 12px;
+  flex-wrap: wrap;
+}
+
+.biofingerGuideTrigger {
+  display: inline-grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  color: #526179;
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+  transition: color 160ms ease, transform 160ms ease;
+}
+
+.biofingerGuideTrigger:hover {
+  color: var(--blue-ink);
+  transform: translateY(-1px);
+}
+
+.biofingerGuideTrigger:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(34, 174, 202, 0.14);
 }
 
 .biofingerDeviceHeaderActions .primaryButton {
@@ -1397,6 +1424,52 @@ button {
   border-radius: 14px;
   padding-inline: 15px;
   white-space: nowrap;
+}
+
+.foundationRefreshButton {
+  min-width: 138px;
+}
+
+.foundationRefreshButton .foundationRefreshIcon {
+  flex: 0 0 auto;
+}
+
+.secondaryButton.foundationRefreshButton.loading {
+  color: var(--blue-ink);
+  border-color: rgba(34, 174, 202, 0.22);
+  background: rgba(236, 253, 255, 0.72);
+}
+
+.foundationRefreshTextButton {
+  display: inline-flex;
+  min-width: 0;
+  min-height: 32px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 0;
+  padding: 0;
+  color: #0789a0;
+  background: transparent;
+  font-size: 0.74rem;
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 160ms ease, transform 160ms ease;
+}
+
+.foundationRefreshTextButton:hover:not(:disabled) {
+  color: #056d80;
+  transform: translateY(-1px);
+}
+
+.foundationRefreshTextButton.loading {
+  color: var(--blue-ink);
+}
+
+.foundationRefreshButton.loading .foundationRefreshIcon {
+  animation: foundationRefreshSpin 760ms linear infinite;
 }
 
 .biofingerSyncHeader h2 {
@@ -1411,7 +1484,7 @@ button {
   margin: 5px 0 0;
   color: var(--ops-muted);
   font-size: 0.83rem;
-  font-weight: 650;
+  font-weight: 500;
   line-height: 1.4;
 }
 
@@ -1507,6 +1580,7 @@ button {
 .biofingerDeviceRegistryPanel {
   display: grid;
   gap: 16px;
+  overflow: hidden;
   padding: 20px;
 }
 
@@ -1517,11 +1591,12 @@ button {
 
 .biofingerDeviceRegistryRow {
   display: grid;
-  grid-template-columns: minmax(360px, 1.35fr) minmax(190px, 0.58fr) minmax(190px, 0.56fr) minmax(124px, 0.34fr) 92px;
+  width: 100%;
+  grid-template-columns: minmax(260px, 1.22fr) minmax(132px, 0.46fr) minmax(178px, 0.58fr) minmax(92px, 0.28fr) 92px;
   align-items: stretch;
-  gap: 14px;
+  gap: 10px;
   min-height: 66px;
-  padding: 9px 14px;
+  padding: 9px 12px;
   border: 1px solid rgba(148, 163, 184, 0.2);
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.86);
@@ -1806,10 +1881,10 @@ button {
 }
 
 .dialogBackdrop.biofingerDrawerBackdrop {
-  align-items: stretch;
-  justify-content: flex-end;
-  overflow: hidden;
-  padding: 0;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  padding: clamp(20px, 5vh, 48px);
   background:
     linear-gradient(90deg, rgba(15, 23, 42, 0.18), rgba(15, 23, 42, 0.3)),
     rgba(15, 23, 42, 0.18);
@@ -1818,18 +1893,17 @@ button {
 
 .dialogPanel.biofingerMappingDrawer {
   display: flex;
-  width: min(640px, calc(100vw - 96px));
-  max-height: 100dvh;
-  min-height: 100dvh;
+  width: min(980px, calc(100vw - 96px));
+  max-height: min(820px, calc(100dvh - 72px));
+  min-height: 0;
   flex-direction: column;
   flex: 0 0 auto;
   overflow: hidden;
-  border: 0;
-  border-left: 1px solid rgba(148, 163, 184, 0.24);
-  border-radius: 0;
+  border: 1px solid rgba(255, 255, 255, 0.76);
+  border-radius: 28px;
   background: rgba(255, 255, 255, 0.98);
-  box-shadow: -28px 0 64px -42px rgba(15, 23, 42, 0.72);
-  animation: biofingerDrawerIn 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  box-shadow: 0 34px 90px -46px rgba(15, 23, 42, 0.72);
+  animation: foundationDialogIn 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .dialogPanel.biofingerMappingDrawer .dialogClose {
@@ -1863,10 +1937,21 @@ button {
 .biofingerDrawerBody {
   display: grid;
   flex: 1 1 auto;
+  grid-template-columns: minmax(280px, 0.82fr) minmax(0, 1fr);
+  align-items: start;
   gap: 14px;
   overflow-y: auto;
   padding: 18px 30px;
   scrollbar-width: thin;
+}
+
+.biofingerDrawerSection:nth-child(3) {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
+.biofingerDrawerSection:nth-child(4) {
+  grid-column: 1 / -1;
 }
 
 .biofingerDrawerSection {
@@ -2113,7 +2198,7 @@ button {
   min-width: 0;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: 3px 11px;
+  gap: 3px 10px;
   padding: 14px;
   border: 1px solid rgba(34, 174, 202, 0.14);
   border-radius: 18px;
@@ -2121,14 +2206,13 @@ button {
 }
 
 .biofingerGuideOverview span {
-  display: grid;
-  width: 38px;
-  height: 38px;
+  display: inline-grid;
+  width: 20px;
+  height: 20px;
   grid-row: span 2;
   place-items: center;
-  border-radius: 14px;
   color: var(--blue-ink);
-  background: rgba(34, 174, 202, 0.11);
+  background: transparent;
 }
 
 .biofingerGuideOverview strong,
@@ -2147,7 +2231,7 @@ button {
 .biofingerGuideOverview small {
   color: #738197;
   font-size: 0.74rem;
-  font-weight: 720;
+  font-weight: 500;
   line-height: 1.35;
 }
 
@@ -2175,12 +2259,12 @@ button {
 
 .biofingerGuideStep > span {
   display: grid;
-  width: 36px;
-  height: 36px;
+  width: 30px;
+  height: 30px;
   place-items: center;
-  border-radius: 13px;
+  border-radius: 999px;
   color: var(--blue-ink);
-  background: rgba(34, 174, 202, 0.1);
+  background: transparent;
   font-size: 0.72rem;
   font-weight: 900;
 }
@@ -2201,7 +2285,7 @@ button {
   margin-top: 5px;
   color: #526179;
   font-size: 0.78rem;
-  font-weight: 690;
+  font-weight: 500;
   line-height: 1.45;
 }
 
@@ -2226,6 +2310,14 @@ button {
   border: 1px solid rgba(15, 23, 42, 0.08);
   border-radius: 20px;
   background: rgba(255, 255, 255, 0.82);
+}
+
+.biofingerGuideDrawer .biofingerDeviceSetupHeader > span {
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .biofingerGuideSettingList {
@@ -2334,6 +2426,588 @@ button {
   min-width: 132px;
 }
 
+.dialogPanel.foundationDialogPanelGuide {
+  display: flex;
+  width: min(1040px, calc(100vw - 64px));
+  max-height: min(760px, calc(100dvh - 64px));
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.74);
+  border-radius: 28px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 252, 255, 0.96)),
+    #ffffff;
+  box-shadow:
+    0 34px 92px -44px rgba(7, 24, 74, 0.88),
+    0 0 0 1px rgba(255, 255, 255, 0.72) inset;
+}
+
+.dialogPanel.foundationDialogPanelGuide .foundationDialogClose {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  z-index: 2;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 999px;
+  color: #526179;
+  background: rgba(248, 251, 255, 0.92);
+  box-shadow: none;
+}
+
+.dialogPanel.foundationDialogPanelGuide .foundationDialogClose:hover {
+  color: var(--blue-ink);
+  background: rgba(230, 248, 252, 0.86);
+}
+
+.foundationGuideDialogHeader {
+  flex: 0 0 auto;
+  padding: 24px 76px 18px 30px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+  background:
+    radial-gradient(circle at 6% 0%, rgba(34, 174, 202, 0.1), transparent 32%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(246, 251, 255, 0.92));
+}
+
+.foundationGuideDialogHeader .dialogEyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.foundationGuideDialogHeader h2 {
+  margin-top: 7px;
+  font-size: clamp(1.32rem, 1.7vw, 1.72rem);
+}
+
+.foundationGuideDialogHeader p {
+  max-width: 720px;
+}
+
+.foundationGuideDialogBody {
+  display: grid;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1.32fr) minmax(310px, 0.78fr);
+  align-items: stretch;
+  gap: 18px;
+  padding: 22px 30px 24px;
+  overflow-y: auto;
+  background: linear-gradient(180deg, rgba(248, 251, 255, 0.82), rgba(255, 255, 255, 0.94));
+  scrollbar-width: none;
+}
+
+.foundationGuideDialogBody::-webkit-scrollbar {
+  display: none;
+}
+
+.biofingerQuickGuideSteps,
+.biofingerQuickSettingCard {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+}
+
+.biofingerQuickGuideSteps {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+}
+
+.biofingerQuickGuideSteps article {
+  display: grid;
+  min-width: 0;
+  min-height: 128px;
+  grid-template-columns: 38px minmax(0, 1fr);
+  align-items: start;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid rgba(15, 23, 42, 0.075);
+  border-radius: 20px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.96), rgba(246, 250, 254, 0.84));
+  box-shadow: 0 18px 36px -34px rgba(7, 24, 74, 0.54);
+}
+
+.biofingerQuickGuideSteps article > span {
+  display: inline-grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--blue-ink);
+  background: rgba(230, 248, 252, 0.82);
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.biofingerQuickGuideSteps strong,
+.biofingerQuickGuideSteps p,
+.biofingerQuickGuideSteps small {
+  display: block;
+  min-width: 0;
+}
+
+.biofingerQuickGuideSteps strong {
+  color: var(--ops-ink);
+  font-size: 0.84rem;
+  font-weight: 880;
+  line-height: 1.2;
+}
+
+.biofingerQuickGuideSteps p {
+  margin: 7px 0 0;
+  color: #53637a;
+  font-size: 0.78rem;
+  font-weight: 500;
+  line-height: 1.42;
+}
+
+.biofingerQuickGuideSteps small {
+  margin-top: 9px;
+  color: var(--blue-ink);
+  font-size: 0.7rem;
+  font-weight: 500;
+  line-height: 1.32;
+}
+
+.biofingerQuickSettingCard {
+  align-self: stretch;
+  align-content: start;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid rgba(34, 174, 202, 0.18);
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 0% 0%, rgba(34, 174, 202, 0.13), transparent 42%),
+    linear-gradient(145deg, rgba(236, 253, 255, 0.78), rgba(255, 255, 255, 0.98));
+  box-shadow: 0 24px 46px -38px rgba(7, 24, 74, 0.62);
+}
+
+.biofingerQuickSettingCard .biofingerDeviceSetupHeader > span {
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.biofingerQuickSettingGrid {
+  display: grid;
+  overflow: hidden;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.biofingerQuickSettingGrid > button,
+.biofingerQuickSettingGrid > div {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-content: center;
+  gap: 3px 8px;
+  min-height: 76px;
+  padding: 14px;
+  border: 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+  border-right: 1px solid rgba(148, 163, 184, 0.14);
+  color: inherit;
+  background: transparent;
+  text-align: left;
+}
+
+.biofingerQuickSettingGrid > button {
+  cursor: pointer;
+}
+
+.biofingerQuickSettingGrid > button:hover {
+  background: rgba(236, 253, 255, 0.72);
+}
+
+.biofingerQuickSettingGrid > button:last-child,
+.biofingerQuickSettingGrid > div:last-child,
+.biofingerQuickSettingGrid > button:nth-child(even),
+.biofingerQuickSettingGrid > div:nth-child(even) {
+  border-right: 0;
+}
+
+.biofingerQuickSettingGrid > button:nth-last-child(-n + 2),
+.biofingerQuickSettingGrid > div:nth-last-child(-n + 2) {
+  border-bottom: 0;
+}
+
+.biofingerQuickSettingGrid span {
+  grid-column: 1 / -1;
+  color: #738197;
+  font-size: 0.68rem;
+  font-weight: 760;
+}
+
+.biofingerQuickSettingGrid strong {
+  color: var(--ops-ink);
+  font-size: 0.82rem;
+  font-weight: 870;
+  overflow-wrap: anywhere;
+}
+
+.biofingerQuickSettingGrid svg {
+  color: var(--blue-ink);
+}
+
+.dialogPanel.foundationDialogPanelGuide .foundationGuideDialogActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex: 0 0 auto;
+  padding: 18px 30px 24px;
+  border-top: 1px solid rgba(148, 163, 184, 0.15);
+  background: rgba(255, 255, 255, 0.98);
+}
+
+.guidePageShell {
+  --guide-list-w: 360px;
+}
+
+.guideFilterPanel {
+  grid-template-columns: minmax(420px, 1fr) minmax(220px, 280px) auto;
+}
+
+.guideWorkspace {
+  display: grid;
+  grid-template-columns: minmax(280px, var(--guide-list-w)) minmax(0, 1fr);
+  align-items: start;
+  gap: 16px;
+}
+
+.guideIndexPanel,
+.guideDetailPanel {
+  min-width: 0;
+}
+
+.guideIndexPanel {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+}
+
+.guidePanelHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.guidePanelHeader span,
+.guideDetailTitle span,
+.guideDetailMeta span {
+  color: #738197;
+  font-size: 0.72rem;
+  font-weight: 780;
+  line-height: 1.25;
+}
+
+.guidePanelHeader h2 {
+  margin: 3px 0 0;
+  color: var(--ops-ink);
+  font-size: 1rem;
+  font-weight: 880;
+}
+
+.guidePanelHeader > strong {
+  display: inline-flex;
+  min-width: 34px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: var(--blue-ink);
+  background: rgba(34, 174, 202, 0.1);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.guideIndexList {
+  display: grid;
+  gap: 8px;
+}
+
+.guideIndexItem {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid transparent;
+  border-radius: 16px;
+  color: #526179;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.guideIndexItem:hover,
+.guideIndexItem.active {
+  border-color: rgba(34, 174, 202, 0.18);
+  color: var(--blue-ink);
+  background: rgba(236, 253, 255, 0.68);
+}
+
+.guideIndexItem.active {
+  box-shadow: inset 3px 0 0 rgba(34, 174, 202, 0.82);
+}
+
+.guideIndexItem svg {
+  color: currentColor;
+}
+
+.guideIndexItem strong,
+.guideIndexItem small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.guideIndexItem strong {
+  color: var(--ops-ink);
+  font-size: 0.82rem;
+  font-weight: 850;
+}
+
+.guideIndexItem small {
+  margin-top: 2px;
+  color: #738197;
+  font-size: 0.7rem;
+  font-weight: 720;
+}
+
+.guideEmptyState {
+  display: grid;
+  min-height: 160px;
+  place-items: center;
+  align-content: center;
+  gap: 6px;
+  color: #738197;
+  text-align: center;
+}
+
+.guideEmptyState strong {
+  color: var(--ops-ink);
+  font-size: 0.9rem;
+  font-weight: 880;
+}
+
+.guideEmptyState small {
+  font-size: 0.76rem;
+  font-weight: 720;
+}
+
+.guideDetailPanel {
+  display: grid;
+  gap: 18px;
+  padding: 22px;
+}
+
+.guideDetailHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 18px;
+  padding-bottom: 4px;
+}
+
+.guideDetailTitle {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+}
+
+.guideDetailTitle > svg {
+  margin-top: 2px;
+  color: var(--blue-ink);
+}
+
+.guideDetailTitle h2 {
+  margin: 4px 0 0;
+  color: var(--ops-ink);
+  font-size: 1.3rem;
+  font-weight: 900;
+  line-height: 1.08;
+}
+
+.guideDetailTitle p {
+  max-width: 760px;
+  margin: 8px 0 0;
+  color: #526179;
+  font-size: 0.86rem;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.guideTags {
+  display: flex;
+  max-width: 340px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.guideTags span {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0 10px;
+  color: #0e7490;
+  background: rgba(34, 174, 202, 0.1);
+  font-size: 0.7rem;
+  font-weight: 820;
+}
+
+.guideDetailMeta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 18px;
+  background: rgba(248, 250, 252, 0.7);
+}
+
+.guideDetailMeta div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 14px;
+  border-right: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.guideDetailMeta div:last-child {
+  border-right: 0;
+}
+
+.guideDetailMeta strong {
+  color: var(--ops-ink);
+  font-size: 0.84rem;
+  font-weight: 860;
+  line-height: 1.25;
+}
+
+.guideDetailGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+  align-items: start;
+  gap: 14px;
+}
+
+.guideSection,
+.guideRelatedPanel {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.guideStepsSection {
+  grid-row: span 2;
+}
+
+.guideWarningSection {
+  background: rgba(255, 251, 235, 0.58);
+}
+
+.guideSectionHeader {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.guideSectionHeader svg {
+  color: var(--blue-ink);
+}
+
+.guideSectionHeader h3 {
+  margin: 0;
+  color: var(--ops-ink);
+  font-size: 0.92rem;
+  font-weight: 880;
+}
+
+.guideSection ol,
+.guideSection ul {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+  padding-left: 18px;
+  color: #526179;
+  font-size: 0.8rem;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.guideSection li::marker {
+  color: var(--blue-ink);
+  font-weight: 900;
+}
+
+.guideRelatedPanel > div:last-child {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.guideRelatedPanel button {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  padding: 11px;
+  border: 1px solid rgba(34, 174, 202, 0.14);
+  border-radius: 15px;
+  color: inherit;
+  background: rgba(236, 253, 255, 0.5);
+  text-align: left;
+  cursor: pointer;
+}
+
+.guideRelatedPanel button:hover {
+  border-color: rgba(34, 174, 202, 0.3);
+  background: #ffffff;
+}
+
+.guideRelatedPanel button svg {
+  color: var(--blue-ink);
+}
+
+.guideRelatedPanel strong,
+.guideRelatedPanel small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.guideRelatedPanel strong {
+  color: var(--ops-ink);
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.guideRelatedPanel small {
+  color: #738197;
+  font-size: 0.68rem;
+  font-weight: 720;
+}
+
 .biofingerDeviceRegistryRow > .secondaryButton {
   width: 92px;
   min-height: 38px;
@@ -2343,7 +3017,7 @@ button {
   border-radius: 14px;
 }
 
-.biofingerDeviceDialog {
+.dialogPanel.biofingerDeviceDialog {
   display: flex;
   width: min(1080px, calc(100vw - 48px));
   max-height: calc(100dvh - 48px);
@@ -2357,13 +3031,32 @@ button {
     0 0 0 1px rgba(255, 255, 255, 0.72) inset;
 }
 
+.dialogPanel.biofingerDeviceDialog .foundationDialogClose {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  z-index: 2;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 999px;
+  color: #526179;
+  background: rgba(248, 251, 255, 0.92);
+  box-shadow: none;
+}
+
+.dialogPanel.biofingerDeviceDialog .foundationDialogClose:hover {
+  color: var(--blue-ink);
+  background: rgba(230, 248, 252, 0.86);
+}
+
 .biofingerDeviceDialog .biofingerDeviceDialogHeader {
   display: grid;
   grid-template-columns: minmax(260px, 0.78fr) minmax(0, 1fr);
   align-items: center;
   flex: 0 0 auto;
   gap: 26px;
-  padding: 24px 32px 18px;
+  padding: 24px 76px 18px 32px;
   border-bottom: 1px solid var(--ops-line);
 }
 
@@ -2396,7 +3089,7 @@ button {
   margin: 0;
   color: var(--ops-muted);
   font-size: 0.84rem;
-  font-weight: 700;
+  font-weight: 500;
   line-height: 1.42;
 }
 
@@ -2605,7 +3298,7 @@ button {
   margin: 0;
   color: var(--ops-muted);
   font-size: 0.76rem;
-  font-weight: 720;
+  font-weight: 500;
   line-height: 1.42;
 }
 
@@ -2642,7 +3335,7 @@ button {
   overflow-wrap: anywhere;
 }
 
-.biofingerDeviceDialogActions {
+.dialogPanel.biofingerDeviceDialog .biofingerDeviceDialogActions {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
@@ -2652,8 +3345,8 @@ button {
   background: #ffffff;
 }
 
-.biofingerDeviceDialogActions .primaryButton,
-.biofingerDeviceDialogActions .secondaryButton {
+.dialogPanel.biofingerDeviceDialog .biofingerDeviceDialogActions .primaryButton,
+.dialogPanel.biofingerDeviceDialog .biofingerDeviceDialogActions .secondaryButton {
   min-width: 150px;
 }
 
@@ -4058,16 +4751,20 @@ button {
   inset: 0;
   z-index: 130;
   display: flex;
+  width: 100vw;
+  height: 100vh;
+  min-height: 100dvh;
   align-items: center;
   justify-content: center;
   overflow-y: auto;
-  padding: max(28px, env(safe-area-inset-top)) 24px max(28px, env(safe-area-inset-bottom));
+  padding: max(32px, env(safe-area-inset-top)) 32px max(32px, env(safe-area-inset-bottom));
   background:
-    linear-gradient(135deg, rgba(15, 23, 42, 0.36), rgba(71, 85, 105, 0.26)),
-    radial-gradient(circle at 78% 18%, rgba(34, 174, 202, 0.16), transparent 32%),
-    rgba(15, 23, 42, 0.28);
-  backdrop-filter: blur(16px) saturate(130%);
+    radial-gradient(circle at 72% 20%, rgba(34, 174, 202, 0.18), transparent 34%),
+    linear-gradient(135deg, rgba(15, 23, 42, 0.5), rgba(71, 85, 105, 0.38)),
+    rgba(15, 23, 42, 0.44);
+  backdrop-filter: blur(18px) saturate(135%);
   animation: dialogBackdropIn 180ms ease both;
+  overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
 }
 
@@ -7723,6 +8420,15 @@ button {
   }
 }
 
+@keyframes foundationRefreshSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @keyframes foundationSkeletonShimmer {
   0% {
     transform: translateX(-120%);
@@ -7776,7 +8482,7 @@ button {
   margin: 4px 0 0;
   color: var(--ops-muted);
   font-size: 0.83rem;
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.4;
 }
 
@@ -10323,6 +11029,13 @@ button {
   .biofingerDeviceDialogBody,
   .biofingerGuideOverview,
   .biofingerGuideLayout,
+  .foundationGuideDialogBody,
+  .guideFilterPanel,
+  .guideWorkspace,
+  .guideDetailHeader,
+  .guideDetailMeta,
+  .guideDetailGrid,
+  .guideRelatedPanel > div:last-child,
   .biofingerDeviceRegistryRow,
   .biofingerDeviceHeaderActions,
   .biofingerDeviceFormGrid,
@@ -10334,8 +11047,15 @@ button {
     grid-template-columns: 1fr;
   }
 
+  .dialogBackdrop.biofingerDrawerBackdrop {
+    align-items: flex-end;
+    padding: 14px;
+  }
+
   .dialogPanel.biofingerMappingDrawer {
-    width: 100vw;
+    width: min(100%, calc(100vw - 28px));
+    max-height: calc(100dvh - 28px);
+    border-radius: 26px 26px 18px 18px;
   }
 
   .dialogPanel.biofingerGuideDrawer {
@@ -10351,19 +11071,57 @@ button {
     padding-inline: 18px;
   }
 
+  .biofingerDrawerSection:nth-child(3),
+  .biofingerDrawerSection:nth-child(4) {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
   .biofingerDrawerEvent small,
   .biofingerDrawerSelectedEmployee small {
     justify-self: start;
   }
 
-  .biofingerDeviceDialog {
+  .dialogPanel.biofingerDeviceDialog {
     width: min(100%, calc(100vw - 28px));
+  }
+
+  .dialogPanel.foundationDialogPanelGuide {
+    width: min(100%, calc(100vw - 28px));
+  }
+
+  .biofingerQuickGuideSteps,
+  .biofingerQuickSettingGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .biofingerQuickSettingGrid > button,
+  .biofingerQuickSettingGrid > div {
+    min-height: 58px;
+    border-right: 0;
+  }
+
+  .biofingerQuickSettingGrid > button:nth-last-child(-n + 2),
+  .biofingerQuickSettingGrid > div:nth-last-child(-n + 2) {
+    border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+  }
+
+  .biofingerQuickSettingGrid > button:last-child,
+  .biofingerQuickSettingGrid > div:last-child {
+    border-bottom: 0;
   }
 
   .biofingerDeviceDialog .biofingerDeviceDialogHeader {
     align-items: start;
     gap: 10px;
-    padding: 22px 22px 16px;
+    padding: 22px 62px 16px 22px;
+  }
+
+  .dialogPanel.biofingerDeviceDialog .foundationDialogClose {
+    top: 14px;
+    right: 14px;
+    width: 38px;
+    height: 38px;
   }
 
   .biofingerDeviceDialog .dialogCompactHeader p {
@@ -10392,6 +11150,38 @@ button {
   .biofingerDeviceDialogActions {
     display: grid;
     padding-inline: 22px;
+  }
+
+  .foundationGuideDialogHeader,
+  .foundationGuideDialogBody,
+  .foundationGuideDialogActions {
+    padding-inline: 22px;
+  }
+
+  .foundationGuideDialogActions {
+    display: grid;
+  }
+
+  .guideDetailPanel {
+    padding: 18px;
+  }
+
+  .guideTags {
+    max-width: none;
+    justify-content: flex-start;
+  }
+
+  .guideDetailMeta div {
+    border-right: 0;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+  }
+
+  .guideDetailMeta div:last-child {
+    border-bottom: 0;
+  }
+
+  .guideStepsSection {
+    grid-row: auto;
   }
 
   .biofingerDeviceHeaderActions {
@@ -10563,6 +11353,63 @@ button {
     flex-direction: column;
     border-radius: 26px 26px 18px 18px;
     animation-name: bottomSheetIn;
+  }
+
+  .dialogBackdrop.foundationDialogBackdropGuide {
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    padding: 12px;
+  }
+
+  .dialogPanel.foundationDialogPanelGuide {
+    width: min(520px, calc(100vw - 24px));
+    max-height: calc(100dvh - 24px);
+    border-radius: 24px;
+    animation-name: dialogPanelIn;
+  }
+
+  .dialogPanel.foundationDialogPanelGuide .foundationDialogClose {
+    top: 14px;
+    right: 14px;
+    width: 38px;
+    height: 38px;
+  }
+
+  .foundationGuideDialogHeader {
+    padding: 22px 58px 14px 20px;
+  }
+
+  .foundationGuideDialogHeader h2 {
+    font-size: 1.08rem;
+  }
+
+  .foundationGuideDialogHeader p {
+    font-size: 0.74rem;
+    line-height: 1.35;
+  }
+
+  .foundationGuideDialogBody {
+    gap: 12px;
+    padding: 14px 20px 16px;
+    overflow-y: auto;
+  }
+
+  .biofingerQuickGuideSteps article {
+    min-height: auto;
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .biofingerQuickSettingCard {
+    padding: 16px;
+  }
+
+  .foundationGuideDialogActions {
+    position: sticky;
+    bottom: 0;
+    gap: 10px;
+    padding: 12px 20px max(14px, env(safe-area-inset-bottom));
   }
 
   .dialogForm {
@@ -10797,6 +11644,32 @@ button {
     margin: 2px -18px calc(-14px - env(safe-area-inset-bottom));
     padding: 12px 18px calc(14px + env(safe-area-inset-bottom));
     background: linear-gradient(180deg, rgba(255, 255, 255, 0), #ffffff 18%);
+  }
+
+  .dialogPanel.foundationDialogPanelGuide .foundationGuideDialogActions {
+    display: grid;
+    grid-template-columns: minmax(92px, 0.34fr) minmax(0, 1fr);
+    gap: 10px;
+    margin: 0;
+    padding: 12px 14px max(14px, env(safe-area-inset-bottom));
+    border-top: 1px solid rgba(148, 163, 184, 0.14);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.72), #ffffff 34%),
+      #ffffff;
+    box-shadow: 0 -16px 34px -30px rgba(7, 24, 74, 0.52);
+  }
+
+  .dialogPanel.foundationDialogPanelGuide .foundationGuideDialogActions .secondaryButton,
+  .dialogPanel.foundationDialogPanelGuide .foundationGuideDialogActions .primaryButton {
+    width: 100%;
+    min-height: 46px;
+    border-radius: 15px;
+    padding: 0 13px;
+    font-size: 0.8rem;
+  }
+
+  .dialogPanel.foundationDialogPanelGuide .foundationGuideDialogActions .primaryButton {
+    gap: 7px;
   }
 
   .inviteDialog .dialogActions,
@@ -12618,6 +13491,47 @@ button {
   font-size: 16px;
   font-weight: 800;
   line-height: 1.38;
+}
+
+/* Foundation: keep descriptive copy readable; headings, labels, buttons, and metrics keep their own weight. */
+.topbar p,
+.tableHeader p,
+.dialogHeader p,
+.dialogCompactHeader p,
+.confirmDialogCopy p,
+.rolePermissionHero p,
+.rolePermissionSummary p,
+.profileHeroPanel p,
+.userDetailHero p,
+.userDetailSummary p,
+.userDetailNote p,
+.biofingerSyncHeader p,
+.biofingerDrawerHeader p,
+.biofingerGuideStep p,
+.biofingerDeviceDialog .dialogCompactHeader p,
+.biofingerDeviceSetupCard p,
+.guideDetailTitle p,
+.guideSection ol,
+.guideSection ul,
+.fieldAttendanceHeader p,
+.fieldFaceCopy p,
+.attendanceReviewHeader p,
+.attendanceReviewStory p,
+.checkoutCorrectionSummary p,
+.payrollProcessHeader p,
+.attendanceMonitorSnapshotItem p,
+.overtimeHero p,
+.attendanceReviewEventPanel p,
+.employeeProfileBrief p,
+.employeeFaceCopy p,
+.emptyStateCard p,
+.employeeFaceGateCopy p,
+.employeeActionHeader p,
+.kioskResultCard p,
+.kioskEmptyCopy p,
+.kioskEmptyState p,
+.kioskPageShell .kioskEmptyCopy p {
+  font-weight: 500;
 }
 
 .kioskPageShell .kioskEmptySteps {

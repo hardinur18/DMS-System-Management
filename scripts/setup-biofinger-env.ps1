@@ -131,6 +131,8 @@ $values["BIOFINGER_TIMEZONE_OFFSET"] = Read-Value -Label "BIOFINGER_TIMEZONE_OFF
 $values["BIOFINGER_DEVICE_CODE"] = Read-Value -Label "BIOFINGER_DEVICE_CODE" -DefaultValue (Get-ExistingValue -Values $values -Key "BIOFINGER_DEVICE_CODE" -DefaultValue "BIO-AT301-001") -Required
 $values["BIOFINGER_EXPORT_DIR"] = Read-Value -Label "BIOFINGER_EXPORT_DIR" -DefaultValue (Get-ExistingValue -Values $values -Key "BIOFINGER_EXPORT_DIR" -DefaultValue "exports") -Required
 $values["BIOFINGER_LOG_DIR"] = Read-Value -Label "BIOFINGER_LOG_DIR" -DefaultValue (Get-ExistingValue -Values $values -Key "BIOFINGER_LOG_DIR" -DefaultValue "logs/biofinger-sync") -Required
+$values["BIOFINGER_CONVERT_ON_IMPORT"] = Get-ExistingValue -Values $values -Key "BIOFINGER_CONVERT_ON_IMPORT" -DefaultValue "false"
+$values["BIOFINGER_CONVERSION_BATCH_SIZE"] = Get-ExistingValue -Values $values -Key "BIOFINGER_CONVERSION_BATCH_SIZE" -DefaultValue "1000"
 
 if (-not $Force -and (Test-Path -LiteralPath $envPath -PathType Leaf)) {
   Copy-Item -LiteralPath $envPath -Destination "$envPath.bak" -Force
@@ -151,7 +153,9 @@ $orderedKeys = @(
   "BIOFINGER_EXPORT_DIR",
   "BIOFINGER_LOG_DIR",
   "BIOFINGER_PYTHON",
-  "BIOFINGER_NODE"
+  "BIOFINGER_NODE",
+  "BIOFINGER_CONVERT_ON_IMPORT",
+  "BIOFINGER_CONVERSION_BATCH_SIZE"
 )
 
 $lines = New-Object System.Collections.Generic.List[string]

@@ -19,6 +19,7 @@ param(
   [int]$SampleLimit = 1,
   [int]$OverlapMinutes = 1440,
   [switch]$FullHistory,
+  [switch]$Convert,
   [switch]$DryRun,
   [switch]$NoImport
 )
@@ -317,6 +318,9 @@ try {
 
   if ($DryRun) {
     $importArgs += "--dry-run"
+  }
+  if ($Convert) {
+    $importArgs += "--convert"
   }
 
   if ($resolvedImportMode -eq "management") {

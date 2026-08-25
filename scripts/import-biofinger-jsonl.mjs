@@ -9,6 +9,7 @@ const DEFAULT_DEVICE_CODE = "BIO-AT301-001";
 const DEFAULT_CHUNK_SIZE = 500;
 const DEFAULT_API_DELAY_MS = 250;
 const DEFAULT_API_RETRIES = 5;
+const DEFAULT_CONVERT_LIMIT = 1000;
 const SUPABASE_MANAGEMENT_API_BASE_URL = "https://api.supabase.com/v1";
 
 function parseArgs(argv) {
@@ -18,6 +19,8 @@ function parseArgs(argv) {
     usersPath: null,
     chunkSize: DEFAULT_CHUNK_SIZE,
     dryRun: false,
+    convert: false,
+    convertLimit: DEFAULT_CONVERT_LIMIT,
     managementApi: false,
     ref: process.env.SUPABASE_PROJECT_REF || "",
     apiDelayMs: DEFAULT_API_DELAY_MS,
@@ -44,6 +47,10 @@ function parseArgs(argv) {
       args.chunkSize = Number(next());
     } else if (arg === "--dry-run") {
       args.dryRun = true;
+    } else if (arg === "--convert") {
+      args.convert = true;
+    } else if (arg === "--convert-limit") {
+      args.convertLimit = Number(next());
     } else if (arg === "--management-api") {
       args.managementApi = true;
     } else if (arg === "--ref") {
@@ -72,6 +79,9 @@ function parseArgs(argv) {
   if (!Number.isInteger(args.apiRetries) || args.apiRetries < 0 || args.apiRetries > 10) {
     throw new Error("--api-retries must be an integer from 0 to 10.");
   }
+  if (!Number.isInteger(args.convertLimit) || args.convertLimit < 1 || args.convertLimit > 5000) {
+    throw new Error("--convert-limit must be an integer from 1 to 5000.");
+  }
   if (args.managementApi && !args.ref) {
     throw new Error("Set SUPABASE_PROJECT_REF or pass --ref <project-ref> for --management-api.");
   }
@@ -99,6 +109,8 @@ Options:
   --users            JSONL file from scripts/biofinger_sync.py --users-output
   --chunk-size       Batch size, 1-1000. Default: ${DEFAULT_CHUNK_SIZE}
   --dry-run          Direct DB: rollback transaction. Management API: read-only count check.
+  --convert          Convert mapped staging events to attendance_logs after import.
+  --convert-limit    Max mapped events converted per run, 1-5000. Default: ${DEFAULT_CONVERT_LIMIT}
   --management-api   Use Supabase Management API instead of DATABASE_URL.
   --ref              Supabase project ref for --management-api.
   --api-delay-ms     Delay between Management API chunks. Default: ${DEFAULT_API_DELAY_MS}
@@ -856,6 +868,33 @@ async function importEventsViaManagementApi({ ref, token, deviceId, events, chun
   };
 }
 
+async function convertEventsViaManagementApi({ ref, token, deviceId, limit }) {
+  const result = await runManagementQuery({
+    ref,
+    token,
+    label: "convert Biofinger staging events",
+    query: `
+      select *
+      from public.convert_biofinger_attendance_events($1::uuid, $2::integer)
+    `,
+    parameters: [deviceId, limit],
+  });
+
+  return firstResultRow(result) || null;
+}
+
+async function convertEventsDirectDatabase(client, deviceId, limit) {
+  const result = await client.query(
+    `
+      select *
+      from public.convert_biofinger_attendance_events($1::uuid, $2::integer)
+    `,
+    [deviceId, limit],
+  );
+
+  return result.rows[0] || null;
+}
+
 async function runManagementApiImport(args, events, users) {
   const token = process.env.SUPABASE_ACCESS_TOKEN;
   if (!token) {
@@ -915,6 +954,14 @@ async function runManagementApiImport(args, events, users) {
     : args.dryRun
       ? { wouldInsert: 0, wouldUpdate: 0, maxEventAt: null }
       : { upserted: 0, mapped: 0, maxEventAt: null };
+  const conversionResult = args.convert && !args.dryRun
+    ? await convertEventsViaManagementApi({
+      ref: args.ref,
+      token,
+      deviceId: device.id,
+      limit: args.convertLimit,
+    })
+    : null;
 
   console.log(JSON.stringify({
     mode: "management_api",
@@ -932,6 +979,7 @@ async function runManagementApiImport(args, events, users) {
     events_would_update: eventResult.wouldUpdate,
     events_upserted: eventResult.upserted,
     events_mapped: eventResult.mapped,
+    conversion: conversionResult,
     max_event_at: eventResult.maxEventAt,
   }, null, 2));
 }
@@ -955,6 +1003,9 @@ async function runDirectDatabaseImport(args, events, users) {
     const eventResult = events.length > 0
       ? await importEvents(client, device.id, events, args.chunkSize)
       : { upserted: 0, mapped: 0, maxEventAt: null };
+    const conversionResult = args.convert
+      ? await convertEventsDirectDatabase(client, device.id, args.convertLimit)
+      : null;
 
     if (args.dryRun) {
       await client.query("rollback");
@@ -971,6 +1022,7 @@ async function runDirectDatabaseImport(args, events, users) {
       events_read: events.length,
       events_upserted: eventResult.upserted,
       events_mapped: eventResult.mapped,
+      conversion: conversionResult,
       max_event_at: eventResult.maxEventAt,
     }, null, 2));
   } catch (error) {

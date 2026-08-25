@@ -10,6 +10,7 @@ Target live:
 AT-301 LAN/WiFi internet lokasi
 -> DMS Biofinger ADMS Receiver di VPS
 -> Supabase staging
+-> convert mapped event ke attendance_logs
 -> DMS Management App
 ```
 
@@ -42,7 +43,7 @@ Status POC per 2026-08-24:
 - Receiver live sudah menulis ke Supabase staging dan mengabaikan duplicate histori lewat `source_hash`.
 - Receiver menerima allowlist dari dua sumber: env `BIOFINGER_ALLOWED_SERIALS` dan Device Registry DMS (`attendance_devices.serial_number`) untuk device berstatus `active` atau `maintenance`.
 
-Mode dry-run hanya dipakai untuk test awal. Saat mode live aktif, data tetap masuk staging Biofinger dan belum otomatis menjadi payroll final.
+Mode dry-run hanya dipakai untuk test awal. Saat mode live aktif, data masuk staging Biofinger. Konversi ke `attendance_logs` sebaiknya dijalankan manual dulu dari DMS UI sampai sample valid. Setelah itu `BIOFINGER_CONVERT_ON_IMPORT=true` boleh diaktifkan agar event yang sudah mapped otomatis dibuat menjadi absensi final.
 
 Jalankan lokal untuk test:
 
@@ -75,11 +76,20 @@ BIOFINGER_DEVICE_CODE=BIO-AT301-001
 BIOFINGER_DEVICE_CODE_PREFIX=BIO-AT301
 BIOFINGER_ALLOWED_SERIALS=GED7244800117
 BIOFINGER_ALLOWED_REMOTE_IPS=
+BIOFINGER_CONVERT_ON_IMPORT=false
+BIOFINGER_CONVERSION_BATCH_SIZE=1000
 BIOFINGER_RECEIVER_DRY_RUN=false
 BIOFINGER_RECEIVER_LOG_PAYLOAD=false
 ```
 
 `SUPABASE_SERVICE_ROLE_KEY` tidak boleh masuk repo, tidak boleh dipakai di browser, dan hanya boleh ada di server/secret manager.
+
+Untuk teks panduan di frontend, receiver bisa diatur lewat env Vite:
+
+```bash
+VITE_BIOFINGER_ADMS_RECEIVER_HOST=187.77.127.179
+VITE_BIOFINGER_ADMS_RECEIVER_PORT=8090
+```
 
 `BIOFINGER_ALLOWED_SERIALS` tetap boleh diisi untuk serial utama/legacy. Untuk penambahan mesin baru, daftarkan serial dari UI `Biofinger > Device > Tambah Device`; receiver akan mengecek registry Supabase dan menerima serial tersebut tanpa perlu edit env VPS selama status device `active` atau `maintenance`.
 
@@ -150,9 +160,22 @@ Receiver melakukan:
 2. Buat link user mesin baru di `employee_attendance_device_links` dengan status `pending`.
 3. Insert raw event ke `biofinger_attendance_events` memakai `source_hash`, sehingga event dobel diabaikan.
 4. Jika User ID sudah punya mapping `active`, event baru langsung diberi `employee_id` dan `import_status = mapped`.
-5. Update `last_seen_at`, `last_sync_at`, dan `sync_cursor_at`.
+5. Jika `BIOFINGER_CONVERT_ON_IMPORT=true`, panggil `convert_biofinger_attendance_events` untuk membuat `attendance_logs` dari event yang sudah `mapped`. Default env tetap `false` sampai sample manual sudah valid.
+6. Update `last_seen_at`, `last_sync_at`, dan `sync_cursor_at`.
 
-Receiver tidak langsung membuat payroll final. Konversi ke `attendance_logs` tetap tahap berikutnya setelah mapping dan aturan punch valid.
+Konversi memakai aturan aman:
+
+- Check-in yang dipakai adalah event `Masuk` paling awal per karyawan per tanggal.
+- Check-out yang dipakai adalah event `Pulang` paling akhir per karyawan per tanggal.
+- Event duplikat ditandai `ignored` dengan catatan sistem.
+- Event yang bentrok dengan attendance dari sumber lain ditandai `error`, bukan menimpa data manual/mobile.
+- Setelah konversi, payroll cycle karyawan terkait di-refresh.
+
+Manual convert juga tersedia dari DMS UI tombol `Proses Absensi` atau command:
+
+```powershell
+npm run biofinger:convert -- --management-api --ref heibhxempixiiqmalyuf --device-code BIO-AT301-001
+```
 
 ## Fallback
 

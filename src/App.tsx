@@ -63,6 +63,8 @@ import dmsLogo from "../assets/brand/dms-logo.jpeg"
 import { CategoryTabs } from "./components/category-tabs"
 import { ConfirmDialog } from "./components/confirm-dialog"
 import { ClickableTableRow, DataTablePagination, RowActionButton, RowActionMenu, RowActionMenuItem, TableNumberCell, TableText } from "./components/data-table"
+import { FoundationDialog, FoundationDialogCloseButton } from "./components/foundation-dialog"
+import { FoundationRefreshButton } from "./components/foundation-refresh-button"
 import { FoundationSkeleton, FoundationTableSkeletonRows } from "./components/foundation-loading"
 import { FoundationSelect } from "./components/foundation-select"
 import { DateFormField, SegmentedFormField, SelectFormField, SwitchFormField, TextFormField } from "./components/form-field"
@@ -93,6 +95,7 @@ type ViewId =
   | "users"
   | "role-permission"
   | "audit-log"
+  | "guide"
   | "profile"
 type AttendanceStatus = "valid" | "pending" | "failed" | "missing"
 type PayrollStatus = "active" | "ready" | "locked" | "paid" | "void"
@@ -394,7 +397,7 @@ interface EmployeePortalData {
   recentLogs: EmployeePortalAttendanceLog[]
 }
 
-type ModuleViewId = Exclude<ViewId, "dashboard" | "kiosk-mode" | "biofinger" | "master-data" | "users" | "role-permission" | "audit-log" | "profile">
+type ModuleViewId = Exclude<ViewId, "dashboard" | "kiosk-mode" | "biofinger" | "master-data" | "users" | "role-permission" | "audit-log" | "guide" | "profile">
 
 interface ModuleKpi {
   label: string
@@ -556,8 +559,8 @@ type BiofingerImportStatus = "pending" | "mapped" | "converted" | "ignored" | "e
 type BiofingerWorkspaceTab = "overview" | "devices" | "mapping" | "events"
 
 const BIOFINGER_ALL_DEVICES = "all"
-const BIOFINGER_ADMS_RECEIVER_HOST = "187.77.127.179"
-const BIOFINGER_ADMS_RECEIVER_PORT = "8090"
+const BIOFINGER_ADMS_RECEIVER_HOST = String(import.meta.env.VITE_BIOFINGER_ADMS_RECEIVER_HOST || "187.77.127.179")
+const BIOFINGER_ADMS_RECEIVER_PORT = String(import.meta.env.VITE_BIOFINGER_ADMS_RECEIVER_PORT || "8090")
 
 interface BiofingerDeviceRow {
   id: string
@@ -646,6 +649,15 @@ interface BiofingerData {
   eventCount: number
   employees: BiofingerEmployeeOption[]
   workLocations: BiofingerWorkLocationOption[]
+}
+
+interface BiofingerConversionSummary {
+  eventsSelected: number
+  eventsConverted: number
+  eventsIgnored: number
+  eventsError: number
+  attendanceLogsUpserted: number
+  employeesRefreshed: number
 }
 
 type BiofingerDataUpdater = BiofingerData | ((current: BiofingerData) => BiofingerData)
@@ -876,6 +888,22 @@ interface ToastMessage {
   description: string
 }
 
+interface GuideArticle {
+  id: string
+  viewId?: ViewId
+  title: string
+  group: string
+  summary: string
+  icon: LucideIcon
+  audience: string
+  frequency: string
+  tags: string[]
+  steps: string[]
+  checks: string[]
+  pitfalls: string[]
+  related: string[]
+}
+
 const accessProfileCacheKey = "dms.management.accessProfile.v4"
 const accessProfileCacheMaxAgeMs = 1000 * 60 * 60 * 12
 
@@ -895,6 +923,7 @@ const navItems: NavItem[] = [
   { id: "users", label: "Pengguna & Akses", icon: ShieldCheck, group: "Sistem & Akses" },
   { id: "role-permission", label: "Role & Permission", icon: Lock, group: "Sistem & Akses" },
   { id: "audit-log", label: "Audit Log", icon: FileBarChart, group: "Sistem & Akses" },
+  { id: "guide", label: "Panduan", icon: ClipboardList, group: "Sistem & Akses" },
   { id: "profile", label: "Profil Saya", icon: UserRoundCheck, group: "Sistem & Akses" },
 ]
 
@@ -912,8 +941,454 @@ const productionReadyViews = new Set<ViewId>([
   "users",
   "role-permission",
   "audit-log",
+  "guide",
   "profile",
 ])
+
+const guideArticles: GuideArticle[] = [
+  {
+    id: "dashboard",
+    viewId: "dashboard",
+    title: "Dashboard Operasional",
+    group: "Overview",
+    summary: "Membaca kondisi harian DMS dari KPI, aktivitas absensi, payroll, dan sinyal risiko.",
+    icon: LayoutDashboard,
+    audience: "Owner, HR, Supervisor",
+    frequency: "Awal hari dan akhir shift",
+    tags: ["kpi", "monitoring", "ringkasan"],
+    steps: [
+      "Buka Dashboard setelah login untuk melihat ringkasan aktivitas utama.",
+      "Cek KPI absensi, karyawan aktif, payroll, dan antrian review.",
+      "Prioritaskan kartu yang menunjukkan pending, review, atau error.",
+      "Masuk ke modul terkait dari sidebar untuk tindak lanjut data yang bermasalah.",
+    ],
+    checks: [
+      "Angka pending absensi sudah turun sebelum payroll diproses.",
+      "Tidak ada antrian review kritis yang tertinggal.",
+      "Data hari ini sudah sinkron dari sumber absensi mobile dan Biofinger.",
+    ],
+    pitfalls: [
+      "Jangan mengambil keputusan payroll hanya dari dashboard tanpa membuka detail.",
+      "Jika angka terlihat stale, refresh modul sumbernya lebih dulu.",
+    ],
+    related: ["attendance-live", "attendance-review", "payroll"],
+  },
+  {
+    id: "attendance-live",
+    viewId: "attendance-live",
+    title: "Live Absensi",
+    group: "Absensi",
+    summary: "Memantau check-in dan check-out harian dari mobile/GPS dan status validasi wajah.",
+    icon: Megaphone,
+    audience: "HR, Supervisor",
+    frequency: "Saat shift berjalan",
+    tags: ["check-in", "check-out", "gps", "face"],
+    steps: [
+      "Pilih tanggal atau mode live sesuai kebutuhan monitoring.",
+      "Gunakan filter lokasi/divisi untuk fokus pada area kerja tertentu.",
+      "Cek status GPS, radius, face score, dan jam masuk/keluar.",
+      "Buka detail baris jika butuh koreksi checkout atau reset data hari itu.",
+    ],
+    checks: [
+      "Karyawan shift aktif sudah punya check-in valid.",
+      "Log out-of-radius punya alasan atau masuk antrian review.",
+      "Check-out kosong dipantau sebelum akhir hari.",
+    ],
+    pitfalls: [
+      "Jangan koreksi absensi tanpa catatan yang bisa diaudit.",
+      "Pastikan tanggal filter benar sebelum mengambil keputusan.",
+    ],
+    related: ["attendance-review", "field-monitoring", "payroll"],
+  },
+  {
+    id: "kiosk-mode",
+    viewId: "kiosk-mode",
+    title: "Kiosk Mode",
+    group: "Absensi",
+    summary: "Mode absensi terpusat untuk perangkat bersama dengan kode akses dan validasi karyawan.",
+    icon: ScanLine,
+    audience: "Admin lokasi, Supervisor",
+    frequency: "Saat perangkat absensi bersama dipakai",
+    tags: ["kiosk", "device", "pin"],
+    steps: [
+      "Aktifkan perangkat kiosk yang sudah terdaftar untuk lokasi kerja.",
+      "Pastikan kode akses kiosk hanya diketahui admin lokasi.",
+      "Karyawan melakukan check-in/out lewat perangkat yang disediakan.",
+      "Pantau hasilnya di Live Absensi dan review jika ada anomali.",
+    ],
+    checks: [
+      "Perangkat kiosk terhubung ke lokasi kerja yang benar.",
+      "Jam perangkat sesuai zona waktu operasional.",
+      "Akses kiosk tidak dipakai di luar lokasi kerja.",
+    ],
+    pitfalls: [
+      "Jangan memakai satu kiosk untuk lokasi yang berbeda tanpa update registry.",
+      "Jangan membagikan kode akses kiosk ke pengguna umum.",
+    ],
+    related: ["attendance-live", "work-locations", "audit-log"],
+  },
+  {
+    id: "biofinger-device",
+    viewId: "biofinger",
+    title: "Biofinger AT-301",
+    group: "Absensi",
+    summary: "Menambahkan mesin Biofinger, menghubungkan serial ke DMS, dan memastikan raw event masuk ke backend.",
+    icon: Fingerprint,
+    audience: "Admin sistem, HR, teknisi lokasi",
+    frequency: "Saat tambah mesin atau cek sinkronisasi",
+    tags: ["biofinger", "at-301", "adms", "serial"],
+    steps: [
+      "Ambil Serial Number dari halaman Dev Status mesin AT-301.",
+      "Buka Biofinger > Device > Tambah Device, isi serial yang sama persis, nama display, status, dan lokasi kerja.",
+      "Di mesin buka COMM. Settings > Pengaturan Server cloud, isi server receiver, port, Server Mode ADMS, HTTPS Off, dan Proxy Off.",
+      "Pastikan mesin mendapat internet via LAN atau WiFi tanpa PC admin menyala terus.",
+      "Klik Refresh Data di DMS untuk menarik ulang data yang sudah masuk ke Supabase.",
+      "Mapping User ID mesin ke karyawan DMS sebelum raw event dipakai sebagai absensi payroll.",
+      "Klik Proses Absensi untuk mengubah event mapped menjadi attendance final, atau aktifkan auto-convert di receiver VPS.",
+    ],
+    checks: [
+      "Serial di DMS sama persis dengan Serial Number mesin.",
+      "Device status Active atau Maintenance agar receiver mengizinkan push.",
+      "Last Seen, User ID mesin, dan Raw Event bertambah setelah mesin online.",
+      "Setiap User ID aktif sudah dipetakan ke satu karyawan DMS.",
+      "Raw Event berstatus converted mulai terlihat di Live Absensi dan Payroll cycle.",
+    ],
+    pitfalls: [
+      "Jangan menukar Serial Number dengan User ID fingerprint.",
+      "Refresh Data tidak memaksa mesin sync, hanya mengambil ulang data backend.",
+      "Jika data belum masuk, cek internet mesin, alamat server, port, dan allowlist serial.",
+      "Event yang bentrok dengan absensi manual/mobile masuk status error dan perlu dicek, bukan ditimpa otomatis.",
+    ],
+    related: ["employees", "attendance-live", "payroll"],
+  },
+  {
+    id: "employees",
+    viewId: "employees",
+    title: "Karyawan",
+    group: "Master Operasional",
+    summary: "Mengelola identitas karyawan, status kerja, lokasi, shift, gaji, dan profil wajah.",
+    icon: UserPlus,
+    audience: "HR, Admin",
+    frequency: "Saat onboarding, mutasi, atau perubahan status",
+    tags: ["employee", "onboarding", "master"],
+    steps: [
+      "Tambah karyawan dari modul Karyawan dengan data identitas utama.",
+      "Hubungkan divisi, jabatan, lokasi kerja, shift, dan tipe gaji.",
+      "Lengkapi profil wajah jika karyawan memakai absensi mobile face verification.",
+      "Pastikan status aktif sebelum karyawan dipakai di absensi, Biofinger, atau payroll.",
+    ],
+    checks: [
+      "Kode karyawan unik dan konsisten.",
+      "Lokasi kerja serta shift sudah dipilih.",
+      "Tipe gaji harian/bulanan sudah sesuai kebijakan.",
+      "Karyawan nonaktif tidak ikut payroll aktif.",
+    ],
+    pitfalls: [
+      "Jangan mapping Biofinger ke karyawan yang belum final datanya.",
+      "Perubahan lokasi kerja perlu dicek ulang terhadap radius absensi.",
+    ],
+    related: ["master-data", "biofinger-device", "payroll"],
+  },
+  {
+    id: "attendance-requests",
+    viewId: "attendance-requests",
+    title: "Rekap Absensi",
+    group: "Absensi",
+    summary: "Membaca rekap kehadiran per tanggal/range sebelum dipakai untuk review dan payroll.",
+    icon: CalendarCheck2,
+    audience: "HR, Finance",
+    frequency: "Harian dan sebelum closing payroll",
+    tags: ["rekap", "cycle", "attendance"],
+    steps: [
+      "Pilih tanggal atau range yang ingin direkap.",
+      "Filter karyawan, divisi, atau lokasi jika ingin audit area tertentu.",
+      "Cek status masuk, pulang, jam kerja, keterlambatan, dan catatan review.",
+      "Koreksi data yang belum valid sebelum dipakai payroll.",
+    ],
+    checks: [
+      "Tanggal/range filter sesuai periode yang dicek.",
+      "Semua anomali sudah dipindahkan ke approval atau dikoreksi.",
+      "Data rekap tidak bertentangan dengan raw event Biofinger.",
+    ],
+    pitfalls: [
+      "Jangan memproses payroll sebelum rekap periode bersih.",
+      "Jangan mengabaikan check-out kosong pada karyawan aktif.",
+    ],
+    related: ["attendance-live", "attendance-review", "payroll"],
+  },
+  {
+    id: "attendance-review",
+    viewId: "attendance-review",
+    title: "Approval Absensi",
+    group: "Absensi",
+    summary: "Menyelesaikan absensi bermasalah seperti out-of-radius, wajah gagal, jam tidak lengkap, dan koreksi manual.",
+    icon: ClipboardList,
+    audience: "HR, Supervisor",
+    frequency: "Setiap ada antrian review",
+    tags: ["approval", "review", "correction"],
+    steps: [
+      "Buka antrian Approval dan pilih item yang perlu keputusan.",
+      "Baca detail bukti GPS, waktu, catatan, dan sumber event.",
+      "Approve hanya jika bukti cukup; reject atau pending jika perlu klarifikasi.",
+      "Tambahkan catatan audit agar keputusan bisa ditelusuri.",
+    ],
+    checks: [
+      "Setiap approval punya alasan yang jelas.",
+      "Keputusan supervisor sesuai kebijakan HR.",
+      "Item critical selesai sebelum payroll lock.",
+    ],
+    pitfalls: [
+      "Jangan approve massal tanpa cek issue detail.",
+      "Jangan mengubah data historis tanpa alasan audit.",
+    ],
+    related: ["attendance-live", "audit-log", "payroll"],
+  },
+  {
+    id: "field-monitoring",
+    viewId: "field-monitoring",
+    title: "Lapangan & GPS",
+    group: "Absensi",
+    summary: "Memantau validitas lokasi kerja, radius GPS, dan aktivitas karyawan lapangan.",
+    icon: LocateFixed,
+    audience: "Supervisor, HR",
+    frequency: "Saat monitoring lapangan atau audit radius",
+    tags: ["gps", "lokasi", "radius"],
+    steps: [
+      "Pilih lokasi kerja atau tanggal monitoring.",
+      "Cek radius, koordinat, dan karyawan yang berada di luar area.",
+      "Bandingkan data GPS dengan shift serta log absensi.",
+      "Update master lokasi jika radius atau koordinat berubah.",
+    ],
+    checks: [
+      "Koordinat lokasi kerja sudah terisi.",
+      "Radius tidak terlalu sempit atau terlalu longgar.",
+      "Outlier GPS masuk review sebelum dipakai payroll.",
+    ],
+    pitfalls: [
+      "Jangan mengubah radius tanpa koordinasi operasional.",
+      "GPS indoor bisa meleset, selalu cek bukti pendukung.",
+    ],
+    related: ["master-data", "attendance-review", "work-locations"],
+  },
+  {
+    id: "payroll",
+    viewId: "payroll",
+    title: "Payroll",
+    group: "Finance",
+    summary: "Memproses gaji berdasarkan cycle absensi, komponen gaji, lembur, bonus, potongan, dan kasbon.",
+    icon: BadgeDollarSign,
+    audience: "Finance, Owner, HR",
+    frequency: "Saat closing periode payroll",
+    tags: ["gaji", "cycle", "finance"],
+    steps: [
+      "Pastikan rekap absensi dan approval periode sudah bersih.",
+      "Cek komponen gaji, lembur, bonus, potongan, dan kasbon.",
+      "Review draft payroll per karyawan sebelum lock.",
+      "Lock payroll hanya setelah HR/Finance setuju.",
+      "Tandai paid setelah pembayaran benar-benar dilakukan.",
+    ],
+    checks: [
+      "Tidak ada absensi pending di periode payroll.",
+      "Komponen gaji aktif sesuai master data.",
+      "Kasbon dan potongan sudah masuk perhitungan.",
+      "Payroll locked tidak berubah tanpa proses unlock yang diaudit.",
+    ],
+    pitfalls: [
+      "Jangan lock payroll sebelum approval absensi selesai.",
+      "Jangan edit manual nominal tanpa catatan dan jejak audit.",
+    ],
+    related: ["attendance-requests", "attendance-review", "cash-advance"],
+  },
+  {
+    id: "cash-advance",
+    viewId: "cash-advance",
+    title: "Kasbon",
+    group: "Finance",
+    summary: "Mengelola pinjaman/kasbon karyawan, cicilan, status approval, dan potongan payroll.",
+    icon: WalletCards,
+    audience: "Finance, Owner",
+    frequency: "Saat ada pengajuan kasbon atau closing payroll",
+    tags: ["kasbon", "potongan", "finance"],
+    steps: [
+      "Input atau review pengajuan kasbon dari karyawan.",
+      "Setujui hanya sesuai kebijakan limit dan kemampuan potong.",
+      "Tentukan cicilan atau skema potongan payroll.",
+      "Cek sisa saldo kasbon sebelum payroll diproses.",
+    ],
+    checks: [
+      "Nominal dan tenor cicilan sudah disetujui.",
+      "Saldo kasbon aktif terbawa ke payroll.",
+      "Kasbon lunas tidak lagi memotong gaji.",
+    ],
+    pitfalls: [
+      "Jangan approve kasbon tanpa otorisasi finance/owner.",
+      "Pastikan perubahan cicilan tercatat sebelum payroll lock.",
+    ],
+    related: ["payroll", "employees", "audit-log"],
+  },
+  {
+    id: "work-locations",
+    viewId: "work-locations",
+    title: "Lokasi Kerja",
+    group: "Master Operasional",
+    summary: "Mengatur lokasi kerja, koordinat, radius GPS, dan hubungan device/absensi ke area kerja.",
+    icon: Package,
+    audience: "Admin, HR, Supervisor",
+    frequency: "Saat buka lokasi baru atau audit GPS",
+    tags: ["lokasi", "gps", "radius"],
+    steps: [
+      "Buat lokasi kerja dari Master Data atau modul lokasi.",
+      "Isi kode, nama, alamat, koordinat latitude/longitude, dan radius.",
+      "Hubungkan karyawan serta device Biofinger ke lokasi yang benar.",
+      "Tes absensi di lokasi untuk memastikan radius sesuai kondisi nyata.",
+    ],
+    checks: [
+      "Koordinat tidak kosong dan formatnya valid.",
+      "Radius sesuai kondisi area kerja.",
+      "Device Biofinger Gudang A/B/C memakai lokasi yang tepat.",
+    ],
+    pitfalls: [
+      "Jangan memakai satu lokasi generik untuk semua cabang.",
+      "Koordinat salah akan membuat absensi valid terlihat out-of-radius.",
+    ],
+    related: ["field-monitoring", "biofinger-device", "master-data"],
+  },
+  {
+    id: "master-data",
+    viewId: "master-data",
+    title: "Master Data",
+    group: "Sistem",
+    summary: "Pondasi dropdown dan referensi untuk role, divisi, jabatan, shift, lokasi, dan komponen gaji.",
+    icon: Database,
+    audience: "Admin sistem, HR, Finance",
+    frequency: "Saat setup awal dan perubahan kebijakan",
+    tags: ["master", "referensi", "dropdown"],
+    steps: [
+      "Kelola data referensi dari tab kategori yang sesuai.",
+      "Isi kode unik, nama, detail, status aktif, dan urutan tampil.",
+      "Untuk lokasi, lengkapi koordinat dan radius.",
+      "Untuk komponen gaji, pastikan tipe earning/deduction dan metode hitung benar.",
+    ],
+    checks: [
+      "Data yang dipakai modul lain tidak dinonaktifkan sembarangan.",
+      "Kode master konsisten dan mudah dikenali.",
+      "Komponen payroll sudah sesuai kebijakan perusahaan.",
+    ],
+    pitfalls: [
+      "Menghapus master yang sudah dipakai bisa memutus relasi data.",
+      "Perubahan shift/lokasi berdampak langsung ke absensi.",
+    ],
+    related: ["employees", "payroll", "field-monitoring"],
+  },
+  {
+    id: "users",
+    viewId: "users",
+    title: "Pengguna & Akses",
+    group: "Sistem",
+    summary: "Mengundang user management app, mengatur role, status login, dan akses dasar.",
+    icon: ShieldCheck,
+    audience: "Owner, Admin sistem",
+    frequency: "Saat onboarding admin atau perubahan akses",
+    tags: ["user", "akses", "login"],
+    steps: [
+      "Invite user baru dengan email yang benar.",
+      "Pilih role sesuai tanggung jawab kerja.",
+      "Pastikan status user aktif setelah menerima undangan.",
+      "Lock/nonaktifkan user yang sudah tidak berwenang.",
+    ],
+    checks: [
+      "Role user tidak melebihi kebutuhan kerja.",
+      "Email user benar sebelum invite.",
+      "Akun lama dinonaktifkan saat user keluar.",
+    ],
+    pitfalls: [
+      "Jangan memakai satu akun bersama untuk banyak orang.",
+      "Jangan memberi akses owner/admin tanpa approval.",
+    ],
+    related: ["role-permission", "audit-log", "profile"],
+  },
+  {
+    id: "role-permission",
+    viewId: "role-permission",
+    title: "Role & Permission",
+    group: "Sistem",
+    summary: "Menentukan hak akses per role agar setiap user hanya membuka fitur yang diperlukan.",
+    icon: Lock,
+    audience: "Owner, Admin sistem",
+    frequency: "Saat setup role atau audit akses",
+    tags: ["role", "permission", "security"],
+    steps: [
+      "Pilih role yang ingin diatur.",
+      "Aktifkan permission sesuai tugas role tersebut.",
+      "Review dampak perubahan pada user yang memakai role itu.",
+      "Simpan perubahan dan cek Audit Log jika perlu verifikasi.",
+    ],
+    checks: [
+      "Role aktif minimal punya akses dashboard atau modul kerjanya.",
+      "Permission finance hanya untuk user berwenang.",
+      "Permission manage lebih ketat dibanding permission view.",
+    ],
+    pitfalls: [
+      "Jangan mengubah role aktif tanpa memahami jumlah user terdampak.",
+      "Jangan memberi permission manage pada user viewer.",
+    ],
+    related: ["users", "audit-log", "dashboard"],
+  },
+  {
+    id: "audit-log",
+    viewId: "audit-log",
+    title: "Audit Log",
+    group: "Sistem",
+    summary: "Melihat riwayat aktivitas penting seperti perubahan data, approval, akses, dan payroll.",
+    icon: FileBarChart,
+    audience: "Owner, Admin, Auditor",
+    frequency: "Saat investigasi atau audit berkala",
+    tags: ["audit", "log", "trace"],
+    steps: [
+      "Buka Audit Log dan filter berdasarkan tanggal, user, atau modul.",
+      "Cari aktivitas yang ingin diverifikasi.",
+      "Baca detail sebelum/sesudah jika tersedia.",
+      "Gunakan hasil audit untuk klarifikasi perubahan data.",
+    ],
+    checks: [
+      "Aktivitas kritis punya user pelaku dan waktu yang jelas.",
+      "Approval dan payroll lock bisa ditelusuri.",
+      "Perubahan akses user tercatat.",
+    ],
+    pitfalls: [
+      "Audit log bukan tempat edit data, hanya sumber penelusuran.",
+      "Jangan hapus jejak audit kecuali ada kebijakan retensi resmi.",
+    ],
+    related: ["users", "role-permission", "payroll"],
+  },
+  {
+    id: "profile",
+    viewId: "profile",
+    title: "Profil Saya",
+    group: "Akun",
+    summary: "Melihat informasi akun sendiri, status akses, dan tindakan keluar aplikasi.",
+    icon: UserRoundCheck,
+    audience: "Semua user",
+    frequency: "Saat cek akun atau logout",
+    tags: ["akun", "profile", "session"],
+    steps: [
+      "Buka Profil Saya dari sidebar.",
+      "Cek nama, email, role, dan status akses.",
+      "Gunakan logout jika selesai bekerja di perangkat bersama.",
+      "Hubungi admin jika role atau akses tidak sesuai.",
+    ],
+    checks: [
+      "Role yang tampil sesuai tugas kerja.",
+      "Logout dilakukan dari perangkat publik.",
+      "Akun tidak dipakai bersama user lain.",
+    ],
+    pitfalls: [
+      "Jangan berbagi kredensial login.",
+      "Jika akses hilang setelah perubahan role, minta admin cek permission.",
+    ],
+    related: ["users", "role-permission", "audit-log"],
+  },
+]
 
 const viewPermissionMap: Partial<Record<ViewId, string>> = {
   dashboard: "dashboard.view",
@@ -3761,6 +4236,17 @@ function mapBiofingerImportStatus(value: unknown): BiofingerImportStatus {
   return "pending"
 }
 
+function mapBiofingerConversionSummary(row: Record<string, unknown> | null | undefined): BiofingerConversionSummary {
+  return {
+    eventsSelected: Number(row?.events_selected || 0),
+    eventsConverted: Number(row?.events_converted || 0),
+    eventsIgnored: Number(row?.events_ignored || 0),
+    eventsError: Number(row?.events_error || 0),
+    attendanceLogsUpserted: Number(row?.attendance_logs_upserted || 0),
+    employeesRefreshed: Number(row?.employees_refreshed || 0),
+  }
+}
+
 function mapBiofingerEventType(value: unknown): "check_in" | "check_out" | "unknown" {
   if (value === "check_in" || value === "check_out") return value
   return "unknown"
@@ -4031,6 +4517,17 @@ async function updateBiofingerUserLink(row: BiofingerUserLinkRow, employeeId: st
     .in("import_status", ["pending", "mapped", "ignored"])
 
   if (eventUpdate.error) throw eventUpdate.error
+}
+
+async function convertBiofingerAttendanceEvents(deviceId: string) {
+  const { data, error } = await supabase.rpc("convert_biofinger_attendance_events", {
+    target_device_id: deviceId && deviceId !== BIOFINGER_ALL_DEVICES ? deviceId : null,
+    target_limit: 1000,
+  })
+
+  if (error) throw error
+  const row = Array.isArray(data) ? data[0] as Record<string, unknown> | undefined : data as Record<string, unknown> | null
+  return mapBiofingerConversionSummary(row)
 }
 
 async function createBiofingerDeviceRegistry(values: BiofingerDeviceFormValues, devices: BiofingerDeviceRow[] = []) {
@@ -6298,10 +6795,7 @@ function KioskModePage({ activeView }: { activeView: ViewId }) {
         subtitle="Scan pertama otomatis check-in, scan berikutnya otomatis check-out di hari yang sama."
         icon={ScanLine}
         actions={(
-          <button className="secondaryButton" type="button" onClick={() => void fetchKiosks()} disabled={loading}>
-            <RefreshCcw size={16} />
-            Refresh Kiosk
-          </button>
+          <FoundationRefreshButton loading={loading} label="Refresh Kiosk" onClick={() => void fetchKiosks()} />
         )}
       />
 
@@ -6447,7 +6941,7 @@ function KioskModePage({ activeView }: { activeView: ViewId }) {
   )
 }
 
-function BiofingerPage({ activeView, profile }: { activeView: ViewId; profile: AppAccessProfile }) {
+function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewId; profile: AppAccessProfile; onOpenGuide?: (guideId?: string) => void }) {
   const [data, setData] = useState<BiofingerData>(() => biofingerDataCache ?? createEmptyBiofingerData())
   const [selectedDeviceId, setSelectedDeviceId] = useState(() => biofingerSelectedDeviceCache || (biofingerDataCache ? biofingerDataCache.devices.length === 1 ? biofingerDataCache.devices[0].id : BIOFINGER_ALL_DEVICES : ""))
   const [activeBiofingerTab, setActiveBiofingerTab] = useState<BiofingerWorkspaceTab>(() => biofingerActiveTabCache)
@@ -6462,6 +6956,8 @@ function BiofingerPage({ activeView, profile }: { activeView: ViewId; profile: A
   const [mappingDraftEmployeeId, setMappingDraftEmployeeId] = useState("")
   const [deviceFormValues, setDeviceFormValues] = useState<BiofingerDeviceFormValues>(() => createEmptyBiofingerDeviceForm())
   const [loading, setLoading] = useState(() => !biofingerDataCache)
+  const [converting, setConverting] = useState(false)
+  const [convertConfirmOpen, setConvertConfirmOpen] = useState(false)
   const [savingId, setSavingId] = useState("")
   const [savingDeviceId, setSavingDeviceId] = useState("")
   const [errorMessage, setErrorMessage] = useState("")
@@ -6559,6 +7055,8 @@ function BiofingerPage({ activeView, profile }: { activeView: ViewId; profile: A
   const safeCurrentPage = Math.min(Math.max(1, currentPage), pageCount)
   const paginatedLinks = filteredLinks.slice((safeCurrentPage - 1) * safePageSize, safeCurrentPage * safePageSize)
   const deviceEvents = !isAllDeviceSelected ? data.events.filter((event) => event.attendanceDeviceId === selectedDeviceId) : data.events
+  const mappedSampleEvents = deviceEvents.filter((event) => event.importStatus === "mapped" && event.employeeId && event.normalizedEventType !== "unknown").length
+  const convertScopeLabel = selectedDevice ? selectedDevice.name : "Semua device Biofinger"
   const mappingDetailEvents = mappingDetailRow
     ? data.events.filter((event) => event.attendanceDeviceId === mappingDetailRow.attendanceDeviceId && event.externalUserId === mappingDetailRow.externalUserId).slice(0, 6)
     : []
@@ -6568,6 +7066,7 @@ function BiofingerPage({ activeView, profile }: { activeView: ViewId; profile: A
   const scopedActiveLinks = deviceLinks.filter((row) => row.status === "active" && row.employeeId).length
   const scopedPendingLinks = deviceLinks.filter((row) => row.status === "pending").length
   const mappedEvents = data.events.filter((event) => event.employeeId).length
+  const convertedEvents = data.events.filter((event) => event.importStatus === "converted").length
   const totalRawEvents = data.eventCount || data.events.length
   const syncSteps = [
     {
@@ -6597,6 +7096,13 @@ function BiofingerPage({ activeView, profile }: { activeView: ViewId; profile: A
       description: "Siap proses absensi",
       icon: Database,
       complete: !biofingerDataLoading && (isAllDeviceSelected ? totalRawEvents : deviceEvents.length) > 0,
+    },
+    {
+      label: "Absensi Final",
+      value: biofingerDataValue(`${formatNumber(convertedEvents)} converted`, "stepValue"),
+      description: "attendance_logs",
+      icon: FileCheck2,
+      complete: !biofingerDataLoading && convertedEvents > 0,
     },
   ]
   const deviceOptions = biofingerDataLoading
@@ -6868,16 +7374,41 @@ function BiofingerPage({ activeView, profile }: { activeView: ViewId; profile: A
     }
   }
 
+  const handleConvertAttendance = async () => {
+    setConvertConfirmOpen(false)
+    setConverting(true)
+    try {
+      const summary = await convertBiofingerAttendanceEvents(selectedDeviceId)
+      showToast({
+        tone: summary.eventsError > 0 ? "error" : "success",
+        title: summary.eventsConverted > 0 ? "Absensi Biofinger diproses" : "Tidak ada event baru",
+        description: `${formatNumber(summary.eventsConverted)} converted, ${formatNumber(summary.eventsIgnored)} duplicate diabaikan, ${formatNumber(summary.eventsError)} butuh cek.`,
+      })
+      await refreshData()
+    } catch (error) {
+      showToast({
+        tone: "error",
+        title: "Gagal proses absensi",
+        description: getFriendlySupabaseError(error, "Pastikan migration convert Biofinger sudah diterapkan di Supabase."),
+      })
+    } finally {
+      setConverting(false)
+    }
+  }
+
   return (
     <OperationalPageShell>
       <PageHeader
         activeView={activeView}
         subtitle="Mapping user fingerprint AT-301 ke master karyawan DMS sebelum raw event dikonversi ke absensi payroll."
         actions={
-          <button className="secondaryButton" type="button" onClick={() => void refreshData()} disabled={loading}>
-            <RefreshCcw size={17} />
-            Refresh Data
-          </button>
+          <>
+            <button className="primaryButton" type="button" disabled={!canManage || biofingerDataLoading || converting || !data.schemaReady} onClick={() => setConvertConfirmOpen(true)}>
+              <FileCheck2 size={17} />
+              {converting ? "Memproses..." : "Proses Absensi"}
+            </button>
+            <FoundationRefreshButton loading={loading} disabled={converting} onClick={() => void refreshData()} />
+          </>
         }
         meta={
           <InlinePageStats
@@ -7002,9 +7533,9 @@ function BiofingerPage({ activeView, profile }: { activeView: ViewId; profile: A
                 </div>
                 <div className="biofingerDeviceHeaderActions">
                   <InlinePageStats items={biofingerDataLoading ? biofingerInlineLoadingStats(2) : [`${data.devices.length} device`, `${data.workLocations.length} lokasi kerja`]} />
-                  <button className="secondaryButton" type="button" onClick={() => setDeviceGuideOpen(true)}>
-                    <ClipboardList size={16} />
-                    Panduan Setup
+                  <button className="biofingerGuideTrigger" type="button" aria-label="Buka panduan setup device" title="Panduan Setup" onClick={() => setDeviceGuideOpen(true)}>
+                    <ClipboardList size={18} />
+                    <span className="srOnly">Panduan Setup</span>
                   </button>
                   <button className="primaryButton" type="button" disabled={!canManage || biofingerDataLoading} onClick={openCreateDeviceDialog}>
                     <UserPlus size={16} />
@@ -7261,6 +7792,10 @@ function BiofingerPage({ activeView, profile }: { activeView: ViewId; profile: A
         open={deviceGuideOpen}
         onClose={() => setDeviceGuideOpen(false)}
         onCopySetting={handleCopyBiofingerSetting}
+        onOpenFullGuide={() => {
+          setDeviceGuideOpen(false)
+          onOpenGuide?.("biofinger-device")
+        }}
       />
 
       <BiofingerMappingDrawer
@@ -7285,6 +7820,40 @@ function BiofingerPage({ activeView, profile }: { activeView: ViewId; profile: A
           void handleStatusChange(row, "pending")
         }}
       />
+
+      <ConfirmDialog
+        open={convertConfirmOpen}
+        eyebrow="Validasi Absensi"
+        title="Proses event Biofinger ke absensi?"
+        description="Event yang sudah mapped akan dibuat menjadi attendance final untuk payroll. Data manual dari sumber lain tidak akan ditimpa."
+        icon={FileCheck2}
+        tone="warning"
+        confirmLabel="Proses Absensi"
+        loading={converting}
+        onClose={() => {
+          if (!converting) setConvertConfirmOpen(false)
+        }}
+        onConfirm={() => void handleConvertAttendance()}
+      >
+        <div className="confirmDialogPreview">
+          <strong>{convertScopeLabel}</strong>
+          <small>{isAllDeviceSelected ? "Scope semua device aktif" : selectedDevice ? formatBiofingerConnection(selectedDevice) : "Device belum dipilih"}</small>
+        </div>
+        <div className="confirmRelationList">
+          <div>
+            <span>Mapping aktif</span>
+            <strong>{formatNumber(scopedActiveLinks)} user</strong>
+          </div>
+          <div>
+            <span>Sample mapped</span>
+            <strong>{formatNumber(mappedSampleEvents)} event</strong>
+          </div>
+          <div>
+            <span>Batch proses</span>
+            <strong>maks. 1.000 event</strong>
+          </div>
+        </div>
+      </ConfirmDialog>
 
       <ToastViewport toast={toast} onClose={() => setToast(null)} />
     </OperationalPageShell>
@@ -7329,18 +7898,16 @@ function BiofingerMappingDrawer({
   const replaceWarning = Boolean(row.employeeId && selectedEmployeeId && selectedEmployeeId !== row.employeeId)
   const saveDisabled = !canManage || saving || Boolean(conflictRow) || !hasMappingChange || (!selectedEmployeeId && !row.employeeId)
 
-  return createPortal(
-    <div className="dialogBackdrop biofingerDrawerBackdrop" role="presentation" onMouseDown={saving ? undefined : onClose}>
-      <aside
-        className="dialogPanel biofingerMappingDrawer"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="biofinger-mapping-title"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <button className="iconButton dialogClose" type="button" aria-label="Tutup detail mapping" disabled={saving} onClick={onClose}>
-          <X size={18} />
-        </button>
+  return (
+    <FoundationDialog
+      open={Boolean(row)}
+      labelledBy="biofinger-mapping-title"
+      className="biofingerMappingDrawer"
+      backdropClassName="biofingerDrawerBackdrop"
+      closeOnBackdrop={!saving}
+      onClose={onClose}
+    >
+        <FoundationDialogCloseButton label="Tutup detail mapping" disabled={saving} onClose={onClose} />
 
         <div className="biofingerDrawerHeader">
           <span className="dialogEyebrow"><UserRoundCheck size={15} /> Mapping Control</span>
@@ -7456,9 +8023,7 @@ function BiofingerMappingDrawer({
             {saving ? "Menyimpan..." : selectedEmployeeId ? "Simpan Mapping" : "Kosongkan Mapping"}
           </button>
         </div>
-      </aside>
-    </div>,
-    document.body,
+    </FoundationDialog>
   )
 }
 
@@ -7495,17 +8060,14 @@ function BiofingerDeviceDialog({
   const serialNumber = normalizeBiofingerSerial(values.serialNumber)
 
   return (
-    <div className="dialogBackdrop" role="presentation" onMouseDown={saving ? undefined : onClose}>
-      <section
-        className="dialogPanel biofingerDeviceDialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="biofinger-device-dialog-title"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <button className="iconButton dialogClose" type="button" aria-label="Tutup setting device" disabled={saving} onClick={onClose}>
-          <X size={18} />
-        </button>
+    <FoundationDialog
+      open={Boolean(mode)}
+      labelledBy="biofinger-device-dialog-title"
+      className="biofingerDeviceDialog"
+      closeOnBackdrop={!saving}
+      onClose={onClose}
+    >
+        <FoundationDialogCloseButton label="Tutup setting device" disabled={saving} onClose={onClose} />
 
         <div className="dialogCompactHeader biofingerDeviceDialogHeader">
           <div className="biofingerDeviceDialogHeading">
@@ -7638,8 +8200,7 @@ function BiofingerDeviceDialog({
             {saving ? "Menyimpan..." : isCreate ? "Tambah Device" : "Simpan Device"}
           </button>
         </div>
-      </section>
-    </div>
+    </FoundationDialog>
   )
 }
 
@@ -7647,10 +8208,12 @@ function BiofingerDeviceGuideDrawer({
   open,
   onClose,
   onCopySetting,
+  onOpenFullGuide,
 }: {
   open: boolean
   onClose: () => void
   onCopySetting: (value: string, label: string) => void
+  onOpenFullGuide: () => void
 }) {
   if (!open) return null
 
@@ -7673,110 +8236,313 @@ function BiofingerDeviceGuideDrawer({
     {
       title: "Validasi device online",
       text: "Setelah disimpan dan mesin online, cek Device Registry untuk Last Seen. Raw Event dan Mapping User akan bergerak saat mesin mengirim data.",
-      meta: "Refresh data hanya jika perlu cek data terbaru.",
+      meta: "Mapping user dulu, lalu Proses Absensi untuk attendance final.",
     },
   ]
 
-  const troubleshootingItems = [
-    "Kalau raw event belum masuk, cek internet mesin dan pastikan server/port tidak salah.",
-    "Kalau receiver menolak device, cek serial di form DMS sama persis dengan Serial Number mesin.",
-    "Kalau device belum aktif, pastikan status registry Active atau Maintenance.",
-    "Allowlist receiver membaca registry DMS otomatis, biasanya butuh maksimal sekitar 1 menit.",
-  ]
-
   return (
-    <div className="dialogBackdrop biofingerDrawerBackdrop" role="presentation" onMouseDown={onClose}>
-      <section
-        className="dialogPanel biofingerGuideDrawer"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="biofinger-device-guide-title"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <button className="iconButton dialogClose" type="button" aria-label="Tutup panduan setup device" onClick={onClose}>
-          <X size={18} />
-        </button>
+    <FoundationDialog
+      open={open}
+      mode="guide"
+      labelledBy="biofinger-device-guide-title"
+      className="biofingerQuickGuideDialog"
+      backdropClassName="biofingerQuickGuideBackdrop"
+      onClose={onClose}
+    >
+        <FoundationDialogCloseButton label="Tutup panduan setup device" onClose={onClose} />
 
-        <header className="biofingerDrawerHeader biofingerGuideHeader">
-          <span className="dialogEyebrow"><ClipboardList size={15} /> Panduan Operasional</span>
-          <h2 id="biofinger-device-guide-title">Setup Device Biofinger</h2>
-          <p>Gunakan panduan ini saat tambah mesin AT-301 baru agar serial, registry DMS, dan receiver cloud tersambung rapi.</p>
+        <header className="dialogCompactHeader foundationGuideDialogHeader biofingerQuickGuideHeader">
+          <div>
+            <span className="dialogEyebrow"><ClipboardList size={15} /> Panduan Cepat</span>
+            <h2 id="biofinger-device-guide-title">Setup Device Biofinger</h2>
+            <p>Ringkasan langkah saat tambah mesin AT-301. Panduan lengkap tersedia di menu Panduan.</p>
+          </div>
         </header>
 
-        <div className="biofingerGuideBody">
-          <section className="biofingerGuideOverview">
-            <div>
-              <span><Fingerprint size={18} /></span>
-              <strong>Flow singkat</strong>
-              <small>Ambil serial mesin, tambah registry DMS, setting ADMS, lalu cek raw event.</small>
-            </div>
-            <div>
-              <span><Database size={18} /></span>
-              <strong>Sumber kebenaran</strong>
-              <small>Device valid diambil dari tabel registry device DMS.</small>
-            </div>
+        <div className="foundationGuideDialogBody biofingerQuickGuideBody">
+          <section className="biofingerQuickGuideSteps">
+            {guideSteps.map((step, index) => (
+              <article key={step.title}>
+                <span>{String(index + 1).padStart(2, "0")}</span>
+                <div>
+                  <strong>{step.title}</strong>
+                  <p>{step.text}</p>
+                  <small>{step.meta}</small>
+                </div>
+              </article>
+            ))}
           </section>
 
-          <section className="biofingerGuideLayout">
-            <div className="biofingerGuideSteps">
-              {guideSteps.map((step, index) => (
-                <article className="biofingerGuideStep" key={step.title}>
-                  <span>{String(index + 1).padStart(2, "0")}</span>
-                  <div>
-                    <h3>{step.title}</h3>
-                    <p>{step.text}</p>
-                    <small>{step.meta}</small>
-                  </div>
-                </article>
-              ))}
+          <section className="biofingerQuickSettingCard">
+            <div className="biofingerDeviceSetupHeader">
+              <span><Settings size={16} /></span>
+              <div>
+                <strong>Setting mesin</strong>
+                <small>COMM. Settings / Pengaturan Server cloud</small>
+              </div>
             </div>
-
-            <aside className="biofingerGuideAside">
-              <section className="biofingerGuideSettingCard">
-                <div className="biofingerDeviceSetupHeader">
-                  <span><Settings size={16} /></span>
-                  <div>
-                    <strong>Setting wajib di mesin</strong>
-                    <small>COMM. Settings / Pengaturan Server cloud</small>
-                  </div>
-                </div>
-                <div className="biofingerGuideSettingList">
-                  <button type="button" onClick={() => onCopySetting(BIOFINGER_ADMS_RECEIVER_HOST, "Alamat server")}>
-                    <span>Alamat server</span>
-                    <strong>{BIOFINGER_ADMS_RECEIVER_HOST}</strong>
-                    <Copy size={14} />
-                  </button>
-                  <button type="button" onClick={() => onCopySetting(BIOFINGER_ADMS_RECEIVER_PORT, "Port receiver")}>
-                    <span>Port</span>
-                    <strong>{BIOFINGER_ADMS_RECEIVER_PORT}</strong>
-                    <Copy size={14} />
-                  </button>
-                  <div><span>Server Mode</span><strong>ADMS</strong></div>
-                  <div><span>HTTPS</span><strong>Off</strong></div>
-                  <div><span>Proxy</span><strong>Off</strong></div>
-                </div>
-              </section>
-
-              <section className="biofingerGuideTroubleshoot">
-                <h3>Troubleshooting cepat</h3>
-                <ul>
-                  {troubleshootingItems.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
-              </section>
-            </aside>
+            <div className="biofingerQuickSettingGrid">
+              <button type="button" onClick={() => onCopySetting(BIOFINGER_ADMS_RECEIVER_HOST, "Alamat server")}>
+                <span>Server</span>
+                <strong>{BIOFINGER_ADMS_RECEIVER_HOST}</strong>
+                <Copy size={14} />
+              </button>
+              <button type="button" onClick={() => onCopySetting(BIOFINGER_ADMS_RECEIVER_PORT, "Port receiver")}>
+                <span>Port</span>
+                <strong>{BIOFINGER_ADMS_RECEIVER_PORT}</strong>
+                <Copy size={14} />
+              </button>
+              <div><span>Mode</span><strong>ADMS</strong></div>
+              <div><span>HTTPS / Proxy</span><strong>Off</strong></div>
+            </div>
           </section>
         </div>
 
-        <footer className="biofingerGuideActions">
-          <button className="primaryButton" type="button" onClick={onClose}>
-            <FileCheck2 size={16} />
-            Mengerti
+        <footer className="dialogActions foundationGuideDialogActions biofingerQuickGuideActions">
+          <button className="secondaryButton" type="button" onClick={onClose}>Tutup</button>
+          <button className="primaryButton" type="button" onClick={onOpenFullGuide}>
+            <ExternalLink size={16} />
+            Buka Panduan Lengkap
           </button>
         </footer>
+    </FoundationDialog>
+  )
+}
+
+function GuidePage({
+  activeView,
+  initialGuideId,
+  onOpenView,
+}: {
+  activeView: ViewId
+  initialGuideId?: string
+  onOpenView: (view: ViewId) => void
+}) {
+  const [searchTerm, setSearchTerm] = useState("")
+  const [groupFilter, setGroupFilter] = useState("all")
+  const [selectedGuideId, setSelectedGuideId] = useState(initialGuideId || guideArticles[0]?.id || "")
+  const normalizedTerm = searchTerm.trim().toLowerCase()
+  const guideGroups = useMemo(() => ["all", ...Array.from(new Set(guideArticles.map((guide) => guide.group)))], [])
+  const groupOptions = guideGroups.map((group) => ({
+    value: group,
+    label: group === "all" ? "Semua Kategori" : group,
+    searchLabel: group,
+  }))
+  const filteredGuides = useMemo(() => guideArticles.filter((guide) => {
+    const matchesGroup = groupFilter === "all" || guide.group === groupFilter
+    const searchable = [
+      guide.title,
+      guide.group,
+      guide.summary,
+      guide.audience,
+      guide.frequency,
+      guide.tags.join(" "),
+    ].join(" ").toLowerCase()
+
+    return matchesGroup && (!normalizedTerm || searchable.includes(normalizedTerm))
+  }), [groupFilter, normalizedTerm])
+
+  useEffect(() => {
+    if (initialGuideId && guideArticles.some((guide) => guide.id === initialGuideId)) {
+      setSelectedGuideId(initialGuideId)
+    }
+  }, [initialGuideId])
+
+  useEffect(() => {
+    if (!filteredGuides.length) return
+    if (filteredGuides.some((guide) => guide.id === selectedGuideId)) return
+    setSelectedGuideId(filteredGuides[0].id)
+  }, [filteredGuides, selectedGuideId])
+
+  const selectedGuide = guideArticles.find((guide) => guide.id === selectedGuideId) || filteredGuides[0] || guideArticles[0]
+  const SelectedGuideIcon = selectedGuide.icon
+  const relatedGuides = selectedGuide.related
+    .map((guideId) => guideArticles.find((guide) => guide.id === guideId))
+    .filter((guide): guide is GuideArticle => Boolean(guide))
+  const visibleGuideCount = filteredGuides.length
+  const selectedViewReady = selectedGuide.viewId ? productionReadyViews.has(selectedGuide.viewId) : false
+
+  return (
+    <OperationalPageShell className="guidePageShell">
+      <PageHeader
+        activeView={activeView}
+        subtitle="Pusat SOP operasional DMS untuk admin, HR, finance, supervisor, dan teknisi. Panduan per fitur dibuat ringkas, bisa dicari, dan siap dipakai saat onboarding."
+        actions={
+          selectedGuide.viewId && selectedGuide.viewId !== "guide" ? (
+            <button className="secondaryButton" type="button" disabled={!selectedViewReady} onClick={() => onOpenView(selectedGuide.viewId as ViewId)}>
+              <ExternalLink size={16} />
+              {selectedViewReady ? "Buka Modul" : "Modul Belum Aktif"}
+            </button>
+          ) : null
+        }
+        meta={
+          <InlinePageStats
+            items={[
+              `${guideArticles.length} panduan`,
+              `${guideGroups.length - 1} kategori`,
+              `${visibleGuideCount} tampil`,
+              "SOP internal",
+            ]}
+          />
+        }
+      />
+
+      <OperationalFilterPanel className="guideFilterPanel">
+        <div className="filterField">
+          <label>Search</label>
+          <div className="uiInput inputWithIcon compact">
+            <Search size={16} />
+            <input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Cari panduan, modul, SOP, atau troubleshooting..." />
+          </div>
+        </div>
+        <div className="filterField">
+          <label>Kategori</label>
+          <FoundationSelect
+            label="Filter kategori panduan"
+            value={groupFilter}
+            options={groupOptions}
+            searchable={false}
+            onChange={setGroupFilter}
+          />
+        </div>
+        <button className="secondaryButton" type="button" onClick={() => {
+          setSearchTerm("")
+          setGroupFilter("all")
+        }}>Reset Filter</button>
+      </OperationalFilterPanel>
+
+      <section className="guideWorkspace">
+        <aside className="surfacePanel guideIndexPanel" aria-label="Daftar panduan DMS">
+          <div className="guidePanelHeader">
+            <div>
+              <span>Knowledge Base</span>
+              <h2>Daftar Panduan</h2>
+            </div>
+            <strong>{visibleGuideCount}</strong>
+          </div>
+
+          <div className="guideIndexList">
+            {filteredGuides.length === 0 ? (
+              <div className="guideEmptyState">
+                <Search size={18} />
+                <strong>Tidak ditemukan</strong>
+                <small>Ubah kata kunci atau reset filter.</small>
+              </div>
+            ) : filteredGuides.map((guide) => {
+              const Icon = guide.icon
+              const active = guide.id === selectedGuide.id
+              return (
+                <button className={clsx("guideIndexItem", active && "active")} type="button" key={guide.id} onClick={() => setSelectedGuideId(guide.id)}>
+                  <Icon size={17} />
+                  <span>
+                    <strong>{guide.title}</strong>
+                    <small>{guide.group}</small>
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </aside>
+
+        <article className="tablePanel guideDetailPanel">
+          {selectedGuide ? (
+            <>
+              <div className="guideDetailHeader">
+                <div className="guideDetailTitle">
+                  <SelectedGuideIcon size={22} />
+                  <div>
+                    <span>{selectedGuide.group}</span>
+                    <h2>{selectedGuide.title}</h2>
+                    <p>{selectedGuide.summary}</p>
+                  </div>
+                </div>
+                <div className="guideTags">
+                  {selectedGuide.tags.map((tag) => <span key={tag}>{tag}</span>)}
+                </div>
+              </div>
+
+              <div className="guideDetailMeta">
+                <div>
+                  <span>Pengguna utama</span>
+                  <strong>{selectedGuide.audience}</strong>
+                </div>
+                <div>
+                  <span>Dipakai saat</span>
+                  <strong>{selectedGuide.frequency}</strong>
+                </div>
+                <div>
+                  <span>Status</span>
+                  <strong>Aktif</strong>
+                </div>
+              </div>
+
+              <div className="guideDetailGrid">
+                <section className="guideSection guideStepsSection">
+                  <div className="guideSectionHeader">
+                    <ClipboardList size={17} />
+                    <h3>Langkah Operasional</h3>
+                  </div>
+                  <ol>
+                    {selectedGuide.steps.map((step) => (
+                      <li key={step}>{step}</li>
+                    ))}
+                  </ol>
+                </section>
+
+                <section className="guideSection">
+                  <div className="guideSectionHeader">
+                    <FileCheck2 size={17} />
+                    <h3>Checklist Validasi</h3>
+                  </div>
+                  <ul>
+                    {selectedGuide.checks.map((check) => (
+                      <li key={check}>{check}</li>
+                    ))}
+                  </ul>
+                </section>
+
+                <section className="guideSection guideWarningSection">
+                  <div className="guideSectionHeader">
+                    <AlertTriangle size={17} />
+                    <h3>Yang Perlu Dihindari</h3>
+                  </div>
+                  <ul>
+                    {selectedGuide.pitfalls.map((pitfall) => (
+                      <li key={pitfall}>{pitfall}</li>
+                    ))}
+                  </ul>
+                </section>
+              </div>
+
+              {relatedGuides.length > 0 && (
+                <section className="guideRelatedPanel">
+                  <div className="guideSectionHeader">
+                    <ExternalLink size={17} />
+                    <h3>Panduan Terkait</h3>
+                  </div>
+                  <div>
+                    {relatedGuides.map((guide) => {
+                      const Icon = guide.icon
+                      return (
+                        <button type="button" key={guide.id} onClick={() => setSelectedGuideId(guide.id)}>
+                          <Icon size={16} />
+                          <span>
+                            <strong>{guide.title}</strong>
+                            <small>{guide.group}</small>
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </section>
+              )}
+            </>
+          ) : (
+            <TableState title="Panduan tidak tersedia" description="Reset filter untuk melihat seluruh panduan." icon={Search} />
+          )}
+        </article>
       </section>
-    </div>
+    </OperationalPageShell>
   )
 }
 
@@ -9978,10 +10744,7 @@ function AuditLogPage({ activeView }: { activeView: ViewId }) {
             <h2>Audit Log</h2>
             <p>Data live dari Supabase untuk melacak perubahan penting di management app.</p>
           </div>
-          <button className="secondaryButton" type="button" onClick={() => void refreshEvents()} disabled={loading}>
-            <FileCheck2 size={17} />
-            Refresh Log
-          </button>
+          <FoundationRefreshButton loading={loading} label="Refresh Log" onClick={() => void refreshEvents()} />
         </div>
         <div className="tableScroller uiDataTableScroller uiDataTableHasColumns">
           <table>
@@ -11658,10 +12421,7 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
         subtitle={pageSubtitle}
         actions={
           <>
-            <button className="secondaryButton" type="button" onClick={refreshData} disabled={loading}>
-              <FileCheck2 size={17} />
-              Refresh Data
-            </button>
+            <FoundationRefreshButton loading={loading} onClick={refreshData} />
             {activeView === "attendance-live" && (
               <>
                 <button className="secondaryButton" type="button" onClick={() => setFaceEnrollmentOpen(true)}>
@@ -14371,7 +15131,7 @@ function EmployeePwaApp({ profile, onLogout }: { profile: AppAccessProfile; onLo
           <AlertTriangle size={22} />
           <strong>App karyawan belum siap</strong>
           <small>{errorMessage}</small>
-          <button className="primaryButton" type="button" onClick={refreshData}>Coba Lagi</button>
+          <FoundationRefreshButton variant="primary" loading={loading} label="Coba Lagi" onClick={refreshData} />
         </section>
       ) : data && employee ? (
         <>
@@ -14515,7 +15275,7 @@ function EmployeePwaApp({ profile, onLogout }: { profile: AppAccessProfile; onLo
                 <h2>Rekap Harian</h2>
                 <p>Ringkasan check-in, check-out, durasi kerja, GPS, dan face per tanggal.</p>
               </div>
-              <button className="employeeTextButton" type="button" onClick={refreshData}>Refresh</button>
+              <FoundationRefreshButton variant="text" loading={loading} label="Refresh" loadingLabel="Memuat" iconSize={14} onClick={refreshData} />
             </div>
             <div className="employeeDailyRecapList">
               {attendanceRecapRows.length === 0 ? (
@@ -14746,6 +15506,7 @@ export function App() {
   const [authLoading, setAuthLoading] = useState(true)
   const [authError, setAuthError] = useState("")
   const [activeView, setActiveView] = useState<ViewId>("dashboard")
+  const [guideFocusId, setGuideFocusId] = useState("")
   const [collapsed, setCollapsed] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const activeLabel = navItems.find((item) => item.id === activeView)?.label || "Dashboard"
@@ -14888,6 +15649,11 @@ export function App() {
     setMobileMenuOpen(false)
   }
 
+  const openGuide = (guideId?: string) => {
+    if (guideId) setGuideFocusId(guideId)
+    navigate("guide")
+  }
+
   if (authLoading) {
     return <AuthLoadingPage />
   }
@@ -14947,7 +15713,7 @@ export function App() {
           ) : activeView === "kiosk-mode" ? (
             <KioskModePage activeView={activeView} />
           ) : activeView === "biofinger" ? (
-            <BiofingerPage activeView={activeView} profile={accessProfile} />
+            <BiofingerPage activeView={activeView} profile={accessProfile} onOpenGuide={openGuide} />
           ) : activeView === "attendance-live" || activeView === "attendance-requests" || activeView === "attendance-review" || activeView === "field-monitoring" || activeView === "payroll" ? (
             <AttendanceCyclePage activeView={activeView} />
           ) : activeView === "employees" ? (
@@ -14960,6 +15726,8 @@ export function App() {
             <MasterDataPage activeView={activeView} />
           ) : activeView === "audit-log" ? (
             <AuditLogPage activeView={activeView} />
+          ) : activeView === "guide" ? (
+            <GuidePage activeView={activeView} initialGuideId={guideFocusId} onOpenView={navigate} />
           ) : activeView === "profile" ? (
             <ProfilePage activeView={activeView} profile={accessProfile} session={session} onLogout={handleLogout} />
           ) : (

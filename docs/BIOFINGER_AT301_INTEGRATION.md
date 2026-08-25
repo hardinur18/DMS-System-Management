@@ -172,13 +172,37 @@ Migration tersebut menambah:
 - Media attendance baru: `fingerprint`
 - Seed device AT-301 pertama: `BIO-AT301-001`
 
+Konversi staging ke absensi final ada di:
+
+```text
+supabase/migrations/20260825000100_biofinger_attendance_conversion.sql
+```
+
+Migration tersebut menambah function:
+
+```text
+public.convert_biofinger_attendance_events(target_device_id uuid, target_limit integer)
+```
+
+Function ini aman dijalankan berulang karena:
+
+- Event raw tetap disimpan di `biofinger_attendance_events`.
+- Attendance final masuk ke `attendance_logs` dengan unique `biofinger_event_id`.
+- Check-in memakai event Masuk paling awal per karyawan per hari.
+- Check-out memakai event Pulang paling akhir per karyawan per hari.
+- Event duplikat ditandai `ignored`.
+- Event yang sudah kalah representatif dari attendance Biofinger yang ada juga ditandai `ignored`, bukan `error`.
+- Conflict dengan absensi dari sumber lain ditandai `error`, bukan ditimpa.
+- Payroll cycle karyawan terkait langsung di-refresh.
+- RPC hanya boleh dijalankan user dengan permission `biofinger.manage`, `attendance.review`, atau `employees.manage`; receiver VPS memakai `service_role`.
+
 Status Supabase development per 2026-08-24:
 
 - Migration Biofinger sudah diterapkan.
 - Device `BIO-AT301-001` sudah ada di `attendance_devices`.
 - 97 user device sudah masuk ke `employee_attendance_device_links` dengan status `pending`.
 - 32603 raw transaction sudah masuk ke `biofinger_attendance_events` dengan status `pending`.
-- Event belum dikonversi ke `attendance_logs` karena mapping karyawan belum diverifikasi.
+- Event bisa dikonversi ke `attendance_logs` setelah mapping karyawan diverifikasi. Gunakan tombol `Proses Absensi` di halaman Biofinger atau command `npm run biofinger:convert`.
 
 ## Script Read-Only
 
@@ -261,7 +285,7 @@ Importer melakukan:
 - Menjaga `source_hash` supaya import ulang tidak membuat duplikasi.
 - Mengisi `employee_id` hanya kalau link sudah berstatus `active`.
 
-Importer tidak otomatis membuat `attendance_logs` final. Konversi ke attendance utama dilakukan setelah mapping employee diverifikasi.
+Importer bisa langsung menjalankan konversi jika diberi flag `--convert`. Tanpa flag itu, konversi tetap bisa dijalankan dari UI Biofinger tombol `Proses Absensi` atau command `npm run biofinger:convert`. Untuk receiver VPS, default `BIOFINGER_CONVERT_ON_IMPORT=false`; aktifkan menjadi `true` hanya setelah sample conversion manual sudah valid.
 
 ## Flow Sinkron Operasional
 
@@ -274,7 +298,8 @@ Flow sinkron yang dipakai DMS:
 5. Import raw transaction ke `biofinger_attendance_events`.
 6. Buka menu `Biofinger` di Management App.
 7. Mapping `User ID Mesin` ke `Karyawan DMS`.
-8. Setelah mapping valid, converter boleh membuat `attendance_logs` final dengan `source = 'biofinger'`.
+8. Setelah mapping valid, jalankan `Proses Absensi` dan cek hasilnya.
+9. Jika hasil sample sudah stabil, aktifkan auto-convert receiver agar `attendance_logs` final dibuat otomatis dengan `source = 'biofinger'`.
 
 Command sinkron ulang dari mesin:
 
@@ -295,6 +320,18 @@ npm run biofinger:import -- --management-api --users exports\at301-users-latest.
 ```
 
 Import aman dijalankan ulang karena `source_hash` mencegah duplikasi raw event.
+
+Import sekaligus convert event yang sudah mapped:
+
+```powershell
+npm run biofinger:import -- --management-api --users exports\at301-users-latest.biofinger.jsonl --events exports\at301-latest.biofinger.jsonl --chunk-size 100 --api-delay-ms 150 --api-retries 7 --convert
+```
+
+Convert staging yang sudah ada tanpa import ulang:
+
+```powershell
+npm run biofinger:convert -- --management-api --ref heibhxempixiiqmalyuf --device-code BIO-AT301-001
+```
 
 ## Automation Lokal Windows
 
@@ -343,6 +380,12 @@ Jalankan sync production lokal:
 powershell -ExecutionPolicy Bypass -File scripts\run-biofinger-sync.ps1
 ```
 
+Jika mapping sudah diverifikasi dan ingin fallback agent langsung memproses absensi final:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run-biofinger-sync.ps1 -Convert
+```
+
 Daftarkan Windows Task Scheduler setiap 5 menit:
 
 ```powershell
@@ -383,7 +426,7 @@ Urutan kerja setelah fondasi ini:
 3. Import raw transaction ke `biofinger_attendance_events`. Done.
 4. Gunakan menu Biofinger di Management App untuk mapping User ID ke Master Karyawan.
 5. Verifikasi arti `punch` dan `status_code` dari AT-301.
-6. Buat converter raw event menjadi `attendance_logs`.
+6. Converter raw event menjadi `attendance_logs`. Done, lewat migration `20260825000100_biofinger_attendance_conversion.sql`.
 7. Review sample payroll sebelum dinyalakan untuk semua karyawan.
 
 ## Mapping Awal Punch

@@ -9,6 +9,7 @@ const DEFAULT_TIMEZONE_OFFSET = "+07:00";
 const DEFAULT_DEVICE_PORT = 4370;
 const DEFAULT_COMMAND_RESPONSE = "OK\n";
 const REGISTRY_ALLOWLIST_CACHE_MS = 60_000;
+const DEFAULT_CONVERSION_BATCH_SIZE = 1000;
 
 const env = process.env;
 
@@ -23,6 +24,8 @@ const config = {
   allowedSerials: parseCsv(env.BIOFINGER_ALLOWED_SERIALS),
   allowedRemoteIps: parseCsv(env.BIOFINGER_ALLOWED_REMOTE_IPS),
   receiverToken: env.BIOFINGER_RECEIVER_TOKEN || "",
+  convertOnImport: ["1", "true", "yes", "on"].includes(String(env.BIOFINGER_CONVERT_ON_IMPORT || "false").trim().toLowerCase()),
+  conversionBatchSize: toInteger(env.BIOFINGER_CONVERSION_BATCH_SIZE, DEFAULT_CONVERSION_BATCH_SIZE),
   dryRun: parseBoolean(env.BIOFINGER_RECEIVER_DRY_RUN),
   logPayload: parseBoolean(env.BIOFINGER_RECEIVER_LOG_PAYLOAD),
   supabaseUrl: env.SUPABASE_URL || env.VITE_SUPABASE_URL || "",
@@ -481,13 +484,13 @@ async function getActiveLinksByUserId({ deviceId, externalUserIds }) {
 }
 
 async function insertAttendanceEvents({ device, events }) {
-  if (!events.length) return { inserted: 0, maxEventAt: null };
+  if (!events.length) return { inserted: 0, maxEventAt: null, conversion: null };
   if (config.dryRun) {
     const maxEventAt = events.reduce((latest, event) => {
       const parsed = new Date(event.device_event_at);
       return !latest || parsed > latest ? parsed : latest;
     }, null);
-    return { inserted: events.length, maxEventAt };
+    return { inserted: events.length, maxEventAt, conversion: null };
   }
 
   const externalUserIds = [...new Set(events.map((event) => event.external_user_id).filter(Boolean))];
@@ -546,7 +549,29 @@ async function insertAttendanceEvents({ device, events }) {
     if (deviceError) throw deviceError;
   }
 
-  return { inserted: data?.length || 0, maxEventAt };
+  const conversion = config.convertOnImport
+    ? await convertMappedEvents({ deviceId: device.id })
+    : null;
+
+  return { inserted: data?.length || 0, maxEventAt, conversion };
+}
+
+async function convertMappedEvents({ deviceId }) {
+  if (config.dryRun || !supabase) return null;
+
+  const batchSize = Math.min(Math.max(config.conversionBatchSize || DEFAULT_CONVERSION_BATCH_SIZE, 1), 5000);
+  const { data, error } = await supabase.rpc("convert_biofinger_attendance_events", {
+    target_device_id: deviceId,
+    target_limit: batchSize,
+  });
+
+  if (error) {
+    console.warn(`${requestLogPrefix()} conversion skipped device=${deviceId} ${error.message || error}`);
+    return { error: error.message || String(error) };
+  }
+
+  const summary = Array.isArray(data) ? data[0] : data;
+  return summary || null;
 }
 
 function buildOptionsResponse(serialNumber) {
@@ -609,7 +634,10 @@ async function handleIClockRequest(request, response, { url, serialNumber, remot
   if (table === "ATTLOG") {
     const events = lines.map((line) => parseAttendanceLine(line, serialNumber)).filter(Boolean);
     const result = await insertAttendanceEvents({ device, events });
-    console.log(`${requestLogPrefix()} attlog serial=${serialNumber || "-"} events=${events.length} inserted=${result.inserted}`);
+    const conversionText = result.conversion
+      ? ` converted=${result.conversion.events_converted ?? 0} ignored=${result.conversion.events_ignored ?? 0} error=${result.conversion.events_error ?? 0}`
+      : "";
+    console.log(`${requestLogPrefix()} attlog serial=${serialNumber || "-"} events=${events.length} inserted=${result.inserted}${conversionText}`);
     return textResponse(response);
   }
 
@@ -658,4 +686,5 @@ const server = http.createServer((request, response) => {
 server.listen(config.port, config.host, () => {
   console.log(`${requestLogPrefix()} DMS Biofinger ADMS receiver listening on ${config.host}:${config.port}`);
   console.log(`${requestLogPrefix()} dryRun=${config.dryRun} allowedSerials=${config.allowedSerials.join(",") || "*"}`);
+  console.log(`${requestLogPrefix()} convertOnImport=${config.convertOnImport} conversionBatchSize=${config.conversionBatchSize}`);
 });

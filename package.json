@@ -18,6 +18,7 @@
     "db:migrate": "node scripts/run-migration.mjs",
     "biofinger:sync": "python scripts/biofinger_sync.py",
     "biofinger:import": "node scripts/import-biofinger-jsonl.mjs",
+    "biofinger:convert": "node scripts/convert-biofinger-attendance.mjs",
     "biofinger:adms": "node scripts/biofinger_adms_receiver.mjs",
     "biofinger:env:setup": "powershell -ExecutionPolicy Bypass -File scripts/setup-biofinger-env.ps1",
     "biofinger:auto": "powershell -ExecutionPolicy Bypass -File scripts/run-biofinger-sync.ps1",
