@@ -647,6 +647,7 @@ interface BiofingerData {
   links: BiofingerUserLinkRow[]
   events: BiofingerEventRow[]
   eventCount: number
+  eventLoadError?: string
   employees: BiofingerEmployeeOption[]
   workLocations: BiofingerWorkLocationOption[]
 }
@@ -4388,38 +4389,47 @@ function mapBiofingerDeviceRecord(row: Record<string, unknown>, workLocationMap:
 }
 
 async function loadBiofingerData(): Promise<BiofingerData> {
-  const [devicesResult, linksResult, eventsResult, employeesResult, workLocationsResult] = await Promise.all([
-    supabase
-      .from("attendance_devices")
-      .select("id, device_code, name, vendor, model, serial_number, mac_address, ip_address, port, protocol, work_location_id, status, last_seen_at, last_sync_at, sync_cursor_at, notes")
-      .order("name", { ascending: true }),
-    supabase
-      .from("employee_attendance_device_links")
-      .select("id, employee_id, attendance_device_id, external_user_id, external_uid, external_name, privilege, status, matched_by, last_seen_at, last_synced_at, notes")
-      .order("external_user_id", { ascending: true }),
-    supabase
-      .from("biofinger_attendance_events")
-      .select("id, attendance_device_id, external_user_id, employee_id, device_event_at, attendance_date, punch, status_code, normalized_event_type, import_status, source_hash", { count: "exact" })
-      .order("device_event_at", { ascending: false })
-      .limit(200),
-    supabase
-      .from("employees")
-      .select("id, employee_code, full_name, status")
-      .is("deleted_at", null)
-      .order("employee_code", { ascending: true }),
-    supabase
-      .from("work_locations")
-      .select("id, code, name, is_active")
-      .order("sort_order", { ascending: true })
-      .order("code", { ascending: true }),
+  const devicesQuery = supabase
+    .from("attendance_devices")
+    .select("id, device_code, name, vendor, model, serial_number, mac_address, ip_address, port, protocol, work_location_id, status, last_seen_at, last_sync_at, sync_cursor_at, notes")
+    .order("name", { ascending: true })
+  const linksQuery = supabase
+    .from("employee_attendance_device_links")
+    .select("id, employee_id, attendance_device_id, external_user_id, external_uid, external_name, privilege, status, matched_by, last_seen_at, last_synced_at, notes")
+    .order("external_user_id", { ascending: true })
+  const eventsQuery = supabase
+    .from("biofinger_attendance_events")
+    .select("id, attendance_device_id, external_user_id, employee_id, device_event_at, attendance_date, punch, status_code, normalized_event_type, import_status, source_hash", { count: "planned" })
+    .order("device_event_at", { ascending: false })
+    .limit(200)
+  const employeesQuery = supabase
+    .from("employees")
+    .select("id, employee_code, full_name, status")
+    .is("deleted_at", null)
+    .order("employee_code", { ascending: true })
+  const workLocationsQuery = supabase
+    .from("work_locations")
+    .select("id, code, name, is_active")
+    .order("sort_order", { ascending: true })
+    .order("code", { ascending: true })
+
+  const [devicesResult, linksResult, employeesResult, workLocationsResult, eventsResult] = await Promise.all([
+    devicesQuery,
+    linksQuery,
+    employeesQuery,
+    workLocationsQuery,
+    eventsQuery,
   ])
 
-  const biofingerSchemaError = devicesResult.error || linksResult.error || eventsResult.error
+  const biofingerSchemaError = devicesResult.error || linksResult.error
   if (biofingerSchemaError) {
     if (isMissingBiofingerSchema(biofingerSchemaError)) {
       return { schemaReady: false, devices: [], links: [], events: [], eventCount: 0, employees: [], workLocations: [] }
     }
     throw biofingerSchemaError
+  }
+  if (eventsResult.error && isMissingBiofingerSchema(eventsResult.error)) {
+    return { schemaReady: false, devices: [], links: [], events: [], eventCount: 0, employees: [], workLocations: [] }
   }
   if (employeesResult.error) throw employeesResult.error
   if (workLocationsResult.error) throw workLocationsResult.error
@@ -4463,7 +4473,8 @@ async function loadBiofingerData(): Promise<BiofingerData> {
     }
   })
 
-  const events = (eventsResult.data || []).map((row: Record<string, unknown>) => {
+  const eventLoadError = eventsResult.error ? getFriendlySupabaseError(eventsResult.error, "Raw event Biofinger belum bisa dimuat.") : ""
+  const events = eventsResult.error ? [] : (eventsResult.data || []).map((row: Record<string, unknown>) => {
     const employeeId = row.employee_id ? String(row.employee_id) : ""
     const employee = employeeMap.get(employeeId)
 
@@ -4484,7 +4495,16 @@ async function loadBiofingerData(): Promise<BiofingerData> {
     }
   })
 
-  return { schemaReady: true, devices, links, events, eventCount: eventsResult.count ?? events.length, employees, workLocations }
+  return {
+    schemaReady: true,
+    devices,
+    links,
+    events,
+    eventCount: eventsResult.error ? events.length : eventsResult.count ?? events.length,
+    eventLoadError,
+    employees,
+    workLocations,
+  }
 }
 
 async function updateBiofingerUserLink(row: BiofingerUserLinkRow, employeeId: string, status?: BiofingerLinkStatus) {
@@ -7068,6 +7088,7 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
   const mappedEvents = data.events.filter((event) => event.employeeId).length
   const convertedEvents = data.events.filter((event) => event.importStatus === "converted").length
   const totalRawEvents = data.eventCount || data.events.length
+  const rawEventErrorMessage = data.eventLoadError || ""
   const syncSteps = [
     {
       label: "Baca Mesin",
@@ -7741,21 +7762,21 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
                   </thead>
                   <tbody>
                     {biofingerDataLoading && <FoundationTableSkeletonRows colSpan={7} columns={7} />}
-                    {!biofingerDataLoading && errorMessage && (
+                    {!biofingerDataLoading && (errorMessage || rawEventErrorMessage) && (
                       <tr>
                         <td className="tableStateCell" colSpan={7}>
-                          <TableState title="Gagal memuat raw event" description={errorMessage} icon={AlertTriangle} tone="danger" />
+                          <TableState title="Gagal memuat raw event" description={errorMessage || rawEventErrorMessage} icon={AlertTriangle} tone="danger" />
                         </td>
                       </tr>
                     )}
-                    {!biofingerDataLoading && !errorMessage && deviceEvents.length === 0 && (
+                    {!biofingerDataLoading && !errorMessage && !rawEventErrorMessage && deviceEvents.length === 0 && (
                       <tr>
                         <td className="tableStateCell" colSpan={7}>
                           <TableState title="Belum ada raw event" description="Import JSONL AT-301 ke staging untuk melihat event fingerprint." icon={Fingerprint} />
                         </td>
                       </tr>
                     )}
-                    {!biofingerDataLoading && !errorMessage && deviceEvents.map((event, index) => (
+                    {!biofingerDataLoading && !errorMessage && !rawEventErrorMessage && deviceEvents.map((event, index) => (
                       <tr key={event.id}>
                         <td className="tableNumberCell"><TableNumberCell value={index + 1} /></td>
                         <td><TableText primary={event.externalUserId} secondary={`Punch ${event.punch ?? "-"}`} /></td>
