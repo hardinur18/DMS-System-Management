@@ -246,6 +246,30 @@ interface FieldLocationSummary {
   reviewToday: number
 }
 
+interface FieldReadinessRow {
+  id: string
+  employeeId: string
+  employeeCode: string
+  fullName: string
+  employeePhotoUrl: string
+  divisionName: string
+  workLocationName: string
+  workLocationCode: string
+  locationReady: boolean
+  appUserId: string
+  appUserCode: string
+  appUserName: string
+  appUserStatus: string
+  appScope: AppScope
+  userReady: boolean
+  faceStatus: EmployeeFaceProfileStatus
+  faceRequired: boolean
+  faceReady: boolean
+  ready: boolean
+  issueLabel: string
+  issueTone: "valid" | "pending" | "failed" | "missing"
+}
+
 type OvertimeStatus = "draft" | "pending" | "approved" | "rejected"
 
 interface OvertimeReviewRow {
@@ -274,6 +298,7 @@ interface OperationsFoundationData {
   rows: AttendanceMonitorRow[]
   allRows: AttendanceMonitorRow[]
   locations: FieldLocationSummary[]
+  fieldReadiness: FieldReadinessRow[]
   reviews: AttendanceReviewRow[]
   overtime: OvertimeReviewRow[]
 }
@@ -641,6 +666,20 @@ interface BiofingerEventRow {
   sourceHash: string
 }
 
+interface BiofingerEventSummaryRow {
+  attendanceDeviceId: string
+  totalEvents: number
+  pendingEvents: number
+  mappedEvents: number
+  convertedEvents: number
+  ignoredEvents: number
+  errorEvents: number
+  checkInEvents: number
+  checkOutEvents: number
+  unknownEvents: number
+  latestEventAt: string
+}
+
 interface BiofingerData {
   schemaReady: boolean
   devices: BiofingerDeviceRow[]
@@ -648,6 +687,9 @@ interface BiofingerData {
   events: BiofingerEventRow[]
   eventCount: number
   eventLoadError?: string
+  eventSummary: BiofingerEventSummaryRow[]
+  eventSummaryLoadError?: string
+  eventSummaryIsFallback?: boolean
   employees: BiofingerEmployeeOption[]
   workLocations: BiofingerWorkLocationOption[]
 }
@@ -664,7 +706,7 @@ interface BiofingerConversionSummary {
 type BiofingerDataUpdater = BiofingerData | ((current: BiofingerData) => BiofingerData)
 
 function createEmptyBiofingerData(): BiofingerData {
-  return { schemaReady: true, devices: [], links: [], events: [], eventCount: 0, employees: [], workLocations: [] }
+  return { schemaReady: true, devices: [], links: [], events: [], eventCount: 0, eventSummary: [], employees: [], workLocations: [] }
 }
 
 let biofingerDataCache: BiofingerData | null = null
@@ -2880,7 +2922,7 @@ function TableState({
   title: string
   description: string
   icon?: LucideIcon
-  tone?: "danger"
+  tone?: "danger" | "warning"
 }) {
   return (
     <div className={clsx("tableState", tone)}>
@@ -4182,6 +4224,53 @@ function mapEmployeeFaceProfileStatus(status: unknown): EmployeeFaceProfileStatu
   return "unenrolled"
 }
 
+function mapAppScope(value: unknown): AppScope {
+  if (value === "field" || value === "both") return value
+  return "management"
+}
+
+function isWorkLocationGpsReady(location?: Record<string, unknown>) {
+  if (!location || location.is_active === false) return false
+  return Boolean(location.latitude && location.longitude && Number(location.radius_m || 0) > 0)
+}
+
+function getFieldFaceReadiness(faceProfile?: Record<string, unknown>) {
+  const status = mapEmployeeFaceProfileStatus(faceProfile?.status)
+  const faceRequired = faceProfile?.verification_required !== false
+  const faceReady = !faceRequired || status === "approved"
+
+  return { status, faceRequired, faceReady }
+}
+
+function getFieldReadinessIssue({
+  userReady,
+  hasUser,
+  locationReady,
+  faceReady,
+  faceStatus,
+}: {
+  userReady: boolean
+  hasUser: boolean
+  locationReady: boolean
+  faceReady: boolean
+  faceStatus: EmployeeFaceProfileStatus
+}): Pick<FieldReadinessRow, "issueLabel" | "issueTone"> {
+  if (!hasUser) return { issueLabel: "Belum punya user lapangan", issueTone: "missing" }
+  if (!userReady) return { issueLabel: "User lapangan tidak aktif", issueTone: "failed" }
+  if (!locationReady) return { issueLabel: "Lokasi GPS belum siap", issueTone: "pending" }
+  if (!faceReady) {
+    return {
+      issueLabel: faceStatus === "pending_review"
+        ? "Face menunggu review HR"
+        : faceStatus === "rejected"
+          ? "Face ditolak, scan ulang"
+          : "Face belum approved",
+      issueTone: "pending",
+    }
+  }
+  return { issueLabel: "Siap absen lapangan", issueTone: "valid" }
+}
+
 function mapEmployeeSalaryType(value: unknown): EmployeeSalaryType {
   if (value === "monthly") return "monthly"
   return "daily"
@@ -4218,6 +4307,8 @@ function isMissingBiofingerSchema(error: unknown) {
     "attendance_devices",
     "employee_attendance_device_links",
     "biofinger_attendance_events",
+    "get_biofinger_attendance_event_summary",
+    "convert_biofinger_attendance_events",
     "biofinger_event_id",
     "attendance_device_id",
     "schema cache",
@@ -4246,6 +4337,76 @@ function mapBiofingerConversionSummary(row: Record<string, unknown> | null | und
     attendanceLogsUpserted: Number(row?.attendance_logs_upserted || 0),
     employeesRefreshed: Number(row?.employees_refreshed || 0),
   }
+}
+
+function createEmptyBiofingerEventSummary(attendanceDeviceId = ""): BiofingerEventSummaryRow {
+  return {
+    attendanceDeviceId,
+    totalEvents: 0,
+    pendingEvents: 0,
+    mappedEvents: 0,
+    convertedEvents: 0,
+    ignoredEvents: 0,
+    errorEvents: 0,
+    checkInEvents: 0,
+    checkOutEvents: 0,
+    unknownEvents: 0,
+    latestEventAt: "",
+  }
+}
+
+function mapBiofingerEventSummary(row: Record<string, unknown>): BiofingerEventSummaryRow {
+  return {
+    attendanceDeviceId: String(row.attendance_device_id || ""),
+    totalEvents: Number(row.total_events || 0),
+    pendingEvents: Number(row.pending_events || 0),
+    mappedEvents: Number(row.mapped_events || 0),
+    convertedEvents: Number(row.converted_events || 0),
+    ignoredEvents: Number(row.ignored_events || 0),
+    errorEvents: Number(row.error_events || 0),
+    checkInEvents: Number(row.check_in_events || 0),
+    checkOutEvents: Number(row.check_out_events || 0),
+    unknownEvents: Number(row.unknown_events || 0),
+    latestEventAt: String(row.latest_event_at || ""),
+  }
+}
+
+function buildBiofingerEventSummaryFromSample(events: BiofingerEventRow[]) {
+  const summaryMap = new Map<string, BiofingerEventSummaryRow>()
+
+  events.forEach((event) => {
+    const deviceId = event.attendanceDeviceId
+    const summary = summaryMap.get(deviceId) || createEmptyBiofingerEventSummary(deviceId)
+    summary.totalEvents += 1
+    if (event.importStatus === "pending") summary.pendingEvents += 1
+    if (event.importStatus === "mapped") summary.mappedEvents += 1
+    if (event.importStatus === "converted") summary.convertedEvents += 1
+    if (event.importStatus === "ignored") summary.ignoredEvents += 1
+    if (event.importStatus === "error") summary.errorEvents += 1
+    if (event.normalizedEventType === "check_in") summary.checkInEvents += 1
+    if (event.normalizedEventType === "check_out") summary.checkOutEvents += 1
+    if (event.normalizedEventType === "unknown") summary.unknownEvents += 1
+    if (!summary.latestEventAt || event.deviceEventAt > summary.latestEventAt) summary.latestEventAt = event.deviceEventAt
+    summaryMap.set(deviceId, summary)
+  })
+
+  return Array.from(summaryMap.values())
+}
+
+function sumBiofingerEventSummaries(summaries: BiofingerEventSummaryRow[]) {
+  return summaries.reduce((total, summary) => ({
+    attendanceDeviceId: BIOFINGER_ALL_DEVICES,
+    totalEvents: total.totalEvents + summary.totalEvents,
+    pendingEvents: total.pendingEvents + summary.pendingEvents,
+    mappedEvents: total.mappedEvents + summary.mappedEvents,
+    convertedEvents: total.convertedEvents + summary.convertedEvents,
+    ignoredEvents: total.ignoredEvents + summary.ignoredEvents,
+    errorEvents: total.errorEvents + summary.errorEvents,
+    checkInEvents: total.checkInEvents + summary.checkInEvents,
+    checkOutEvents: total.checkOutEvents + summary.checkOutEvents,
+    unknownEvents: total.unknownEvents + summary.unknownEvents,
+    latestEventAt: !total.latestEventAt || summary.latestEventAt > total.latestEventAt ? summary.latestEventAt : total.latestEventAt,
+  }), createEmptyBiofingerEventSummary(BIOFINGER_ALL_DEVICES))
 }
 
 function mapBiofingerEventType(value: unknown): "check_in" | "check_out" | "unknown" {
@@ -4402,6 +4563,7 @@ async function loadBiofingerData(): Promise<BiofingerData> {
     .select("id, attendance_device_id, external_user_id, employee_id, device_event_at, attendance_date, punch, status_code, normalized_event_type, import_status, source_hash", { count: "planned" })
     .order("device_event_at", { ascending: false })
     .limit(200)
+  const eventSummaryQuery = supabase.rpc("get_biofinger_attendance_event_summary")
   const employeesQuery = supabase
     .from("employees")
     .select("id, employee_code, full_name, status")
@@ -4413,23 +4575,24 @@ async function loadBiofingerData(): Promise<BiofingerData> {
     .order("sort_order", { ascending: true })
     .order("code", { ascending: true })
 
-  const [devicesResult, linksResult, employeesResult, workLocationsResult, eventsResult] = await Promise.all([
+  const [devicesResult, linksResult, employeesResult, workLocationsResult, eventsResult, eventSummaryResult] = await Promise.all([
     devicesQuery,
     linksQuery,
     employeesQuery,
     workLocationsQuery,
     eventsQuery,
+    eventSummaryQuery,
   ])
 
   const biofingerSchemaError = devicesResult.error || linksResult.error
   if (biofingerSchemaError) {
     if (isMissingBiofingerSchema(biofingerSchemaError)) {
-      return { schemaReady: false, devices: [], links: [], events: [], eventCount: 0, employees: [], workLocations: [] }
+      return { schemaReady: false, devices: [], links: [], events: [], eventCount: 0, eventSummary: [], employees: [], workLocations: [] }
     }
     throw biofingerSchemaError
   }
   if (eventsResult.error && isMissingBiofingerSchema(eventsResult.error)) {
-    return { schemaReady: false, devices: [], links: [], events: [], eventCount: 0, employees: [], workLocations: [] }
+    return { schemaReady: false, devices: [], links: [], events: [], eventCount: 0, eventSummary: [], employees: [], workLocations: [] }
   }
   if (employeesResult.error) throw employeesResult.error
   if (workLocationsResult.error) throw workLocationsResult.error
@@ -4494,14 +4657,28 @@ async function loadBiofingerData(): Promise<BiofingerData> {
       sourceHash: String(row.source_hash || ""),
     }
   })
+  const eventSummaryIsFallback = Boolean(eventSummaryResult.error)
+  const eventSummaryLoadError = eventSummaryResult.error
+    ? isMissingBiofingerSchema(eventSummaryResult.error)
+      ? "Migration ringkasan event belum aktif di database; angka memakai sample terakhir."
+      : getFriendlySupabaseError(eventSummaryResult.error, "Ringkasan raw event Biofinger belum bisa dimuat.")
+    : ""
+  const eventSummary = eventSummaryResult.error
+    ? buildBiofingerEventSummaryFromSample(events)
+    : ((eventSummaryResult.data || []) as Array<Record<string, unknown>>).map((row) => mapBiofingerEventSummary(row))
+  const totalEventSummary = sumBiofingerEventSummaries(eventSummary)
+  const eventCount = totalEventSummary.totalEvents || eventsResult.count || events.length
 
   return {
     schemaReady: true,
     devices,
     links,
     events,
-    eventCount: eventsResult.error ? events.length : eventsResult.count ?? events.length,
+    eventCount,
     eventLoadError,
+    eventSummary,
+    eventSummaryLoadError,
+    eventSummaryIsFallback,
     employees,
     workLocations,
   }
@@ -5141,7 +5318,7 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey()): Pro
   await supabase.rpc("refresh_all_employee_payroll_cycles")
 
   const selectedDate = targetDate || getLocalDateKey()
-  const [employeeResult, divisionResult, locationResult, attendanceResult, payrollResult, overtimeResult, payrollComponentResult] = await Promise.all([
+  const [employeeResult, divisionResult, locationResult, attendanceResult, payrollResult, overtimeResult, payrollComponentResult, appUserResult, faceProfileResult] = await Promise.all([
     supabase
       .from("employees")
       .select("id, employee_code, full_name, photo_path, division_id, work_location_id, salary_type, daily_salary, monthly_salary, payroll_cycle_days, status, deleted_at")
@@ -5166,14 +5343,30 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey()): Pro
     supabase
       .from("payroll_components")
       .select("id, name, code, calculation_unit, rate_amount, day_type, auto_detect_overtime"),
+    supabase
+      .from("app_users")
+      .select("id, user_code, full_name, status, employee_id, app_scope")
+      .in("app_scope", ["field", "both"])
+      .order("user_code", { ascending: true }),
+    supabase
+      .from("employee_face_profiles")
+      .select("employee_id, status, verification_required, face_score_threshold"),
   ])
-  const error = employeeResult.error || divisionResult.error || locationResult.error || attendanceResult.error || payrollResult.error || overtimeResult.error || payrollComponentResult.error
+  const error = employeeResult.error || divisionResult.error || locationResult.error || attendanceResult.error || payrollResult.error || overtimeResult.error || payrollComponentResult.error || appUserResult.error || faceProfileResult.error
 
   if (error) throw error
 
   const divisionMap = new Map((divisionResult.data || []).map((row) => [String(row.id), String(row.name || "")]))
   const locationRows = (locationResult.data || []) as Array<Record<string, unknown>>
   const locationMap = new Map(locationRows.map((row) => [String(row.id), row]))
+  const appUserRows = (appUserResult.data || []) as Array<Record<string, unknown>>
+  const appUserByEmployee = new Map<string, Record<string, unknown>>()
+  appUserRows.forEach((row) => {
+    const employeeId = String(row.employee_id || "")
+    if (!employeeId || appUserByEmployee.has(employeeId)) return
+    appUserByEmployee.set(employeeId, row)
+  })
+  const faceProfileMap = new Map(((faceProfileResult.data || []) as Array<Record<string, unknown>>).map((row) => [String(row.employee_id || ""), row]))
   const logs = (attendanceResult.data || []) as Array<Record<string, unknown>>
   const payrollRows = (payrollResult.data || []) as Array<Record<string, unknown>>
   const overtimeRows = (overtimeResult.data || []) as Array<Record<string, unknown>>
@@ -5287,6 +5480,47 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey()): Pro
       return buildAttendanceMonitorRow(employee, selectedDate, selectedLogsByEmployee.get(employeeId))
     })
 
+  const fieldReadiness: FieldReadinessRow[] = activeEmployees.map((employee) => {
+    const employeeId = String(employee.id)
+    const location = locationMap.get(String(employee.work_location_id || ""))
+    const appUser = appUserByEmployee.get(employeeId)
+    const appScope = mapAppScope(appUser?.app_scope)
+    const userReady = Boolean(appUser && appUser.status === "active" && (appScope === "field" || appScope === "both"))
+    const locationReady = isWorkLocationGpsReady(location)
+    const faceReadiness = getFieldFaceReadiness(faceProfileMap.get(employeeId))
+    const issue = getFieldReadinessIssue({
+      userReady,
+      hasUser: Boolean(appUser),
+      locationReady,
+      faceReady: faceReadiness.faceReady,
+      faceStatus: faceReadiness.status,
+    })
+
+    return {
+      id: employeeId,
+      employeeId,
+      employeeCode: String(employee.employee_code || ""),
+      fullName: String(employee.full_name || ""),
+      employeePhotoUrl: getEmployeePhotoPublicUrl(String(employee.photo_path || "")),
+      divisionName: divisionMap.get(String(employee.division_id || "")) || "Belum pilih divisi",
+      workLocationName: String(location?.name || "Belum pilih lokasi"),
+      workLocationCode: String(location?.code || ""),
+      locationReady,
+      appUserId: String(appUser?.id || ""),
+      appUserCode: String(appUser?.user_code || ""),
+      appUserName: String(appUser?.full_name || ""),
+      appUserStatus: String(appUser?.status || ""),
+      appScope,
+      userReady,
+      faceStatus: faceReadiness.status,
+      faceRequired: faceReadiness.faceRequired,
+      faceReady: faceReadiness.faceReady,
+      ready: userReady && locationReady && faceReadiness.faceReady,
+      issueLabel: issue.issueLabel,
+      issueTone: issue.issueTone,
+    }
+  })
+
   const allRows: AttendanceMonitorRow[] = []
   logsByEmployeeDate.forEach((entry, key) => {
     const [employeeId, attendanceDate] = key.split(":")
@@ -5395,7 +5629,7 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey()): Pro
     }
   })
 
-  return { rows, allRows, locations, reviews: reviewRows, overtime: overtimeReviewRows }
+  return { rows, allRows, locations, fieldReadiness, reviews: reviewRows, overtime: overtimeReviewRows }
 }
 
 function getBrowserPosition(): Promise<GeolocationPosition> {
@@ -7075,20 +7309,25 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
   const safeCurrentPage = Math.min(Math.max(1, currentPage), pageCount)
   const paginatedLinks = filteredLinks.slice((safeCurrentPage - 1) * safePageSize, safeCurrentPage * safePageSize)
   const deviceEvents = !isAllDeviceSelected ? data.events.filter((event) => event.attendanceDeviceId === selectedDeviceId) : data.events
-  const mappedSampleEvents = deviceEvents.filter((event) => event.importStatus === "mapped" && event.employeeId && event.normalizedEventType !== "unknown").length
+  const totalEventSummary = sumBiofingerEventSummaries(data.eventSummary)
+  const selectedEventSummary = isAllDeviceSelected
+    ? totalEventSummary
+    : data.eventSummary.find((summary) => summary.attendanceDeviceId === selectedDeviceId) || createEmptyBiofingerEventSummary(selectedDeviceId)
   const convertScopeLabel = selectedDevice ? selectedDevice.name : "Semua device Biofinger"
   const mappingDetailEvents = mappingDetailRow
     ? data.events.filter((event) => event.attendanceDeviceId === mappingDetailRow.attendanceDeviceId && event.externalUserId === mappingDetailRow.externalUserId).slice(0, 6)
     : []
   const activeLinks = data.links.filter((row) => row.status === "active" && row.employeeId).length
   const pendingLinks = data.links.filter((row) => row.status === "pending").length
-  const ignoredLinks = data.links.filter((row) => row.status === "ignored").length
   const scopedActiveLinks = deviceLinks.filter((row) => row.status === "active" && row.employeeId).length
   const scopedPendingLinks = deviceLinks.filter((row) => row.status === "pending").length
-  const mappedEvents = data.events.filter((event) => event.employeeId).length
-  const convertedEvents = data.events.filter((event) => event.importStatus === "converted").length
-  const totalRawEvents = data.eventCount || data.events.length
+  const totalRawEvents = data.eventCount || totalEventSummary.totalEvents || data.events.length
+  const scopedRawEvents = isAllDeviceSelected ? totalRawEvents : selectedEventSummary.totalEvents || deviceEvents.length
+  const mappedReadyEvents = selectedEventSummary.mappedEvents
+  const convertedEvents = selectedEventSummary.convertedEvents
   const rawEventErrorMessage = data.eventLoadError || ""
+  const eventSummaryWarning = data.eventSummaryLoadError || ""
+  const eventSummaryIsFallback = data.eventSummaryIsFallback === true
   const syncSteps = [
     {
       label: "Baca Mesin",
@@ -7113,10 +7352,10 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
     },
     {
       label: "Staging Event",
-      value: biofingerDataValue(`${formatNumber(isAllDeviceSelected ? totalRawEvents : deviceEvents.length)} log`, "stepValue"),
-      description: "Siap proses absensi",
+      value: biofingerDataValue(`${formatNumber(scopedRawEvents)} log`, "stepValue"),
+      description: `${formatNumber(mappedReadyEvents)} siap proses`,
       icon: Database,
-      complete: !biofingerDataLoading && (isAllDeviceSelected ? totalRawEvents : deviceEvents.length) > 0,
+      complete: !biofingerDataLoading && scopedRawEvents > 0,
     },
     {
       label: "Absensi Final",
@@ -7424,7 +7663,7 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
         subtitle="Mapping user fingerprint AT-301 ke master karyawan DMS sebelum raw event dikonversi ke absensi payroll."
         actions={
           <>
-            <button className="primaryButton" type="button" disabled={!canManage || biofingerDataLoading || converting || !data.schemaReady} onClick={() => setConvertConfirmOpen(true)}>
+            <button className="primaryButton" type="button" disabled={!canManage || biofingerDataLoading || converting || !data.schemaReady || (!eventSummaryIsFallback && mappedReadyEvents <= 0)} onClick={() => setConvertConfirmOpen(true)}>
               <FileCheck2 size={17} />
               {converting ? "Memproses..." : "Proses Absensi"}
             </button>
@@ -7460,8 +7699,14 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
             <OperationalKpiCard label="Total Device" value={biofingerDataValue(data.devices.length, "metricValue")} detail="Registry mesin AT-301" icon={Fingerprint} tone="blue" />
             <OperationalKpiCard label="User Mapped" value={biofingerDataValue(activeLinks, "metricValue")} detail="Siap jadi absensi" icon={UserRoundCheck} tone="green" />
             <OperationalKpiCard label="Belum Mapping" value={biofingerDataValue(pendingLinks, "metricValue")} detail="Perlu pilih karyawan" icon={AlertTriangle} tone="amber" />
-            <OperationalKpiCard label="Event Staging" value={biofingerDataValue(formatNumber(totalRawEvents), "metricValue wide")} detail={!biofingerDataLoading && ignoredLinks ? `${ignoredLinks} user ignored` : "Raw log mesin"} icon={FileBarChart} tone="violet" />
+            <OperationalKpiCard label="Event Staging" value={biofingerDataValue(formatNumber(totalRawEvents), "metricValue wide")} detail={biofingerDataLoading ? "Raw log mesin" : `${formatNumber(totalEventSummary.convertedEvents)} converted / ${formatNumber(totalEventSummary.mappedEvents)} siap`} icon={FileBarChart} tone="violet" />
           </OperationalKpiGrid>
+
+          {!biofingerDataLoading && eventSummaryWarning && (
+            <OperationalTableCard>
+              <TableState title="Ringkasan event memakai fallback sample" description={eventSummaryWarning} icon={AlertTriangle} tone="warning" />
+            </OperationalTableCard>
+          )}
 
           <section className="surfacePanel biofingerScopePanel">
             <div className="biofingerScopeIntro">
@@ -7498,7 +7743,7 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
               </div>
               <div>
                 <span>Raw Event</span>
-                <strong>{biofingerDataValue(`${formatNumber(isAllDeviceSelected ? totalRawEvents : deviceEvents.length)} log`, "scopeValue short")}</strong>
+                <strong>{biofingerDataValue(`${formatNumber(scopedRawEvents)} log`, "scopeValue short")}</strong>
               </div>
             </div>
             {selectedDevice && (
@@ -7525,7 +7770,7 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
                   <h2>Sync Pipeline</h2>
                   <p>{biofingerDataLoading ? "Menunggu data sinkronisasi dari Supabase." : selectedDevice ? `${selectedDevice.name} / ${formatBiofingerConnection(selectedDevice)} / last sync ${formatUserDateTime(selectedDevice.lastSyncAt, "Belum sync")}` : `${formatNumber(data.devices.length)} device / sample terakhir / last sync mengikuti masing-masing device.`}</p>
                 </div>
-                <InlinePageStats items={biofingerDataLoading ? biofingerInlineLoadingStats(2) : [`${formatNumber(mappedEvents)} sample mapped`, `${formatNumber(data.events.length)} sample tampil`]} />
+                <InlinePageStats items={biofingerDataLoading ? biofingerInlineLoadingStats(3) : [`${formatNumber(mappedReadyEvents)} siap proses`, `${formatNumber(convertedEvents)} converted`, `${formatNumber(data.events.length)} sample tampil`]} />
               </div>
               <div className="biofingerSyncSteps">
                 {syncSteps.map((step) => {
@@ -7866,8 +8111,12 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
             <strong>{formatNumber(scopedActiveLinks)} user</strong>
           </div>
           <div>
-            <span>Sample mapped</span>
-            <strong>{formatNumber(mappedSampleEvents)} event</strong>
+            <span>Siap proses</span>
+            <strong>{formatNumber(mappedReadyEvents)} event</strong>
+          </div>
+          <div>
+            <span>Sudah final</span>
+            <strong>{formatNumber(convertedEvents)} event</strong>
           </div>
           <div>
             <span>Batch proses</span>
@@ -12072,7 +12321,7 @@ function AttendanceMonitorDetailDialog({
 }
 
 function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "attendance-requests" | "attendance-review" | "field-monitoring" | "payroll" }) {
-  const [data, setData] = useState<OperationsFoundationData>({ rows: [], allRows: [], locations: [], reviews: [], overtime: [] })
+  const [data, setData] = useState<OperationsFoundationData>({ rows: [], allRows: [], locations: [], fieldReadiness: [], reviews: [], overtime: [] })
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
   const [selectedDate, setSelectedDate] = useState(getLocalDateKey())
@@ -12387,12 +12636,40 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
 
     return matchesSearch && matchesStatus
   })
+  const filteredFieldReadinessRows = data.fieldReadiness.filter((row) => {
+    const matchesSearch = normalizedSearch
+      ? [
+        row.employeeCode,
+        row.fullName,
+        row.divisionName,
+        row.workLocationName,
+        row.appUserCode,
+        row.appUserName,
+        row.appUserStatus,
+        row.appScope,
+        row.faceStatus,
+        row.issueLabel,
+      ].join(" ").toLowerCase().includes(normalizedSearch)
+      : true
+    const matchesStatus = statusFilter === "all"
+      || row.issueTone === statusFilter
+      || row.faceStatus === statusFilter
+      || (statusFilter === "ready" && row.ready)
+      || (statusFilter === "active" && row.userReady)
+      || (statusFilter === "missing" && (!row.userReady || !row.locationReady || !row.faceReady))
+
+    return matchesSearch && matchesStatus
+  })
   const readyPayrollRows = data.rows.filter((row) => row.payrollStatus === "ready")
   const lockedPayrollRows = data.rows.filter((row) => row.payrollStatus === "locked")
   const paidPayrollRows = data.rows.filter((row) => row.payrollStatus === "paid")
   const voidPayrollRows = data.rows.filter((row) => row.payrollStatus === "void")
   const reviewRows = data.rows.filter((row) => row.attendanceStatus === "pending" || row.attendanceStatus === "failed")
   const gpsReadyLocations = data.locations.filter((location) => location.isReady)
+  const fieldReadyRows = data.fieldReadiness.filter((row) => row.ready)
+  const fieldBlockedRows = data.fieldReadiness.filter((row) => !row.ready)
+  const fieldLinkedRows = data.fieldReadiness.filter((row) => row.userReady)
+  const fieldFacePendingRows = data.fieldReadiness.filter((row) => !row.faceReady)
   const faceVerifiedRows = data.rows.filter((row) => row.faceStatus === "verified")
   const payrollPreviewTotal = [...readyPayrollRows, ...lockedPayrollRows].reduce((sum, row) => sum + row.payrollAmount, 0)
   const filteredOvertimeRows = data.overtime.filter((row) => {
@@ -12471,10 +12748,21 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
 
       {activeView !== "attendance-live" && activeView !== "attendance-review" && activeView !== "attendance-requests" && (
         <OperationalKpiGrid>
-          <OperationalKpiCard label="Absen Valid" value={data.rows.filter((row) => row.attendanceStatus === "valid").length} detail={isTodayView ? "Hari ini" : formatWorkDate(selectedDate)} icon={UserRoundCheck} tone="green" />
-          <OperationalKpiCard label="Butuh Review" value={reviewRows.length} detail="GPS/face/perlu approval" icon={AlertTriangle} tone="amber" />
-          <OperationalKpiCard label="Lokasi GPS" value={`${gpsReadyLocations.length}/${data.locations.length}`} detail="Koordinat + radius siap" icon={LocateFixed} tone="blue" />
-          <OperationalKpiCard label="Preview Payroll" value={formatCurrency(payrollPreviewTotal)} detail="Pokok + lembur approved" icon={BadgeDollarSign} tone="violet" />
+          {activeView === "field-monitoring" ? (
+            <>
+              <OperationalKpiCard label="Siap Absen" value={fieldReadyRows.length} detail="User, GPS, dan face clear" icon={UserRoundCheck} tone="green" />
+              <OperationalKpiCard label="Perlu Setup" value={fieldBlockedRows.length} detail="Belum bisa absen dari HP" icon={AlertTriangle} tone="amber" />
+              <OperationalKpiCard label="User Linked" value={`${fieldLinkedRows.length}/${data.fieldReadiness.length}`} detail="Scope field atau both" icon={UsersRound} tone="blue" />
+              <OperationalKpiCard label="Face Pending" value={fieldFacePendingRows.length} detail="Perlu daftar/review wajah" icon={ScanFace} tone="violet" />
+            </>
+          ) : (
+            <>
+              <OperationalKpiCard label="Absen Valid" value={data.rows.filter((row) => row.attendanceStatus === "valid").length} detail={isTodayView ? "Hari ini" : formatWorkDate(selectedDate)} icon={UserRoundCheck} tone="green" />
+              <OperationalKpiCard label="Butuh Review" value={reviewRows.length} detail="GPS/face/perlu approval" icon={AlertTriangle} tone="amber" />
+              <OperationalKpiCard label="Lokasi GPS" value={`${gpsReadyLocations.length}/${data.locations.length}`} detail="Koordinat + radius siap" icon={LocateFixed} tone="blue" />
+              <OperationalKpiCard label="Preview Payroll" value={formatCurrency(payrollPreviewTotal)} detail="Pokok + lembur approved" icon={BadgeDollarSign} tone="violet" />
+            </>
+          )}
         </OperationalKpiGrid>
       )}
 
@@ -12547,7 +12835,10 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
       )}
 
       {activeView === "field-monitoring" ? (
-        <LocationRadiusTable locations={data.locations} loading={loading} errorMessage={errorMessage} />
+        <>
+          <FieldReadinessTable rows={filteredFieldReadinessRows} allRows={data.fieldReadiness} loading={loading} errorMessage={errorMessage} />
+          <LocationRadiusTable locations={data.locations} loading={loading} errorMessage={errorMessage} />
+        </>
       ) : activeView === "attendance-review" ? (
         <AttendanceReviewTable rows={filteredReviewRows} loading={loading || reviewSubmitting} errorMessage={errorMessage} onReview={openReviewDialog} onApproveAll={handleApproveReviewGroup} />
       ) : activeView === "attendance-requests" ? (
@@ -13899,6 +14190,160 @@ function mapFieldLocationToMasterRow(location: FieldLocationSummary): MasterData
     longitude: location.longitude,
     radiusM: location.radiusM,
   }
+}
+
+function FieldReadinessTextStatus({
+  tone,
+  children,
+}: {
+  tone: "valid" | "pending" | "failed" | "missing"
+  children: ReactNode
+}) {
+  return <span className={clsx("textStatusIndicator", tone)}>{children}</span>
+}
+
+function getFieldFaceStatusTone(row: FieldReadinessRow): "valid" | "pending" | "failed" | "missing" {
+  if (row.faceReady) return "valid"
+  if (row.faceStatus === "rejected") return "failed"
+  if (row.faceStatus === "unenrolled" || row.faceStatus === "disabled") return "missing"
+  return "pending"
+}
+
+function FieldReadinessTable({
+  rows,
+  allRows,
+  loading,
+  errorMessage,
+}: {
+  rows: FieldReadinessRow[]
+  allRows: FieldReadinessRow[]
+  loading: boolean
+  errorMessage: string
+}) {
+  const readyCount = allRows.filter((row) => row.ready).length
+  const linkedCount = allRows.filter((row) => row.userReady).length
+  const locationReadyCount = allRows.filter((row) => row.locationReady).length
+  const faceReadyCount = allRows.filter((row) => row.faceReady).length
+  const appScopeLabel: Record<AppScope, string> = {
+    management: "Management",
+    field: "Lapangan",
+    both: "Management + Lapangan",
+  }
+
+  return (
+    <OperationalTableCard className="fieldReadinessPanel">
+      <div className="tableHeader">
+        <div>
+          <h2>Kesiapan App Lapangan</h2>
+          <p>Validasi user field, lokasi GPS, dan face profile sebelum karyawan absen dari HP.</p>
+        </div>
+        <InlinePageStats
+          items={[
+            `${readyCount} siap absen`,
+            `${allRows.length - readyCount} perlu setup`,
+            `${linkedCount} user linked`,
+          ]}
+        />
+      </div>
+
+      <div className="fieldReadinessSummary" aria-label="Ringkasan kesiapan lapangan">
+        <span>
+          <small>User Field</small>
+          <strong>{linkedCount}/{allRows.length}</strong>
+        </span>
+        <span>
+          <small>Lokasi GPS</small>
+          <strong>{locationReadyCount}/{allRows.length}</strong>
+        </span>
+        <span>
+          <small>Face Ready</small>
+          <strong>{faceReadyCount}/{allRows.length}</strong>
+        </span>
+        <span>
+          <small>Status</small>
+          <strong>{readyCount === allRows.length && allRows.length > 0 ? "Clear" : "Review"}</strong>
+        </span>
+      </div>
+
+      <div className="tableScroller uiDataTableScroller uiDataTableHasColumns fieldReadinessScroller">
+        <table>
+          <colgroup>
+            <col className="tableNumberColumn" />
+            <col style={{ width: "260px" }} />
+            <col style={{ width: "240px" }} />
+            <col style={{ width: "230px" }} />
+            <col style={{ width: "190px" }} />
+            <col style={{ width: "230px" }} />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>No</th>
+              <th>Karyawan</th>
+              <th>User Lapangan</th>
+              <th>Lokasi GPS</th>
+              <th>Face</th>
+              <th>Kesiapan</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading && <FoundationTableSkeletonRows colSpan={6} columns={6} rows={5} />}
+            {!loading && errorMessage && (
+              <tr>
+                <td className="tableStateCell" colSpan={6}>
+                  <TableState title="Gagal memuat Lapangan" description={errorMessage} icon={AlertTriangle} tone="danger" />
+                </td>
+              </tr>
+            )}
+            {!loading && !errorMessage && rows.map((row, index) => (
+              <tr key={row.id}>
+                <td><TableNumberCell value={index + 1} /></td>
+                <td>
+                  <EmployeeIdentityCell
+                    fullName={row.fullName}
+                    code={row.employeeCode}
+                    photoUrl={row.employeePhotoUrl}
+                    secondary={row.divisionName}
+                  />
+                </td>
+                <td>
+                  <TableText
+                    primary={row.appUserName || "Belum ada user"}
+                    secondary={row.appUserCode ? `${row.appUserCode} / ${appScopeLabel[row.appScope]}` : "Buat di Pengguna & Akses"}
+                  />
+                </td>
+                <td>
+                  <span className="fieldReadinessStack">
+                    <FieldReadinessTextStatus tone={row.locationReady ? "valid" : "pending"}>
+                      {row.locationReady ? row.workLocationName : "GPS belum siap"}
+                    </FieldReadinessTextStatus>
+                    <small>{row.workLocationCode || row.workLocationName}</small>
+                  </span>
+                </td>
+                <td>
+                  <span className="fieldReadinessStack">
+                    <FieldReadinessTextStatus tone={getFieldFaceStatusTone(row)}>
+                      {row.faceRequired ? employeeFaceStatusLabel[row.faceStatus] : "Tidak wajib face"}
+                    </FieldReadinessTextStatus>
+                    <small>{row.faceRequired ? "Verifikasi aktif" : "Verifikasi dimatikan"}</small>
+                  </span>
+                </td>
+                <td>
+                  <FieldReadinessTextStatus tone={row.issueTone}>{row.issueLabel}</FieldReadinessTextStatus>
+                </td>
+              </tr>
+            ))}
+            {!loading && !errorMessage && rows.length === 0 && (
+              <tr>
+                <td className="tableStateCell" colSpan={6}>
+                  <TableState title="Tidak ada hasil" description="Ubah search atau status filter untuk melihat karyawan lain." icon={Search} />
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </OperationalTableCard>
+  )
 }
 
 function LocationRadiusTable({ locations, loading, errorMessage }: { locations: FieldLocationSummary[]; loading: boolean; errorMessage: string }) {

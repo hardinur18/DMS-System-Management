@@ -8501,6 +8501,67 @@ button {
   -webkit-user-select: auto;
 }
 
+.fieldReadinessPanel {
+  min-height: 0;
+  margin-bottom: 18px;
+}
+
+.fieldReadinessPanel .tableHeader {
+  align-items: flex-start;
+}
+
+.fieldReadinessSummary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0;
+  padding: 14px 20px 16px;
+  border-bottom: 1px solid var(--ops-line);
+}
+
+.fieldReadinessSummary > span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 11px 14px;
+  border: 1px solid rgba(204, 213, 225, 0.72);
+  border-right-width: 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 251, 253, 0.9));
+}
+
+.fieldReadinessSummary > span:first-child {
+  border-radius: 14px 0 0 14px;
+}
+
+.fieldReadinessSummary > span:last-child {
+  border-right-width: 1px;
+  border-radius: 0 14px 14px 0;
+}
+
+.fieldReadinessSummary small {
+  color: #71809a;
+  font-size: 0.72rem;
+  font-weight: 760;
+}
+
+.fieldReadinessSummary strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 0.96rem;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fieldReadinessScroller {
+  max-height: 440px;
+}
+
+.fieldReadinessStack {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
 .dataTablePagination {
   display: flex;
   align-items: center;
@@ -9076,6 +9137,11 @@ button {
 .tableState.danger > span {
   color: #e11d48;
   background: linear-gradient(145deg, #fff1f2, #ffffff);
+}
+
+.tableState.warning > span {
+  color: #d97706;
+  background: linear-gradient(145deg, #fffbeb, #ffffff);
 }
 
 .tableState strong {
@@ -9765,6 +9831,43 @@ button {
   border-color: rgba(100, 116, 139, 0.2);
   color: #64748b;
   background: rgba(100, 116, 139, 0.09);
+}
+
+.textStatusIndicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 850;
+  line-height: 1.25;
+}
+
+.textStatusIndicator::before {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 13%, transparent);
+  content: "";
+}
+
+.textStatusIndicator.valid {
+  color: var(--green-ink);
+}
+
+.textStatusIndicator.pending {
+  color: var(--amber-ink);
+}
+
+.textStatusIndicator.failed {
+  color: var(--danger-ink);
+}
+
+.textStatusIndicator.missing {
+  color: #64748b;
 }
 
 .faceScore {
@@ -13552,6 +13655,23 @@ button {
 }
 
 @media (max-width: 760px) {
+  .fieldReadinessSummary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    padding-inline: 14px;
+  }
+
+  .fieldReadinessSummary > span,
+  .fieldReadinessSummary > span:first-child,
+  .fieldReadinessSummary > span:last-child {
+    border-width: 1px;
+    border-radius: 14px;
+  }
+
+  .fieldReadinessPanel .tableHeader {
+    flex-direction: column;
+  }
+
   .kioskPageShell .kioskTerminalPanel,
   .kioskPageShell .kioskResultPanel {
     border-radius: 22px;
