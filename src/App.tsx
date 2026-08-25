@@ -556,6 +556,8 @@ type BiofingerImportStatus = "pending" | "mapped" | "converted" | "ignored" | "e
 type BiofingerWorkspaceTab = "overview" | "devices" | "mapping" | "events"
 
 const BIOFINGER_ALL_DEVICES = "all"
+const BIOFINGER_ADMS_RECEIVER_HOST = "187.77.127.179"
+const BIOFINGER_ADMS_RECEIVER_PORT = "8090"
 
 interface BiofingerDeviceRow {
   id: string
@@ -567,12 +569,25 @@ interface BiofingerDeviceRow {
   macAddress: string
   ipAddress: string
   port: number
+  protocol: string
   workLocationId: string
   workLocationName: string
   status: string
   lastSeenAt: string
   lastSyncAt: string
   syncCursorAt: string
+  notes: string
+}
+
+interface BiofingerDeviceFormValues {
+  deviceCode: string
+  name: string
+  serialNumber: string
+  model: string
+  ipAddress: string
+  port: string
+  workLocationId: string
+  status: string
   notes: string
 }
 
@@ -3751,6 +3766,77 @@ function mapBiofingerEventType(value: unknown): "check_in" | "check_out" | "unkn
   return "unknown"
 }
 
+function normalizeBiofingerDeviceCode(value: string) {
+  return value.trim().toUpperCase().replace(/[^A-Z0-9_-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "")
+}
+
+function normalizeBiofingerSerial(value: string) {
+  return value.trim().toUpperCase().replace(/[^A-Z0-9_-]+/g, "")
+}
+
+function buildNextBiofingerDeviceCode(devices: BiofingerDeviceRow[] = []) {
+  const maxNumber = devices.reduce((max, device) => {
+    const match = /^BIO-AT301-(\d+)$/i.exec(device.deviceCode)
+    return match ? Math.max(max, Number(match[1]) || 0) : max
+  }, 0)
+
+  return `BIO-AT301-${String(maxNumber + 1).padStart(3, "0")}`
+}
+
+function createEmptyBiofingerDeviceForm(devices: BiofingerDeviceRow[] = []): BiofingerDeviceFormValues {
+  return {
+    deviceCode: buildNextBiofingerDeviceCode(devices),
+    name: "",
+    serialNumber: "",
+    model: "AT-301",
+    ipAddress: "",
+    port: "4370",
+    workLocationId: "",
+    status: "active",
+    notes: "",
+  }
+}
+
+function getBiofingerDeviceFormFromRow(device: BiofingerDeviceRow): BiofingerDeviceFormValues {
+  return {
+    deviceCode: device.deviceCode,
+    name: device.name,
+    serialNumber: device.serialNumber,
+    model: device.model || "AT-301",
+    ipAddress: device.ipAddress,
+    port: String(device.port || 4370),
+    workLocationId: device.workLocationId,
+    status: device.status || "active",
+    notes: device.notes,
+  }
+}
+
+function validateBiofingerDeviceForm(values: BiofingerDeviceFormValues, devices: BiofingerDeviceRow[] = [], editingDeviceId = "") {
+  const deviceCode = normalizeBiofingerDeviceCode(values.deviceCode)
+  const serialNumber = normalizeBiofingerSerial(values.serialNumber)
+  const name = values.name.trim()
+  const port = Number.parseInt(values.port || "4370", 10)
+
+  if (!deviceCode) throw new Error("Kode device wajib diisi.")
+  if (!name) throw new Error("Nama display device wajib diisi.")
+  if (!serialNumber) throw new Error("Serial number device wajib diisi supaya receiver ADMS bisa mengenali mesin.")
+  if (!Number.isFinite(port) || port < 1 || port > 65535) throw new Error("Port device harus 1 sampai 65535.")
+
+  const duplicateCode = devices.find((device) => device.id !== editingDeviceId && device.deviceCode.toUpperCase() === deviceCode)
+  if (duplicateCode) throw new Error(`Kode device ${deviceCode} sudah dipakai oleh ${duplicateCode.name}.`)
+
+  const duplicateSerial = devices.find((device) => device.id !== editingDeviceId && device.serialNumber.toUpperCase() === serialNumber)
+  if (duplicateSerial) throw new Error(`Serial ${serialNumber} sudah terdaftar di ${duplicateSerial.name}.`)
+
+  return { deviceCode, serialNumber, name, port }
+}
+
+function formatBiofingerConnection(device: BiofingerDeviceRow) {
+  const protocol = device.protocol === "adms-cloud" ? "ADMS Cloud" : device.protocol || "zk-4370"
+  const address = device.ipAddress ? `${device.ipAddress}:${device.port}` : `${BIOFINGER_ADMS_RECEIVER_HOST}:${BIOFINGER_ADMS_RECEIVER_PORT}`
+  return `${protocol} / ${address}`
+}
+
 function formatBiofingerEventType(value: BiofingerEventRow["normalizedEventType"]) {
   if (value === "check_in") return "Masuk"
   if (value === "check_out") return "Pulang"
@@ -3793,11 +3879,33 @@ function BiofingerEmployeeMappingChip({
   )
 }
 
+function mapBiofingerDeviceRecord(row: Record<string, unknown>, workLocationMap: Map<string, BiofingerWorkLocationOption>): BiofingerDeviceRow {
+  return {
+    workLocationId: String(row.work_location_id || ""),
+    workLocationName: workLocationMap.get(String(row.work_location_id || ""))?.name || "",
+    id: String(row.id || ""),
+    deviceCode: String(row.device_code || ""),
+    name: String(row.name || row.device_code || "Biofinger"),
+    vendor: String(row.vendor || "Biofinger"),
+    model: String(row.model || ""),
+    serialNumber: String(row.serial_number || ""),
+    macAddress: String(row.mac_address || ""),
+    ipAddress: String(row.ip_address || ""),
+    port: Number(row.port || 4370),
+    protocol: String(row.protocol || "zk-4370"),
+    status: String(row.status || "active"),
+    lastSeenAt: String(row.last_seen_at || ""),
+    lastSyncAt: String(row.last_sync_at || ""),
+    syncCursorAt: String(row.sync_cursor_at || ""),
+    notes: String(row.notes || ""),
+  }
+}
+
 async function loadBiofingerData(): Promise<BiofingerData> {
   const [devicesResult, linksResult, eventsResult, employeesResult, workLocationsResult] = await Promise.all([
     supabase
       .from("attendance_devices")
-      .select("id, device_code, name, vendor, model, serial_number, mac_address, ip_address, port, work_location_id, status, last_seen_at, last_sync_at, sync_cursor_at, notes")
+      .select("id, device_code, name, vendor, model, serial_number, mac_address, ip_address, port, protocol, work_location_id, status, last_seen_at, last_sync_at, sync_cursor_at, notes")
       .order("name", { ascending: true }),
     supabase
       .from("employee_attendance_device_links")
@@ -3845,24 +3953,7 @@ async function loadBiofingerData(): Promise<BiofingerData> {
   }))
   const workLocationMap = new Map(workLocations.map((location) => [location.id, location]))
 
-  const devices = (devicesResult.data || []).map((row: Record<string, unknown>) => ({
-    workLocationId: String(row.work_location_id || ""),
-    workLocationName: workLocationMap.get(String(row.work_location_id || ""))?.name || "",
-    id: String(row.id || ""),
-    deviceCode: String(row.device_code || ""),
-    name: String(row.name || row.device_code || "Biofinger"),
-    vendor: String(row.vendor || "Biofinger"),
-    model: String(row.model || ""),
-    serialNumber: String(row.serial_number || ""),
-    macAddress: String(row.mac_address || ""),
-    ipAddress: String(row.ip_address || ""),
-    port: Number(row.port || 4370),
-    status: String(row.status || "active"),
-    lastSeenAt: String(row.last_seen_at || ""),
-    lastSyncAt: String(row.last_sync_at || ""),
-    syncCursorAt: String(row.sync_cursor_at || ""),
-    notes: String(row.notes || ""),
-  }))
+  const devices = (devicesResult.data || []).map((row: Record<string, unknown>) => mapBiofingerDeviceRecord(row, workLocationMap))
 
   const links = (linksResult.data || []).map((row: Record<string, unknown>) => {
     const employeeId = row.employee_id ? String(row.employee_id) : ""
@@ -3942,18 +4033,54 @@ async function updateBiofingerUserLink(row: BiofingerUserLinkRow, employeeId: st
   if (eventUpdate.error) throw eventUpdate.error
 }
 
-async function updateBiofingerDeviceRegistry(deviceId: string, values: { name: string; workLocationId: string; status: string }) {
-  const name = values.name.trim()
-  if (!name) {
-    throw new Error("Nama display device wajib diisi.")
-  }
+async function createBiofingerDeviceRegistry(values: BiofingerDeviceFormValues, devices: BiofingerDeviceRow[] = []) {
+  const { deviceCode, serialNumber, name, port } = validateBiofingerDeviceForm(values, devices)
+
+  const { data, error } = await supabase
+    .from("attendance_devices")
+    .insert({
+      device_code: deviceCode,
+      name,
+      vendor: "Biofinger",
+      model: values.model.trim() || "AT-301",
+      serial_number: serialNumber,
+      ip_address: values.ipAddress.trim() || null,
+      port,
+      protocol: "adms-cloud",
+      work_location_id: values.workLocationId || null,
+      status: values.status || "active",
+      metadata: {
+        source: "management-app",
+        registration_mode: "adms-cloud",
+        receiver_host: BIOFINGER_ADMS_RECEIVER_HOST,
+        receiver_port: BIOFINGER_ADMS_RECEIVER_PORT,
+        allowlist_source: "device-registry",
+      },
+      notes: values.notes.trim() || "Ditambahkan dari Biofinger Device Registry.",
+    })
+    .select("id, device_code, name, vendor, model, serial_number, mac_address, ip_address, port, protocol, work_location_id, status, last_seen_at, last_sync_at, sync_cursor_at, notes")
+    .single()
+
+  if (error) throw error
+  return data as Record<string, unknown>
+}
+
+async function updateBiofingerDeviceRegistry(deviceId: string, values: BiofingerDeviceFormValues, devices: BiofingerDeviceRow[] = []) {
+  const { deviceCode, serialNumber, name, port } = validateBiofingerDeviceForm(values, devices, deviceId)
 
   const { error } = await supabase
     .from("attendance_devices")
     .update({
+      device_code: deviceCode,
       name,
+      model: values.model.trim() || "AT-301",
+      serial_number: serialNumber,
+      ip_address: values.ipAddress.trim() || null,
+      port,
+      protocol: "adms-cloud",
       work_location_id: values.workLocationId || null,
       status: values.status || "active",
+      notes: values.notes.trim() || null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", deviceId)
@@ -6329,9 +6456,10 @@ function BiofingerPage({ activeView, profile }: { activeView: ViewId; profile: A
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(() => biofingerPageSizeCache)
   const [editingDeviceId, setEditingDeviceId] = useState("")
+  const [deviceDialogMode, setDeviceDialogMode] = useState<"" | "create" | "edit">("")
   const [mappingDetailId, setMappingDetailId] = useState("")
   const [mappingDraftEmployeeId, setMappingDraftEmployeeId] = useState("")
-  const [deviceFormValues, setDeviceFormValues] = useState({ name: "", workLocationId: "", status: "active" })
+  const [deviceFormValues, setDeviceFormValues] = useState<BiofingerDeviceFormValues>(() => createEmptyBiofingerDeviceForm())
   const [loading, setLoading] = useState(() => !biofingerDataCache)
   const [savingId, setSavingId] = useState("")
   const [savingDeviceId, setSavingDeviceId] = useState("")
@@ -6443,8 +6571,8 @@ function BiofingerPage({ activeView, profile }: { activeView: ViewId; profile: A
   const syncSteps = [
     {
       label: "Baca Mesin",
-      value: biofingerDataValue(isAllDeviceSelected ? `${formatNumber(data.devices.length)} device ready` : selectedDevice ? `${selectedDevice.ipAddress}:${selectedDevice.port}` : "Belum pilih", "stepValue"),
-      description: "Local agent AT-301",
+      value: biofingerDataValue(isAllDeviceSelected ? `${formatNumber(data.devices.length)} device ready` : selectedDevice ? formatBiofingerConnection(selectedDevice) : "Belum pilih", "stepValue"),
+      description: "ADMS Cloud AT-301",
       icon: Fingerprint,
       complete: !biofingerDataLoading && data.devices.length > 0,
     },
@@ -6528,7 +6656,7 @@ function BiofingerPage({ activeView, profile }: { activeView: ViewId; profile: A
   const selectedDeviceSubtitle = biofingerDataLoading
     ? "Device registry dari Supabase"
     : selectedDevice
-    ? `${selectedDevice.workLocationName || "Belum pilih lokasi"} / ${selectedDevice.ipAddress}:${selectedDevice.port} / ${selectedDevice.status}`
+    ? `${selectedDevice.workLocationName || "Belum pilih lokasi"} / ${formatBiofingerConnection(selectedDevice)} / ${selectedDevice.status}`
     : `${formatNumber(data.devices.length)} device registry / ${formatNumber(data.workLocations.length)} lokasi kerja`
 
   const resetFilters = () => {
@@ -6537,18 +6665,23 @@ function BiofingerPage({ activeView, profile }: { activeView: ViewId; profile: A
     setSelectedDeviceId(BIOFINGER_ALL_DEVICES)
   }
 
+  const openCreateDeviceDialog = () => {
+    setActiveBiofingerTab("devices")
+    setEditingDeviceId("")
+    setDeviceDialogMode("create")
+    setDeviceFormValues(createEmptyBiofingerDeviceForm(data.devices))
+  }
+
   const openDeviceDialog = (device: BiofingerDeviceRow) => {
     setEditingDeviceId(device.id)
-    setDeviceFormValues({
-      name: device.name,
-      workLocationId: device.workLocationId,
-      status: device.status,
-    })
+    setDeviceDialogMode("edit")
+    setDeviceFormValues(getBiofingerDeviceFormFromRow(device))
   }
 
   const closeDeviceDialog = () => {
     if (savingDeviceId) return
     setEditingDeviceId("")
+    setDeviceDialogMode("")
   }
 
   const openMappingDrawer = (row: BiofingerUserLinkRow) => {
@@ -6562,22 +6695,60 @@ function BiofingerPage({ activeView, profile }: { activeView: ViewId; profile: A
     setMappingDraftEmployeeId("")
   }
 
-  const handleDeviceSave = async () => {
-    if (!editingDevice) return
-    setSavingDeviceId(editingDevice.id)
+  const handleCopyBiofingerSetting = async (value: string, label: string) => {
     try {
-      await updateBiofingerDeviceRegistry(editingDevice.id, deviceFormValues)
-      const nextName = deviceFormValues.name.trim()
+      await navigator.clipboard.writeText(value)
+      showToast({ tone: "success", title: "Setting disalin", description: `${label} sudah masuk clipboard.` })
+    } catch {
+      showToast({ tone: "error", title: "Gagal copy", description: `${label} belum bisa disalin otomatis dari browser ini.` })
+    }
+  }
+
+  const handleDeviceSave = async () => {
+    const formDeviceCode = normalizeBiofingerDeviceCode(deviceFormValues.deviceCode)
+    setSavingDeviceId(editingDevice?.id || "new")
+    try {
+      const workLocationMap = new Map(data.workLocations.map((location) => [location.id, location]))
+
+      if (deviceDialogMode === "create") {
+        const createdRecord = await createBiofingerDeviceRegistry(deviceFormValues, data.devices)
+        const createdDevice = mapBiofingerDeviceRecord(createdRecord, workLocationMap)
+        commitBiofingerData((current) => ({
+          ...current,
+          devices: [...current.devices, createdDevice].sort((first, second) => first.name.localeCompare(second.name)),
+        }))
+        setSelectedDeviceId(createdDevice.id)
+        showToast({
+          tone: "success",
+          title: "Device ditambahkan",
+          description: `${createdDevice.name} siap menerima push ADMS saat mesin online.`,
+        })
+        setDeviceDialogMode("")
+        return
+      }
+
+      if (!editingDevice) return
+      await updateBiofingerDeviceRegistry(editingDevice.id, deviceFormValues, data.devices)
       const workLocation = data.workLocations.find((location) => location.id === deviceFormValues.workLocationId)
+      const normalizedSerial = normalizeBiofingerSerial(deviceFormValues.serialNumber)
+      const normalizedPort = Number.parseInt(deviceFormValues.port || "4370", 10)
+      const nextName = deviceFormValues.name.trim()
       commitBiofingerData((current) => ({
         ...current,
         devices: current.devices.map((device) => device.id === editingDevice.id
           ? {
             ...device,
+            deviceCode: formDeviceCode,
             name: nextName,
+            model: deviceFormValues.model.trim() || "AT-301",
+            serialNumber: normalizedSerial,
+            ipAddress: deviceFormValues.ipAddress.trim(),
+            port: Number.isFinite(normalizedPort) ? normalizedPort : 4370,
+            protocol: "adms-cloud",
             workLocationId: deviceFormValues.workLocationId,
             workLocationName: workLocation?.name || "",
             status: deviceFormValues.status || "active",
+            notes: deviceFormValues.notes.trim(),
           }
           : device),
       }))
@@ -6587,8 +6758,9 @@ function BiofingerPage({ activeView, profile }: { activeView: ViewId; profile: A
         description: `${nextName} sudah tersimpan di registry Biofinger.`,
       })
       setEditingDeviceId("")
+      setDeviceDialogMode("")
     } catch (error) {
-      showToast({ tone: "error", title: "Gagal update device", description: getFriendlySupabaseError(error, "Device registry belum bisa disimpan.") })
+      showToast({ tone: "error", title: "Gagal simpan device", description: getFriendlySupabaseError(error, "Device registry belum bisa disimpan.") })
     } finally {
       setSavingDeviceId("")
     }
@@ -6798,7 +6970,7 @@ function BiofingerPage({ activeView, profile }: { activeView: ViewId; profile: A
               <div className="biofingerSyncHeader">
                 <div>
                   <h2>Sync Pipeline</h2>
-                  <p>{biofingerDataLoading ? "Menunggu data sinkronisasi dari Supabase." : selectedDevice ? `${selectedDevice.name} / ${selectedDevice.ipAddress}:${selectedDevice.port} / last sync ${formatUserDateTime(selectedDevice.lastSyncAt, "Belum sync")}` : `${formatNumber(data.devices.length)} device / sample terakhir / last sync mengikuti masing-masing device.`}</p>
+                  <p>{biofingerDataLoading ? "Menunggu data sinkronisasi dari Supabase." : selectedDevice ? `${selectedDevice.name} / ${formatBiofingerConnection(selectedDevice)} / last sync ${formatUserDateTime(selectedDevice.lastSyncAt, "Belum sync")}` : `${formatNumber(data.devices.length)} device / sample terakhir / last sync mengikuti masing-masing device.`}</p>
                 </div>
                 <InlinePageStats items={biofingerDataLoading ? biofingerInlineLoadingStats(2) : [`${formatNumber(mappedEvents)} sample mapped`, `${formatNumber(data.events.length)} sample tampil`]} />
               </div>
@@ -6825,9 +6997,15 @@ function BiofingerPage({ activeView, profile }: { activeView: ViewId; profile: A
               <div className="biofingerSyncHeader">
                 <div>
                   <h2>Device Registry</h2>
-                  <p>Nama display, lokasi kerja, koneksi, dan status mesin Biofinger.</p>
+                  <p>Tambah mesin baru, set lokasi kerja, lalu arahkan ADMS Cloud mesin ke receiver DMS.</p>
                 </div>
-                <InlinePageStats items={biofingerDataLoading ? biofingerInlineLoadingStats(2) : [`${data.devices.length} device`, `${data.workLocations.length} lokasi kerja`]} />
+                <div className="biofingerDeviceHeaderActions">
+                  <InlinePageStats items={biofingerDataLoading ? biofingerInlineLoadingStats(2) : [`${data.devices.length} device`, `${data.workLocations.length} lokasi kerja`]} />
+                  <button className="primaryButton" type="button" disabled={!canManage || biofingerDataLoading} onClick={openCreateDeviceDialog}>
+                    <UserPlus size={16} />
+                    Tambah Device
+                  </button>
+                </div>
               </div>
               <div className="biofingerDeviceRegistryList">
                 {biofingerDataLoading && (
@@ -6853,9 +7031,13 @@ function BiofingerPage({ activeView, profile }: { activeView: ViewId; profile: A
                       <span><Search size={17} /></span>
                       <div>
                         <strong>Belum ada device</strong>
-                        <small>Tambahkan registry Biofinger AT-301 sebelum mapping user.</small>
+                        <small>Tambahkan registry Biofinger AT-301, lalu setting ADMS Cloud di mesin.</small>
                       </div>
                     </div>
+                    <button className="primaryButton" type="button" disabled={!canManage} onClick={openCreateDeviceDialog}>
+                      <UserPlus size={16} />
+                      Tambah Device
+                    </button>
                   </div>
                 )}
                 {!biofingerDataLoading && data.devices.map((device) => (
@@ -6873,7 +7055,7 @@ function BiofingerPage({ activeView, profile }: { activeView: ViewId; profile: A
                     </div>
                     <div className="biofingerRegistryMeta">
                       <span>Koneksi</span>
-                      <strong>{device.ipAddress}:{device.port}</strong>
+                      <strong>{formatBiofingerConnection(device)}</strong>
                     </div>
                     <div className="biofingerRegistryMeta">
                       <span>Status</span>
@@ -6916,7 +7098,7 @@ function BiofingerPage({ activeView, profile }: { activeView: ViewId; profile: A
                 <div className="tableHeader">
                   <div>
                     <h2>Mapping User Biofinger</h2>
-                    <p>{biofingerDataLoading ? "Mengambil user mesin dan mapping karyawan dari Supabase." : selectedDevice ? `${selectedDevice.ipAddress}:${selectedDevice.port} / ${selectedDevice.status} / sync ${formatUserDateTime(selectedDevice.lastSyncAt, "Belum sync")}` : "Semua device / mapping user mesin ke karyawan DMS."}</p>
+                    <p>{biofingerDataLoading ? "Mengambil user mesin dan mapping karyawan dari Supabase." : selectedDevice ? `${formatBiofingerConnection(selectedDevice)} / ${selectedDevice.status} / sync ${formatUserDateTime(selectedDevice.lastSyncAt, "Belum sync")}` : "Semua device / mapping user mesin ke karyawan DMS."}</p>
                   </div>
                   <InlinePageStats items={biofingerDataLoading ? biofingerInlineLoadingStats(3) : [`${filteredLinks.length} user`, `${scopedActiveLinks} active`, `${scopedPendingLinks} pending`]} />
                 </div>
@@ -7058,6 +7240,7 @@ function BiofingerPage({ activeView, profile }: { activeView: ViewId; profile: A
 
       <BiofingerDeviceDialog
         device={editingDevice}
+        mode={deviceDialogMode}
         values={deviceFormValues}
         workLocationOptions={workLocationOptions}
         statusOptions={deviceStatusOptions}
@@ -7065,6 +7248,7 @@ function BiofingerPage({ activeView, profile }: { activeView: ViewId; profile: A
         canManage={canManage}
         onChange={(values) => setDeviceFormValues((current) => ({ ...current, ...values }))}
         onClose={closeDeviceDialog}
+        onCopySetting={handleCopyBiofingerSetting}
         onSubmit={() => void handleDeviceSave()}
       />
 
@@ -7269,6 +7453,7 @@ function BiofingerMappingDrawer({
 
 function BiofingerDeviceDialog({
   device,
+  mode,
   values,
   workLocationOptions,
   statusOptions,
@@ -7276,19 +7461,27 @@ function BiofingerDeviceDialog({
   canManage,
   onChange,
   onClose,
+  onCopySetting,
   onSubmit,
 }: {
   device: BiofingerDeviceRow | null
-  values: { name: string; workLocationId: string; status: string }
+  mode: "" | "create" | "edit"
+  values: BiofingerDeviceFormValues
   workLocationOptions: Array<{ value: string; label: string; searchLabel: string; description?: string }>
   statusOptions: Array<{ value: string; label: string; searchLabel: string }>
   saving: boolean
   canManage: boolean
-  onChange: (values: Partial<{ name: string; workLocationId: string; status: string }>) => void
+  onChange: (values: Partial<BiofingerDeviceFormValues>) => void
   onClose: () => void
+  onCopySetting: (value: string, label: string) => void
   onSubmit: () => void
 }) {
-  if (!device) return null
+  if (!mode) return null
+
+  const isCreate = mode === "create"
+  const dialogTitle = isCreate ? "Tambah Device Biofinger" : "Edit Device Biofinger"
+  const deviceCode = normalizeBiofingerDeviceCode(values.deviceCode) || values.deviceCode || "BIO-AT301"
+  const serialNumber = normalizeBiofingerSerial(values.serialNumber)
 
   return (
     <div className="dialogBackdrop" role="presentation" onMouseDown={saving ? undefined : onClose}>
@@ -7305,60 +7498,119 @@ function BiofingerDeviceDialog({
 
         <div className="dialogCompactHeader">
           <span className="dialogEyebrow"><Fingerprint size={15} /> Device Registry</span>
-          <h2 id="biofinger-device-dialog-title">Edit Device Biofinger</h2>
-          <p>{device.deviceCode} / {device.serialNumber || "Serial belum ada"} / {device.ipAddress}:{device.port}</p>
+          <h2 id="biofinger-device-dialog-title">{dialogTitle}</h2>
+          <p>{isCreate ? "Daftarkan serial mesin dulu, lalu arahkan cloud server di mesin ke receiver DMS." : `${device?.deviceCode || deviceCode} / ${device?.serialNumber || serialNumber || "Serial belum ada"} / ${device ? formatBiofingerConnection(device) : "ADMS Cloud"}`}</p>
         </div>
 
         <div className="biofingerDeviceDialogBody">
-          <label className="formField">
-            <span>Nama Display</span>
-            <input className="uiInput" value={values.name} disabled={!canManage || saving} onChange={(event) => onChange({ name: event.target.value })} placeholder="Gudang A - AT-301" />
+          <div className="biofingerDeviceFormGrid">
+            <label className="formField">
+              <span>Nama Display</span>
+              <input className="uiInput" value={values.name} disabled={!canManage || saving} onChange={(event) => onChange({ name: event.target.value })} placeholder="Biofinger Gudang A" />
+            </label>
+
+            <label className="formField">
+              <span>Kode Device</span>
+              <input className="uiInput" value={values.deviceCode} disabled={!canManage || saving} onChange={(event) => onChange({ deviceCode: normalizeBiofingerDeviceCode(event.target.value) })} placeholder="BIO-AT301-002" />
+            </label>
+
+            <label className="formField">
+              <span>Serial Number</span>
+              <input className="uiInput" value={values.serialNumber} disabled={!canManage || saving} onChange={(event) => onChange({ serialNumber: normalizeBiofingerSerial(event.target.value) })} placeholder="GEDxxxxxxxxx" />
+            </label>
+
+            <label className="formField">
+              <span>Model</span>
+              <input className="uiInput" value={values.model} disabled={!canManage || saving} onChange={(event) => onChange({ model: event.target.value })} placeholder="AT-301" />
+            </label>
+
+            <label className="formField">
+              <span>Lokasi Kerja</span>
+              <FoundationSelect
+                label={`Lokasi kerja untuk ${deviceCode}`}
+                value={values.workLocationId}
+                options={workLocationOptions}
+                disabled={!canManage || saving}
+                onChange={(nextValue) => onChange({ workLocationId: nextValue })}
+              />
+            </label>
+
+            <label className="formField">
+              <span>Status Device</span>
+              <FoundationSelect
+                label={`Status device ${deviceCode}`}
+                value={values.status}
+                options={statusOptions}
+                searchable={false}
+                disabled={!canManage || saving}
+                onChange={(nextValue) => onChange({ status: nextValue })}
+              />
+            </label>
+
+            <label className="formField">
+              <span>IP Lokal Mesin</span>
+              <input className="uiInput" value={values.ipAddress} disabled={!canManage || saving} onChange={(event) => onChange({ ipAddress: event.target.value.trim() })} placeholder="Opsional, contoh 192.168.1.202" inputMode="decimal" />
+            </label>
+
+            <label className="formField">
+              <span>Port Device</span>
+              <input className="uiInput" value={values.port} disabled={!canManage || saving} onChange={(event) => onChange({ port: normalizeIntegerInput(event.target.value, 65535) })} placeholder="4370" inputMode="numeric" />
+            </label>
+          </div>
+
+          <label className="formField biofingerDeviceNotesField">
+            <span>Catatan</span>
+            <input className="uiInput" value={values.notes} disabled={!canManage || saving} onChange={(event) => onChange({ notes: event.target.value })} placeholder="Contoh: Mesin gudang A dekat pintu loading" />
           </label>
 
-          <label className="formField">
-            <span>Lokasi Kerja</span>
-            <FoundationSelect
-              label={`Lokasi kerja untuk ${device.deviceCode}`}
-              value={values.workLocationId}
-              options={workLocationOptions}
-              disabled={!canManage || saving}
-              onChange={(nextValue) => onChange({ workLocationId: nextValue })}
-            />
-          </label>
-
-          <label className="formField">
-            <span>Status Device</span>
-            <FoundationSelect
-              label={`Status device ${device.deviceCode}`}
-              value={values.status}
-              options={statusOptions}
-              searchable={false}
-              disabled={!canManage || saving}
-              onChange={(nextValue) => onChange({ status: nextValue })}
-            />
-          </label>
+          <section className="biofingerDeviceSetupCard">
+            <div className="biofingerDeviceSetupHeader">
+              <span><Settings size={16} /></span>
+              <div>
+                <strong>Setting di Mesin AT-301</strong>
+                <small>Menu COMM. Settings / Pengaturan Server cloud</small>
+              </div>
+            </div>
+            <div className="biofingerDeviceSetupGrid">
+              <button type="button" onClick={() => onCopySetting(BIOFINGER_ADMS_RECEIVER_HOST, "Alamat server")}>
+                <span>Alamat server</span>
+                <strong>{BIOFINGER_ADMS_RECEIVER_HOST}</strong>
+                <Copy size={14} />
+              </button>
+              <button type="button" onClick={() => onCopySetting(BIOFINGER_ADMS_RECEIVER_PORT, "Port receiver")}>
+                <span>Port</span>
+                <strong>{BIOFINGER_ADMS_RECEIVER_PORT}</strong>
+                <Copy size={14} />
+              </button>
+              <div><span>Server Mode</span><strong>ADMS</strong></div>
+              <div><span>HTTPS</span><strong>Off</strong></div>
+              <div><span>Proxy</span><strong>Off</strong></div>
+              <div><span>Identitas</span><strong>{serialNumber || "Isi serial dulu"}</strong></div>
+            </div>
+            <p>Setelah device disimpan, serial aktif di registry menjadi allowlist receiver. Saat mesin online, status last seen dan raw event akan bergerak otomatis.</p>
+          </section>
 
           <div className="biofingerDeviceFacts">
             <div>
-              <span>Model</span>
-              <strong>{device.model || "AT-301"}</strong>
+              <span>Receiver</span>
+              <strong>{BIOFINGER_ADMS_RECEIVER_HOST}:{BIOFINGER_ADMS_RECEIVER_PORT}</strong>
             </div>
             <div>
               <span>MAC</span>
-              <strong>{device.macAddress || "-"}</strong>
+              <strong>{device?.macAddress || "-"}</strong>
             </div>
             <div>
-              <span>Last Sync</span>
-              <strong>{formatUserDateTime(device.lastSyncAt, "Belum sync")}</strong>
+              <span>Last Seen</span>
+              <strong>{device ? formatUserDateTime(device.lastSeenAt, "Belum online") : "Menunggu mesin online"}</strong>
             </div>
           </div>
         </div>
 
         <div className="dialogActions biofingerDeviceDialogActions">
           <button className="secondaryButton" type="button" disabled={saving} onClick={onClose}>Batal</button>
-          <button className="primaryButton" type="button" disabled={!canManage || saving || !values.name.trim()} onClick={onSubmit}>
+          <button className="primaryButton" type="button" disabled={!canManage || saving || !values.name.trim() || !serialNumber} onClick={onSubmit}>
             <FileCheck2 size={17} />
-            {saving ? "Menyimpan..." : "Simpan Device"}
+            {saving ? "Menyimpan..." : isCreate ? "Tambah Device" : "Simpan Device"}
           </button>
         </div>
       </section>

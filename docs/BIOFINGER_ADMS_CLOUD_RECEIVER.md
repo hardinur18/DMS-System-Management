@@ -40,6 +40,7 @@ Status POC per 2026-08-24:
 - Health check: `http://187.77.127.179:8090/health`
 - AT-301 push via WiFi sudah confirmed dari serial `GED7244800117`.
 - Receiver live sudah menulis ke Supabase staging dan mengabaikan duplicate histori lewat `source_hash`.
+- Receiver menerima allowlist dari dua sumber: env `BIOFINGER_ALLOWED_SERIALS` dan Device Registry DMS (`attendance_devices.serial_number`) untuk device berstatus `active` atau `maintenance`.
 
 Mode dry-run hanya dipakai untuk test awal. Saat mode live aktif, data tetap masuk staging Biofinger dan belum otomatis menjadi payroll final.
 
@@ -79,6 +80,28 @@ BIOFINGER_RECEIVER_LOG_PAYLOAD=false
 ```
 
 `SUPABASE_SERVICE_ROLE_KEY` tidak boleh masuk repo, tidak boleh dipakai di browser, dan hanya boleh ada di server/secret manager.
+
+`BIOFINGER_ALLOWED_SERIALS` tetap boleh diisi untuk serial utama/legacy. Untuk penambahan mesin baru, daftarkan serial dari UI `Biofinger > Device > Tambah Device`; receiver akan mengecek registry Supabase dan menerima serial tersebut tanpa perlu edit env VPS selama status device `active` atau `maintenance`.
+
+## Menambah Device Baru
+
+Flow resmi untuk mesin AT-301 tambahan:
+
+1. Buka DMS Management App.
+2. Masuk ke `Biofinger > Device`.
+3. Klik `Tambah Device`.
+4. Isi nama display, kode device, serial number, lokasi kerja, dan status.
+5. Simpan device.
+6. Setting mesin AT-301 ke receiver:
+   - Server Mode: `ADMS`
+   - Alamat server: `187.77.127.179`
+   - Port server: `8090`
+   - HTTPS: `Off`
+   - Proxy: `Off`
+7. Hubungkan mesin ke LAN/WiFi internet.
+8. Lakukan 1 scan test; `last_seen_at` dan raw event akan bergerak ketika push masuk.
+
+Dengan flow ini, mesin tidak harus dicolok ke PC admin. PC admin hanya dipakai untuk troubleshooting lokal port `4370` jika ADMS/cloud push bermasalah.
 
 ## Setting Mesin AT-301
 

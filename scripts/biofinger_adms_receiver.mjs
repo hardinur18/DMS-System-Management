@@ -8,6 +8,7 @@ const DEFAULT_HOST = "0.0.0.0";
 const DEFAULT_TIMEZONE_OFFSET = "+07:00";
 const DEFAULT_DEVICE_PORT = 4370;
 const DEFAULT_COMMAND_RESPONSE = "OK\n";
+const REGISTRY_ALLOWLIST_CACHE_MS = 60_000;
 
 const env = process.env;
 
@@ -33,6 +34,7 @@ const supabase = config.dryRun
   : createSupabaseClient(config.supabaseUrl, config.supabaseServiceRoleKey);
 
 const requestLogPrefix = () => new Date().toISOString();
+const registrySerialCache = new Map();
 
 function parseCsv(value) {
   return String(value || "")
@@ -108,9 +110,38 @@ function getSerialFromUrl(url) {
   ).trim();
 }
 
-function assertRequestAllowed({ request, url, serialNumber, remoteIp }) {
+async function isSerialAllowedByRegistry(serialNumber) {
+  if (!serialNumber || config.dryRun || !supabase) return false;
+
+  const cached = registrySerialCache.get(serialNumber);
+  const now = Date.now();
+  if (cached && now - cached.checkedAt < REGISTRY_ALLOWLIST_CACHE_MS) {
+    return cached.allowed;
+  }
+
+  const { data, error } = await supabase
+    .from("attendance_devices")
+    .select("id, status")
+    .eq("serial_number", serialNumber)
+    .maybeSingle();
+
+  if (error) {
+    console.error(`${requestLogPrefix()} registry allowlist lookup failed serial=${serialNumber} ${error.message || error}`);
+    registrySerialCache.set(serialNumber, { allowed: false, checkedAt: now });
+    return false;
+  }
+
+  const allowed = Boolean(data && (data.status === "active" || data.status === "maintenance"));
+  registrySerialCache.set(serialNumber, { allowed, checkedAt: now });
+  return allowed;
+}
+
+async function assertRequestAllowed({ request, url, serialNumber, remoteIp }) {
   if (config.allowedSerials.length && (!serialNumber || !config.allowedSerials.includes(serialNumber))) {
-    return { ok: false, status: 403, message: "Serial device tidak diizinkan." };
+    const registryAllowed = await isSerialAllowedByRegistry(serialNumber);
+    if (!registryAllowed) {
+      return { ok: false, status: 403, message: "Serial device tidak diizinkan." };
+    }
   }
 
   if (config.allowedRemoteIps.length && (!remoteIp || !config.allowedRemoteIps.includes(remoteIp))) {
@@ -598,10 +629,11 @@ async function handleRequest(request, response) {
         dryRun: config.dryRun,
         port: config.port,
         allowedSerials: config.allowedSerials.length,
+        registryAllowlist: !config.dryRun,
       });
     }
 
-    const allowed = assertRequestAllowed({ request, url, serialNumber, remoteIp });
+    const allowed = await assertRequestAllowed({ request, url, serialNumber, remoteIp });
     if (!allowed.ok) {
       console.log(`${requestLogPrefix()} reject status=${allowed.status} reason=${allowed.message} path=${url.pathname} serial=${serialNumber || "-"} remote=${remoteIp || "-"}`);
       return textResponse(response, `${allowed.message}\n`, allowed.status);

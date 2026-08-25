@@ -115,6 +115,28 @@ Device Registry Biofinger
 
 Setting ini tersedia di halaman `Biofinger`, panel `Device Registry`.
 
+Untuk menambah mesin baru:
+
+1. Buka `Biofinger > Device`.
+2. Klik `Tambah Device`.
+3. Isi:
+   - Nama display, contoh `Biofinger Gudang A`
+   - Kode device, contoh `BIO-AT301-002`
+   - Serial number dari menu status/web panel mesin
+   - Lokasi kerja dari Master Data
+   - Status `active`
+4. Simpan device.
+5. Setting cloud di mesin ke receiver DMS:
+   - Server Mode: `ADMS`
+   - Alamat server: `187.77.127.179`
+   - Port: `8090`
+   - HTTPS: `Off`
+   - Proxy: `Off`
+6. Sambungkan mesin ke LAN/WiFi internet.
+7. Lakukan scan test dan cek `last seen`/raw event di halaman Biofinger.
+
+Receiver membaca serial aktif dari Device Registry sebagai allowlist dinamis. Jadi setelah serial tersimpan di DMS, penambahan mesin baru tidak perlu edit env VPS manual kecuali ada kebijakan firewall/IP khusus.
+
 ## Flow Karyawan Baru
 
 Urutan resmi untuk karyawan baru:
