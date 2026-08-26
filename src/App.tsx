@@ -3072,7 +3072,6 @@ function useHorizontalDragScroll<T extends HTMLElement>() {
           scrollLeft: node.scrollLeft,
           suppressClickUntil: dragStateRef.current.suppressClickUntil,
         }
-        node.setPointerCapture(event.pointerId)
       },
       onPointerMove: (event: ReactPointerEvent<T>) => {
         const node = scrollRef.current
@@ -3088,6 +3087,7 @@ function useHorizontalDragScroll<T extends HTMLElement>() {
             return
           }
           dragState.moved = true
+          if (!node.hasPointerCapture(event.pointerId)) node.setPointerCapture(event.pointerId)
           setDragging(true)
         }
         node.scrollLeft = dragState.scrollLeft - deltaX
