@@ -133,6 +133,8 @@ $values["BIOFINGER_EXPORT_DIR"] = Read-Value -Label "BIOFINGER_EXPORT_DIR" -Defa
 $values["BIOFINGER_LOG_DIR"] = Read-Value -Label "BIOFINGER_LOG_DIR" -DefaultValue (Get-ExistingValue -Values $values -Key "BIOFINGER_LOG_DIR" -DefaultValue "logs/biofinger-sync") -Required
 $values["BIOFINGER_CONVERT_ON_IMPORT"] = Get-ExistingValue -Values $values -Key "BIOFINGER_CONVERT_ON_IMPORT" -DefaultValue "false"
 $values["BIOFINGER_CONVERSION_BATCH_SIZE"] = Get-ExistingValue -Values $values -Key "BIOFINGER_CONVERSION_BATCH_SIZE" -DefaultValue "1000"
+$values["BIOFINGER_AUTO_USER_SYNC_ENABLED"] = Get-ExistingValue -Values $values -Key "BIOFINGER_AUTO_USER_SYNC_ENABLED" -DefaultValue "false"
+$values["BIOFINGER_AUTO_USER_SYNC_INTERVAL_MS"] = Get-ExistingValue -Values $values -Key "BIOFINGER_AUTO_USER_SYNC_INTERVAL_MS" -DefaultValue "21600000"
 
 if (-not $Force -and (Test-Path -LiteralPath $envPath -PathType Leaf)) {
   Copy-Item -LiteralPath $envPath -Destination "$envPath.bak" -Force
@@ -155,7 +157,9 @@ $orderedKeys = @(
   "BIOFINGER_PYTHON",
   "BIOFINGER_NODE",
   "BIOFINGER_CONVERT_ON_IMPORT",
-  "BIOFINGER_CONVERSION_BATCH_SIZE"
+  "BIOFINGER_CONVERSION_BATCH_SIZE",
+  "BIOFINGER_AUTO_USER_SYNC_ENABLED",
+  "BIOFINGER_AUTO_USER_SYNC_INTERVAL_MS"
 )
 
 $lines = New-Object System.Collections.Generic.List[string]

@@ -321,7 +321,9 @@ Importer bisa langsung menjalankan konversi jika diberi flag `--convert`. Tanpa 
 
 ## Flow Sinkron Operasional
 
-Flow sinkron yang dipakai DMS:
+Flow sinkron lokal di bawah ini hanya fallback jika ADMS/cloud receiver belum dipakai. Untuk target tanpa PC admin, gunakan flow `docs/BIOFINGER_ADMS_CLOUD_RECEIVER.md`: mesin AT-301 push ke receiver VPS, lalu DMS membaca data dari Supabase.
+
+Flow sinkron fallback lokal:
 
 1. Pastikan PC bisa akses web panel AT-301 di `http://192.168.1.201/`.
 2. Baca device lokal dengan `scripts/biofinger_sync.py`.
@@ -332,6 +334,14 @@ Flow sinkron yang dipakai DMS:
 7. Mapping `User ID Mesin` ke `Karyawan DMS`.
 8. Setelah mapping valid, jalankan `Proses Absensi` dan cek hasilnya.
 9. Jika hasil sample sudah stabil, aktifkan auto-convert receiver agar `attendance_logs` final dibuat otomatis dengan `source = 'biofinger'`.
+
+Catatan flow cloud:
+
+- User atau fingerprint baru di mesin perlu melakukan scan minimal sekali agar User ID terkirim sebagai raw event.
+- Jika nama mesin belum ikut terkirim, klik `Sync User Mesin` di DMS untuk meminta payload `USERINFO`.
+- `Refresh Data` hanya membaca ulang data backend; tombol ini tidak memaksa mesin mengirim data.
+- Urutan mapping default di DMS memakai User ID tertinggi agar user yang baru dibuat lebih cepat terlihat.
+- Shift malam lintas tanggal masih perlu policy final sebelum otomatis digabung ke hari kerja sebelumnya.
 
 Command sinkron ulang dari mesin:
 

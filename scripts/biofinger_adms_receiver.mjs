@@ -14,7 +14,8 @@ const DEFAULT_COMMAND_BATCH_SIZE = 3;
 const DEFAULT_COMMAND_RETRY_MS = 120_000;
 const DEFAULT_USER_SYNC_PIN = "ALL";
 const DEFAULT_USER_SYNC_COMMAND_TEMPLATE = "C:{id}:DATA QUERY USERINFO";
-const RECEIVER_VERSION = "2026-08-26-user-sync-v1";
+const DEFAULT_AUTO_USER_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const RECEIVER_VERSION = "2026-08-26-auto-user-sync-v2";
 
 const env = process.env;
 
@@ -35,6 +36,8 @@ const config = {
   commandRetryMs: toInteger(env.BIOFINGER_ADMS_COMMAND_RETRY_MS, DEFAULT_COMMAND_RETRY_MS),
   userSyncPin: env.BIOFINGER_USER_SYNC_PIN || DEFAULT_USER_SYNC_PIN,
   userSyncCommandTemplate: env.BIOFINGER_USER_SYNC_COMMAND_TEMPLATE || DEFAULT_USER_SYNC_COMMAND_TEMPLATE,
+  autoUserSync: parseBoolean(env.BIOFINGER_AUTO_USER_SYNC_ENABLED),
+  autoUserSyncIntervalMs: toInteger(env.BIOFINGER_AUTO_USER_SYNC_INTERVAL_MS, DEFAULT_AUTO_USER_SYNC_INTERVAL_MS),
   dryRun: parseBoolean(env.BIOFINGER_RECEIVER_DRY_RUN),
   logPayload: parseBoolean(env.BIOFINGER_RECEIVER_LOG_PAYLOAD),
   supabaseUrl: env.SUPABASE_URL || env.VITE_SUPABASE_URL || "",
@@ -670,8 +673,56 @@ async function claimCommandQueueRows(device) {
   return commands;
 }
 
+async function createAutoUserSyncCommand(device) {
+  if (config.dryRun || !supabase || !commandQueueTableAvailable || !config.autoUserSync) return false;
+  if (!device?.id) return false;
+
+  const intervalMs = Math.max(config.autoUserSyncIntervalMs || DEFAULT_AUTO_USER_SYNC_INTERVAL_MS, 5 * 60 * 1000);
+  const cutoffIso = new Date(Date.now() - intervalMs).toISOString();
+  const { data: recentCommands, error: recentError } = await supabase
+    .from("biofinger_device_commands")
+    .select("id")
+    .eq("attendance_device_id", device.id)
+    .eq("command_type", "sync_users")
+    .in("status", ["pending", "sent", "acknowledged", "completed"])
+    .gt("requested_at", cutoffIso)
+    .limit(1);
+
+  if (recentError) {
+    if (noteCommandQueueError(recentError)) return false;
+    throw recentError;
+  }
+
+  if (recentCommands?.length) return false;
+
+  const { error: insertError } = await supabase
+    .from("biofinger_device_commands")
+    .insert({
+      attendance_device_id: device.id,
+      serial_number: device.serial_number || null,
+      command_type: "sync_users",
+      pin: config.userSyncPin || DEFAULT_USER_SYNC_PIN,
+      status: "pending",
+      metadata: {
+        source: "receiver-auto",
+        interval_ms: intervalMs,
+        device_code: device.device_code || "",
+      },
+    });
+
+  if (insertError) {
+    if (noteCommandQueueError(insertError)) return false;
+    throw insertError;
+  }
+
+  return true;
+}
+
 async function claimAdmsCommands(device) {
-  const queueCommands = await claimCommandQueueRows(device);
+  let queueCommands = await claimCommandQueueRows(device);
+  if (!queueCommands.length && await createAutoUserSyncCommand(device)) {
+    queueCommands = await claimCommandQueueRows(device);
+  }
   const metadataCommand = await claimMetadataUserSyncCommand(device);
   return metadataCommand ? [...queueCommands, metadataCommand] : queueCommands;
 }
@@ -1104,6 +1155,8 @@ async function handleRequest(request, response) {
         registryAllowlist: !config.dryRun,
         commandQueue: commandQueueTableAvailable ? "available" : "fallback-metadata",
         commandBatchSize: config.commandBatchSize,
+        autoUserSync: config.autoUserSync,
+        autoUserSyncIntervalMs: config.autoUserSyncIntervalMs,
       });
     }
 
@@ -1135,4 +1188,5 @@ server.listen(config.port, config.host, () => {
   console.log(`${requestLogPrefix()} dryRun=${config.dryRun} allowedSerials=${config.allowedSerials.join(",") || "*"}`);
   console.log(`${requestLogPrefix()} convertOnImport=${config.convertOnImport} conversionBatchSize=${config.conversionBatchSize}`);
   console.log(`${requestLogPrefix()} commandBatchSize=${config.commandBatchSize} userSyncTemplate=${config.userSyncCommandTemplate}`);
+  console.log(`${requestLogPrefix()} autoUserSync=${config.autoUserSync} autoUserSyncIntervalMs=${config.autoUserSyncIntervalMs}`);
 });

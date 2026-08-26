@@ -30,7 +30,7 @@ Deployment helper untuk VPS ada di:
 deploy/biofinger-adms/
 ```
 
-Status POC per 2026-08-24:
+Status POC per 2026-08-26:
 
 - VPS Hostinger: `187.77.127.179`
 - Service: `dms-biofinger-adms`
@@ -41,6 +41,7 @@ Status POC per 2026-08-24:
 - Health check: `http://187.77.127.179:8090/health`
 - AT-301 push via WiFi sudah confirmed dari serial `GED7244800117`.
 - Receiver live sudah menulis ke Supabase staging dan mengabaikan duplicate histori lewat `source_hash`.
+- Receiver sudah bisa meminta ulang daftar user/nama lewat command `DATA QUERY USERINFO` pada firmware AT-301 yang diuji.
 - Receiver menerima allowlist dari dua sumber: env `BIOFINGER_ALLOWED_SERIALS` dan Device Registry DMS (`attendance_devices.serial_number`) untuk device berstatus `active` atau `maintenance`.
 
 Mode dry-run hanya dipakai untuk test awal. Saat mode live aktif, data masuk staging Biofinger. Konversi ke `attendance_logs` sebaiknya dijalankan manual dulu dari DMS UI sampai sample valid. Setelah itu `BIOFINGER_CONVERT_ON_IMPORT=true` boleh diaktifkan agar event yang sudah mapped otomatis dibuat menjadi absensi final.
@@ -78,6 +79,8 @@ BIOFINGER_ALLOWED_SERIALS=GED7244800117
 BIOFINGER_ALLOWED_REMOTE_IPS=
 BIOFINGER_CONVERT_ON_IMPORT=false
 BIOFINGER_CONVERSION_BATCH_SIZE=1000
+BIOFINGER_AUTO_USER_SYNC_ENABLED=false
+BIOFINGER_AUTO_USER_SYNC_INTERVAL_MS=21600000
 BIOFINGER_RECEIVER_DRY_RUN=false
 BIOFINGER_RECEIVER_LOG_PAYLOAD=false
 ```
@@ -181,6 +184,8 @@ BIOFINGER_USER_SYNC_PIN=ALL
 BIOFINGER_USER_SYNC_COMMAND_TEMPLATE="C:{id}:DATA QUERY USERINFO"
 BIOFINGER_ADMS_COMMAND_BATCH_SIZE=3
 BIOFINGER_ADMS_COMMAND_RETRY_MS=120000
+BIOFINGER_AUTO_USER_SYNC_ENABLED=false
+BIOFINGER_AUTO_USER_SYNC_INTERVAL_MS=21600000
 ```
 
 Status command disimpan di tabel `biofinger_device_commands` jika migration `20260826000100_biofinger_user_sync_commands.sql` sudah diterapkan. Jika tabel/function belum ada, frontend memakai fallback `attendance_devices.metadata.biofinger_user_sync_request`; receiver tetap bisa membaca fallback ini agar POC tidak berhenti.
@@ -206,6 +211,28 @@ Halaman Biofinger menampilkan status `User Sync`:
 - `Sync User Mesin`: meminta mesin mengirim data user/nama.
 - `Refresh Data`: mengambil ulang data yang sudah masuk ke Supabase.
 
+## Auto-Sync User Mesin
+
+Receiver bisa membuat command `sync_users` otomatis saat AT-301 polling `/iclock/getrequest`, tanpa admin klik tombol `Sync User Mesin`.
+
+Default repo tetap mati:
+
+```bash
+BIOFINGER_AUTO_USER_SYNC_ENABLED=false
+BIOFINGER_AUTO_USER_SYNC_INTERVAL_MS=21600000
+```
+
+Aktifkan hanya setelah command manual `Sync User Mesin` sudah terbukti berhasil di mesin tersebut. Nilai `21600000` berarti 6 jam. Auto-sync ini hanya menarik daftar user/nama mesin; konversi raw event ke `attendance_logs` tetap dikendalikan oleh `BIOFINGER_CONVERT_ON_IMPORT` atau tombol `Proses Absensi`.
+
+## Status Online Device
+
+Halaman Biofinger membaca heartbeat dari kolom `attendance_devices.last_seen_at`.
+
+- `Online`: receiver melihat polling/push mesin dalam 2 menit terakhir.
+- `Idle`: receiver melihat mesin dalam 15 menit terakhir, tetapi bukan heartbeat baru.
+- `Offline`: receiver belum melihat mesin lebih dari 15 menit.
+- `Belum online`: device sudah terdaftar, tetapi receiver belum pernah menerima serial itu.
+
 ## Perilaku Database
 
 Receiver melakukan:
@@ -215,8 +242,10 @@ Receiver melakukan:
 3. Jika ada command pending, kirim command ke mesin melalui `/iclock/getrequest`.
 4. Insert raw event ke `biofinger_attendance_events` memakai `source_hash`, sehingga event dobel diabaikan.
 5. Jika User ID sudah punya mapping `active`, event baru langsung diberi `employee_id` dan `import_status = mapped`.
-6. Jika `BIOFINGER_CONVERT_ON_IMPORT=true`, panggil `convert_biofinger_attendance_events` untuk membuat `attendance_logs` dari event yang sudah `mapped`. Default env tetap `false` sampai sample manual sudah valid.
-7. Update `last_seen_at`, `last_sync_at`, dan `sync_cursor_at`.
+6. Mapping dari DMS sebaiknya lewat RPC `update_biofinger_user_mapping` agar konflik karyawan dicegah, raw event ikut diperbarui, dan Audit Log tercatat.
+7. Jika `BIOFINGER_AUTO_USER_SYNC_ENABLED=true`, receiver membuat command `sync_users` berkala saat interval terakhir sudah lewat.
+8. Jika `BIOFINGER_CONVERT_ON_IMPORT=true`, panggil `convert_biofinger_attendance_events` untuk membuat `attendance_logs` dari event yang sudah `mapped`. Default env tetap `false` sampai sample manual sudah valid.
+9. Update `last_seen_at`, `last_sync_at`, dan `sync_cursor_at`.
 
 Konversi memakai aturan aman:
 
@@ -225,6 +254,7 @@ Konversi memakai aturan aman:
 - Event duplikat ditandai `ignored` dengan catatan sistem.
 - Event yang bentrok dengan attendance dari sumber lain ditandai `error`, bukan menimpa data manual/mobile.
 - Setelah konversi, payroll cycle karyawan terkait di-refresh.
+- Shift malam lintas tanggal masih perlu policy operasional final; rule saat ini memakai tanggal mesin dari raw event.
 
 Manual convert juga tersedia dari DMS UI tombol `Proses Absensi` atau command:
 

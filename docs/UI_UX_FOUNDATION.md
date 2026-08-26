@@ -225,6 +225,23 @@ Setiap UI yang menampilkan `attendance_logs` harus mempertahankan sumber data ab
 - Tabel mapping Biofinger punya kontrol `Urutan`; default-nya `User ID Tertinggi`, dengan opsi `Terbaru dari Mesin` dan `User ID Terendah`.
 - Biofinger punya dua action berbeda: `Sync User Mesin` untuk meminta payload USERINFO dari AT-301, dan `Refresh Data` untuk membaca ulang data Supabase yang sudah masuk.
 
+## Attendance Shift Settlement Pattern
+
+Live Absensi dan Rekap Absensi tidak boleh hanya membaca durasi mentah dari `attendance_logs`. Setiap tampilan harian harus menjelaskan hubungan antara log aktual dan kewajiban shift karyawan.
+
+- Data jadwal wajib berasal dari `employees.shift_id` ke `shifts.start_time` dan `shifts.end_time`.
+- Check-in aktual memakai log `check_in`; check-out aktual memakai log `check_out`.
+- Untuk Biofinger, event final tetap mengikuti rule check-in paling awal dan check-out paling akhir per karyawan/tanggal.
+- UI menampilkan `Jadwal & Jam`: nama shift, jam jadwal, jam wajib, jam aktual, telat, pulang cepat, kurang jam, dan lewat shift bila ada.
+- Sort default Live Absensi adalah aktivitas terbaru di paling atas. Karyawan tanpa aktivitas hari itu turun setelah baris yang punya update.
+- Detail Live Absensi memakai inline collapse di bawah baris agar HR tetap punya konteks tabel. Modal detail dipakai untuk rekap/review yang butuh ruang baca lebih panjang.
+- Teks dalam table Live Absensi harus medium, bukan bold semua. Gunakan bobot tebal hanya untuk angka ringkasan, judul section, status penting, dan CTA.
+- Row utama Live Absensi maksimal tiga baris informasi per kolom dan rata atas. Keterangan panjang, sumber lengkap, metrik telat, pulang cepat, kurang jam, dan kelebihan jam dipindahkan ke inline collapse.
+- Inline collapse Live Absensi tidak memakai card bertumpuk; gunakan satu panel detail dengan section datar dan divider ringan.
+- `kurang jam` adalah indikator operasional/review. Jangan otomatis memotong payroll sebelum policy payroll disetujui.
+- Settlement backend disiapkan di `attendance_daily_summaries`; payroll jangka panjang harus membaca hasil settlement final, bukan raw log langsung.
+- Shift malam boleh melewati tanggal kalender. Backend harus menyimpan `scheduled_end_at` di tanggal berikutnya bila `end_time <= start_time`.
+
 ## Master Data Form Mapping
 
 Form Master Data harus mengikuti kategori aktif:

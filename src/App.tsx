@@ -98,6 +98,8 @@ type ViewId =
   | "guide"
   | "profile"
 type AttendanceStatus = "valid" | "pending" | "failed" | "missing"
+type AttendanceSettlementStatus = "ready" | "running" | "short" | "missing_checkout" | "missing_checkin" | "review" | "failed" | "no_shift"
+type AttendanceSettlementTone = "valid" | "pending" | "failed" | "missing"
 type PayrollStatus = "active" | "ready" | "locked" | "paid" | "void"
 type PayrollProcessAction = "lock" | "mark_paid" | "unlock" | "void" | "restore"
 type AttendanceLogStatus = "valid" | "review" | "rejected"
@@ -134,6 +136,10 @@ interface AttendanceMonitorRow {
   employeePhotoUrl: string
   divisionName: string
   workLocationName: string
+  shiftId: string
+  shiftName: string
+  shiftStartTime: string
+  shiftEndTime: string
   attendanceDate: string
   eventAt: string
   checkInId: string
@@ -182,6 +188,18 @@ interface AttendanceMonitorRow {
   overtimeAmount: number
   salaryType: EmployeeSalaryType
   workDurationLabel: string
+  scheduledStartAt: string
+  scheduledEndAt: string
+  expectedWorkMinutes: number | null
+  actualWorkMinutes: number | null
+  lateMinutes: number
+  earlyLeaveMinutes: number
+  shortageMinutes: number
+  overtimeMinutes: number
+  lastActivityAt: string
+  settlementStatus: AttendanceSettlementStatus
+  settlementLabel: string
+  settlementTone: AttendanceSettlementTone
   notes: string
 }
 
@@ -593,6 +611,7 @@ type BiofingerImportStatus = "pending" | "mapped" | "converted" | "ignored" | "e
 type BiofingerWorkspaceTab = "overview" | "devices" | "mapping" | "events"
 type BiofingerMappingSort = "user_id_desc" | "latest" | "user_id_asc"
 type BiofingerCommandStatus = "pending" | "sent" | "acknowledged" | "completed" | "failed" | "expired" | "cancelled"
+type BiofingerConnectionState = "online" | "idle" | "offline" | "never" | "inactive"
 
 interface EmployeeBiofingerLink {
   id: string
@@ -612,6 +631,8 @@ interface EmployeeBiofingerLink {
 const BIOFINGER_ALL_DEVICES = "all"
 const BIOFINGER_ADMS_RECEIVER_HOST = String(import.meta.env.VITE_BIOFINGER_ADMS_RECEIVER_HOST || "187.77.127.179")
 const BIOFINGER_ADMS_RECEIVER_PORT = String(import.meta.env.VITE_BIOFINGER_ADMS_RECEIVER_PORT || "8090")
+const BIOFINGER_ONLINE_WINDOW_MS = 2 * 60 * 1000
+const BIOFINGER_IDLE_WINDOW_MS = 15 * 60 * 1000
 
 interface BiofingerDeviceRow {
   id: string
@@ -1075,25 +1096,29 @@ const guideArticles: GuideArticle[] = [
     viewId: "attendance-live",
     title: "Live Absensi",
     group: "Absensi",
-    summary: "Memantau check-in dan check-out harian dari mobile/GPS dan status validasi wajah.",
+    summary: "Memantau check-in/check-out harian, sumber absensi, jadwal shift, jam aktual, dan kekurangan jam.",
     icon: Megaphone,
     audience: "HR, Supervisor",
     frequency: "Saat shift berjalan",
-    tags: ["check-in", "check-out", "gps", "face"],
+    tags: ["check-in", "check-out", "gps", "face", "shift", "kurang jam"],
     steps: [
       "Pilih tanggal atau mode live sesuai kebutuhan monitoring.",
       "Gunakan filter lokasi/divisi untuk fokus pada area kerja tertentu.",
-      "Cek status GPS, radius, face score, dan jam masuk/keluar.",
+      "Cek status GPS, radius, face score, sumber absensi, dan jam masuk/keluar.",
+      "Baca kolom Jadwal & Jam untuk melihat kewajiban shift, jam aktual, telat, pulang cepat, dan kurang jam.",
       "Buka detail baris jika butuh koreksi checkout atau reset data hari itu.",
     ],
     checks: [
       "Karyawan shift aktif sudah punya check-in valid.",
+      "Shift karyawan sudah punya jam mulai dan jam selesai di Master Data.",
+      "Kurang jam masuk indikator review operasional sebelum dijadikan potongan payroll.",
       "Log out-of-radius punya alasan atau masuk antrian review.",
       "Check-out kosong dipantau sebelum akhir hari.",
     ],
     pitfalls: [
       "Jangan koreksi absensi tanpa catatan yang bisa diaudit.",
       "Pastikan tanggal filter benar sebelum mengambil keputusan.",
+      "Jangan jadikan kurang jam sebagai potongan otomatis sebelum policy payroll disetujui.",
     ],
     related: ["attendance-review", "field-monitoring", "payroll"],
   },
@@ -1144,6 +1169,7 @@ const guideArticles: GuideArticle[] = [
       "Klik Refresh Data di DMS untuk menarik ulang data yang sudah masuk ke Supabase.",
       "Mapping User ID mesin ke karyawan DMS sebelum raw event dipakai sebagai absensi payroll.",
       "Klik Proses Absensi untuk mengubah event mapped menjadi attendance final, atau aktifkan auto-convert di receiver VPS.",
+      "Jika auto-sync user di receiver diaktifkan, receiver akan meminta USERINFO berkala saat mesin polling ADMS.",
     ],
     checks: [
       "Serial di DMS sama persis dengan Serial Number mesin.",
@@ -1157,6 +1183,7 @@ const guideArticles: GuideArticle[] = [
       "User/finger yang baru dibuat di mesin bisa belum muncul sebelum user tersebut scan sekali.",
       "Refresh Data tidak memaksa mesin sync, hanya mengambil ulang data backend. Gunakan Sync User Mesin untuk command USERINFO.",
       "Nama di mesin tetap tergantung dukungan firmware AT-301; jika command tidak didukung, mapping by User ID tetap menjadi sumber stabil.",
+      "Shift malam lintas tanggal masih perlu rule operasional final sebelum dipakai otomatis.",
       "Jika data belum masuk, cek internet mesin, alamat server, port, dan allowlist serial.",
       "Event yang bentrok dengan absensi manual/mobile masuk status error dan perlu dicek, bukan ditimpa otomatis.",
     ],
@@ -2238,6 +2265,9 @@ function getFriendlySupabaseError(error: unknown, fallback: string) {
   if (!rawMessage && !message.trim()) return fallback
 
   if (code === "42501" || message.includes("row-level security") || message.includes("permission denied")) {
+    if (message.includes("biofinger")) {
+      return "Akses user belum punya izin Kelola Biofinger. Cek Role & Permission untuk permission biofinger.manage."
+    }
     return "Akses user belum punya izin Kelola Master Data. Cek Role & Permission untuk permission master_data.manage."
   }
 
@@ -3340,6 +3370,36 @@ function AttendanceTimelineCell({ row }: { row: AttendanceMonitorRow }) {
           </span>
         </span>
       ))}
+    </div>
+  )
+}
+
+function AttendanceSettlementCell({ row }: { row: AttendanceMonitorRow }) {
+  const scheduleLabel = getAttendanceShiftScheduleLabel(row)
+  const metrics = [
+    { label: "Wajib", value: row.expectedWorkMinutes === null ? "-" : formatMinutesDuration(row.expectedWorkMinutes), tone: "neutral" },
+    { label: "Aktual", value: row.actualWorkMinutes === null ? "-" : formatMinutesDuration(row.actualWorkMinutes), tone: row.actualWorkMinutes === null ? "missing" : "valid" },
+    row.lateMinutes > 0 ? { label: "Telat", value: formatMinutesDuration(row.lateMinutes), tone: "pending" } : null,
+    row.earlyLeaveMinutes > 0 ? { label: "Pulang -", value: formatMinutesDuration(row.earlyLeaveMinutes), tone: "failed" } : null,
+    row.shortageMinutes > 0 ? { label: "Kurang", value: formatMinutesDuration(row.shortageMinutes), tone: "failed" } : null,
+    row.overtimeMinutes > 0 ? { label: "Pulang +", value: formatMinutesDuration(row.overtimeMinutes), tone: "valid" } : null,
+  ].filter(Boolean) as Array<{ label: string; value: string; tone: string }>
+
+  return (
+    <div className={clsx("attendanceSettlementCell", `tone-${row.settlementTone}`)}>
+      <div className="attendanceSettlementHeader">
+        <span className="attendanceSettlementPulse" aria-hidden="true" />
+        <strong>{row.settlementLabel}</strong>
+      </div>
+      <small>{row.shiftName} / {scheduleLabel}</small>
+      <div className="attendanceSettlementMetrics">
+        {metrics.map((metric) => (
+          <span className={clsx("attendanceSettlementMetric", `tone-${metric.tone}`)} key={metric.label}>
+            <span>{metric.label}</span>
+            <strong>{metric.value}</strong>
+          </span>
+        ))}
+      </div>
     </div>
   )
 }
@@ -4631,6 +4691,17 @@ function isMissingBiofingerCommandSchema(error: unknown) {
     || message.includes("relation")
 }
 
+function isMissingBiofingerMappingRpc(error: unknown) {
+  const errorObject = error && typeof error === "object" ? error as { code?: unknown; message?: unknown; details?: unknown; hint?: unknown } : null
+  const message = `${String(errorObject?.message || "")} ${String(errorObject?.details || "")} ${String(errorObject?.hint || "")}`.toLowerCase()
+  const code = String(errorObject?.code || "")
+
+  return code === "PGRST202"
+    || code === "42883"
+    || message.includes("update_biofinger_user_mapping")
+    || message.includes("could not find the function")
+}
+
 function mapBiofingerLinkStatus(value: unknown): BiofingerLinkStatus {
   if (value === "active" || value === "ignored" || value === "inactive") return value
   return "pending"
@@ -4801,6 +4872,42 @@ function formatBiofingerConnection(device: BiofingerDeviceRow) {
   const protocol = device.protocol === "adms-cloud" ? "ADMS Cloud" : device.protocol || "zk-4370"
   const address = device.ipAddress ? `${device.ipAddress}:${device.port}` : `${BIOFINGER_ADMS_RECEIVER_HOST}:${BIOFINGER_ADMS_RECEIVER_PORT}`
   return `${protocol} / ${address}`
+}
+
+function getBiofingerDeviceConnectionState(device: BiofingerDeviceRow | null): BiofingerConnectionState {
+  if (!device) return "never"
+  if (device.status.trim().toLowerCase() === "inactive") return "inactive"
+
+  const lastSeenAt = Date.parse(device.lastSeenAt || "")
+  if (!Number.isFinite(lastSeenAt)) return "never"
+
+  const ageMs = Date.now() - lastSeenAt
+  if (ageMs <= BIOFINGER_ONLINE_WINDOW_MS) return "online"
+  if (ageMs <= BIOFINGER_IDLE_WINDOW_MS) return "idle"
+  return "offline"
+}
+
+const biofingerConnectionLabel: Record<BiofingerConnectionState, string> = {
+  online: "Online",
+  idle: "Idle",
+  offline: "Offline",
+  never: "Belum online",
+  inactive: "Inactive",
+}
+
+function formatBiofingerConnectionDetail(device: BiofingerDeviceRow | null) {
+  if (!device) return "Belum pilih device"
+  if (!device.lastSeenAt) return "Belum pernah terlihat receiver"
+  return `Last seen ${formatUserDateTime(device.lastSeenAt, "-")}`
+}
+
+function BiofingerDeviceConnectionText({ device }: { device: BiofingerDeviceRow | null }) {
+  const state = getBiofingerDeviceConnectionState(device)
+  return (
+    <span className={clsx("biofingerDeviceConnectionText", state)} title={formatBiofingerConnectionDetail(device)}>
+      {biofingerConnectionLabel[state]}
+    </span>
+  )
 }
 
 function compareBiofingerUserIds(a: Pick<BiofingerUserLinkRow, "externalUserId" | "externalUid">, b: Pick<BiofingerUserLinkRow, "externalUserId" | "externalUid">) {
@@ -5156,21 +5263,32 @@ async function updateBiofingerUserLink(row: BiofingerUserLinkRow, employeeId: st
     throw new Error("Pilih karyawan DMS sebelum mengaktifkan mapping Biofinger.")
   }
 
+  const mappingResult = await supabase.rpc("update_biofinger_user_mapping", {
+    target_link_id: row.id,
+    target_employee_id: employeeId || null,
+    target_status: nextStatus,
+  })
+
+  if (!mappingResult.error) return
+  if (!isMissingBiofingerMappingRpc(mappingResult.error)) throw mappingResult.error
+
+  const updatedAt = new Date().toISOString()
   const { error } = await supabase
     .from("employee_attendance_device_links")
     .update({
       employee_id: employeeId || null,
       status: nextStatus,
       matched_by: "manual",
-      updated_at: new Date().toISOString(),
+      last_synced_at: updatedAt,
+      updated_at: updatedAt,
     })
     .eq("id", row.id)
 
   if (error) throw error
 
   const eventPayload = nextStatus === "active"
-    ? { employee_id: employeeId, import_status: "mapped", updated_at: new Date().toISOString() }
-    : { employee_id: null, import_status: nextStatus === "ignored" ? "ignored" : "pending", updated_at: new Date().toISOString() }
+    ? { employee_id: employeeId, import_status: "mapped", updated_at: updatedAt }
+    : { employee_id: null, import_status: nextStatus === "ignored" ? "ignored" : "pending", updated_at: updatedAt }
 
   const eventUpdate = await supabase
     .from("biofinger_attendance_events")
@@ -5180,6 +5298,18 @@ async function updateBiofingerUserLink(row: BiofingerUserLinkRow, employeeId: st
     .in("import_status", ["pending", "mapped", "ignored"])
 
   if (eventUpdate.error) throw eventUpdate.error
+
+  await writeAuditLog("Update Biofinger mapping", "employee_attendance_device_links", row.id, {
+    module: "biofinger",
+    source: "frontend-fallback",
+    attendance_device_id: row.attendanceDeviceId,
+    external_user_id: row.externalUserId,
+    previous_status: row.status,
+    next_status: nextStatus,
+    previous_employee_id: row.employeeId || null,
+    next_employee_id: employeeId || null,
+    events_updated: eventUpdate.count ?? null,
+  }).catch(() => undefined)
 }
 
 async function convertBiofingerAttendanceEvents(deviceId: string) {
@@ -5823,6 +5953,42 @@ function formatMinutesDuration(minutes: number) {
   return `${hours}j ${restMinutes}m`
 }
 
+function parseShiftTimeMinutes(value?: string | null) {
+  const match = String(value || "").match(/^(\d{1,2}):(\d{2})/)
+  if (!match) return null
+  const hour = Number(match[1])
+  const minute = Number(match[2])
+  if (!Number.isFinite(hour) || !Number.isFinite(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) return null
+  return hour * 60 + minute
+}
+
+function formatShiftClock(value?: string | null) {
+  const minutes = parseShiftTimeMinutes(value)
+  if (minutes === null) return "--:--"
+  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`
+}
+
+function buildJakartaDateTimeIso(dateKey: string, totalMinutes: number) {
+  const dayOffset = Math.floor(totalMinutes / 1440)
+  const minuteOfDay = ((totalMinutes % 1440) + 1440) % 1440
+  const date = shiftDateKey(dateKey, dayOffset)
+  return `${date}T${String(Math.floor(minuteOfDay / 60)).padStart(2, "0")}:${String(minuteOfDay % 60).padStart(2, "0")}:00+07:00`
+}
+
+function getScheduledShiftWindow(attendanceDate: string, startTime?: string | null, endTime?: string | null) {
+  const startMinutes = parseShiftTimeMinutes(startTime)
+  const endMinutes = parseShiftTimeMinutes(endTime)
+  if (!attendanceDate || startMinutes === null || endMinutes === null) return null
+
+  const normalizedEndMinutes = endMinutes <= startMinutes ? endMinutes + 1440 : endMinutes
+  return {
+    startAt: buildJakartaDateTimeIso(attendanceDate, startMinutes),
+    endAt: buildJakartaDateTimeIso(attendanceDate, normalizedEndMinutes),
+    expectedMinutes: normalizedEndMinutes - startMinutes,
+    isOvernight: normalizedEndMinutes >= 1440,
+  }
+}
+
 function getAttendanceDurationMinutes(checkInAt?: string | null, checkOutAt?: string | null) {
   if (!checkInAt) return null
   const startMs = new Date(checkInAt).getTime()
@@ -5851,6 +6017,115 @@ function formatAttendanceWorkDuration(checkInAt?: string | null, checkOutAt?: st
   return checkOutAt ? formatMinutesDuration(minutes) : `Berjalan ${formatMinutesDuration(minutes)}`
 }
 
+function calculateAttendanceSettlement({
+  attendanceDate,
+  checkInAt,
+  checkOutAt,
+  shiftName,
+  shiftStartTime,
+  shiftEndTime,
+  attendanceStatus,
+}: {
+  attendanceDate: string
+  checkInAt: string
+  checkOutAt: string
+  shiftName: string
+  shiftStartTime: string
+  shiftEndTime: string
+  attendanceStatus: AttendanceStatus
+}) {
+  const schedule = getScheduledShiftWindow(attendanceDate, shiftStartTime, shiftEndTime)
+  const actualWorkMinutes = checkInAt && checkOutAt ? getAttendanceDurationMinutes(checkInAt, checkOutAt) : null
+  const checkInMs = checkInAt ? new Date(checkInAt).getTime() : null
+  const checkOutMs = checkOutAt ? new Date(checkOutAt).getTime() : null
+  const scheduledStartMs = schedule ? new Date(schedule.startAt).getTime() : null
+  const scheduledEndMs = schedule ? new Date(schedule.endAt).getTime() : null
+  const lateMinutes = scheduledStartMs !== null && checkInMs !== null && Number.isFinite(checkInMs)
+    ? Math.max(0, Math.floor((checkInMs - scheduledStartMs) / 60000))
+    : 0
+  const earlyLeaveMinutes = scheduledEndMs !== null && checkOutMs !== null && Number.isFinite(checkOutMs)
+    ? Math.max(0, Math.floor((scheduledEndMs - checkOutMs) / 60000))
+    : 0
+  const overtimeMinutes = scheduledEndMs !== null && checkOutMs !== null && Number.isFinite(checkOutMs)
+    ? Math.max(0, Math.floor((checkOutMs - scheduledEndMs) / 60000))
+    : 0
+  const shortageMinutes = schedule && actualWorkMinutes !== null
+    ? Math.max(0, schedule.expectedMinutes - actualWorkMinutes)
+    : 0
+  const lastActivityAt = [checkInAt, checkOutAt]
+    .filter(Boolean)
+    .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] || ""
+
+  let settlementStatus: AttendanceSettlementStatus = "ready"
+  if (attendanceStatus === "failed") settlementStatus = "failed"
+  else if (!checkInAt) settlementStatus = "missing_checkin"
+  else if (!checkOutAt) settlementStatus = isMissingCheckoutShift(checkInAt, checkOutAt, attendanceDate) ? "missing_checkout" : "running"
+  else if (!schedule) settlementStatus = "no_shift"
+  else if (attendanceStatus === "pending") settlementStatus = "review"
+  else if (shortageMinutes > 0) settlementStatus = "short"
+
+  const settlementTone: AttendanceSettlementTone =
+    settlementStatus === "ready" ? "valid"
+      : settlementStatus === "failed" ? "failed"
+      : settlementStatus === "missing_checkin" || settlementStatus === "missing_checkout" ? "missing"
+        : "pending"
+  const settlementLabel =
+    settlementStatus === "ready" ? "Sesuai shift"
+      : settlementStatus === "running" ? "Sedang berjalan"
+      : settlementStatus === "short" ? `Kurang ${formatMinutesDuration(shortageMinutes)}`
+      : settlementStatus === "missing_checkout" ? "Belum checkout"
+      : settlementStatus === "missing_checkin" ? "Belum masuk"
+      : settlementStatus === "review" ? "Review HR"
+      : settlementStatus === "failed" ? "Tidak valid"
+        : "Shift belum lengkap"
+
+  return {
+    scheduledStartAt: schedule?.startAt || "",
+    scheduledEndAt: schedule?.endAt || "",
+    expectedWorkMinutes: schedule?.expectedMinutes ?? null,
+    actualWorkMinutes,
+    lateMinutes,
+    earlyLeaveMinutes,
+    shortageMinutes,
+    overtimeMinutes,
+    lastActivityAt,
+    settlementStatus,
+    settlementLabel,
+    settlementTone,
+    shiftScheduleLabel: schedule ? `${formatShiftClock(shiftStartTime)} - ${formatShiftClock(shiftEndTime)}${schedule.isOvernight ? " +1" : ""}` : "Shift belum lengkap",
+    shiftName: shiftName || "Belum pilih shift",
+  }
+}
+
+function compareAttendanceRowsByLatestActivity(a: AttendanceMonitorRow, b: AttendanceMonitorRow) {
+  const aTime = a.lastActivityAt ? new Date(a.lastActivityAt).getTime() : 0
+  const bTime = b.lastActivityAt ? new Date(b.lastActivityAt).getTime() : 0
+  if (aTime !== bTime) return bTime - aTime
+  const dateCompare = b.attendanceDate.localeCompare(a.attendanceDate)
+  if (dateCompare !== 0) return dateCompare
+  return a.employeeCode.localeCompare(b.employeeCode)
+}
+
+function getAttendanceShiftScheduleLabel(row: AttendanceMonitorRow) {
+  if (!row.scheduledStartAt || !row.scheduledEndAt) return "jadwal belum lengkap"
+  const crossesDate = row.scheduledStartAt.slice(0, 10) !== row.scheduledEndAt.slice(0, 10)
+  return `${formatAttendanceTime(row.scheduledStartAt)} - ${formatAttendanceTime(row.scheduledEndAt)}${crossesDate ? " +1" : ""}`
+}
+
+function getAttendanceSettlementDescription(row: AttendanceMonitorRow) {
+  const expected = row.expectedWorkMinutes === null ? "wajib belum terbaca" : `wajib ${formatMinutesDuration(row.expectedWorkMinutes)}`
+  const actual = row.actualWorkMinutes === null ? "aktual belum final" : `aktual ${formatMinutesDuration(row.actualWorkMinutes)}`
+
+  if (row.settlementStatus === "ready") return `${actual} sudah memenuhi ${expected}.`
+  if (row.settlementStatus === "running") return `Shift sedang berjalan; ${actual} dan akan final setelah check-out.`
+  if (row.settlementStatus === "short") return `${actual}, kurang ${formatMinutesDuration(row.shortageMinutes)} dari ${expected}.`
+  if (row.settlementStatus === "missing_checkout") return "Check-in sudah ada, tetapi check-out belum tercatat."
+  if (row.settlementStatus === "missing_checkin") return "Belum ada check-in untuk tanggal ini."
+  if (row.settlementStatus === "review") return "Data absensi validasi GPS/face masih perlu review HR."
+  if (row.settlementStatus === "failed") return "Data absensi ditandai tidak valid dan perlu pengecekan."
+  return "Shift karyawan belum punya jam mulai dan jam selesai lengkap."
+}
+
 function mapPayrollCycleStatus(status: unknown): PayrollStatus {
   if (status === "ready" || status === "locked" || status === "paid" || status === "void") return status
   return "active"
@@ -5871,6 +6146,21 @@ function getDailyAttendanceMonitorStatus(checkIn?: Record<string, unknown>, chec
   return "valid"
 }
 
+function getAttendanceLogTimeMs(row?: Record<string, unknown>) {
+  const timeMs = new Date(String(row?.event_at || "")).getTime()
+  return Number.isFinite(timeMs) ? timeMs : 0
+}
+
+function pickEarliestAttendanceLog(current: Record<string, unknown> | undefined, next: Record<string, unknown>) {
+  if (!current) return next
+  return getAttendanceLogTimeMs(next) < getAttendanceLogTimeMs(current) ? next : current
+}
+
+function pickLatestAttendanceLog(current: Record<string, unknown> | undefined, next: Record<string, unknown>) {
+  if (!current) return next
+  return getAttendanceLogTimeMs(next) > getAttendanceLogTimeMs(current) ? next : current
+}
+
 function getAttendanceReviewIssue(row: Record<string, unknown>) {
   if (row.status === "rejected") return "Ditolak HR"
   if (row.gps_status === "out_of_radius") return "Di luar radius"
@@ -5887,14 +6177,15 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey()): Pro
   await supabase.rpc("refresh_all_employee_payroll_cycles")
 
   const selectedDate = targetDate || getLocalDateKey()
-  const [employeeResult, divisionResult, locationResult, attendanceResult, payrollResult, overtimeResult, payrollComponentResult, appUserResult, faceProfileResult] = await Promise.all([
+  const [employeeResult, divisionResult, locationResult, shiftResult, attendanceResult, payrollResult, overtimeResult, payrollComponentResult, appUserResult, faceProfileResult] = await Promise.all([
     supabase
       .from("employees")
-      .select("id, employee_code, full_name, photo_path, division_id, work_location_id, salary_type, daily_salary, monthly_salary, payroll_cycle_days, status, deleted_at")
+      .select("id, employee_code, full_name, photo_path, division_id, work_location_id, shift_id, salary_type, daily_salary, monthly_salary, payroll_cycle_days, status, deleted_at")
       .is("deleted_at", null)
       .order("employee_code", { ascending: true }),
     supabase.from("divisions").select("id, name"),
     supabase.from("work_locations").select("id, code, name, address, latitude, longitude, radius_m, is_active").order("sort_order", { ascending: true }).order("code", { ascending: true }),
+    supabase.from("shifts").select("id, code, name, start_time, end_time, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
     supabase
       .from("attendance_logs")
       .select("id, employee_id, work_location_id, attendance_date, event_type, event_at, latitude, longitude, distance_m, radius_m, gps_status, face_status, face_score, face_snapshot_path, status, workday_counted, source, attendance_media, attendance_device_id, biofinger_event_id, notes")
@@ -5921,13 +6212,14 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey()): Pro
       .from("employee_face_profiles")
       .select("employee_id, status, verification_required, face_score_threshold"),
   ])
-  const error = employeeResult.error || divisionResult.error || locationResult.error || attendanceResult.error || payrollResult.error || overtimeResult.error || payrollComponentResult.error || appUserResult.error || faceProfileResult.error
+  const error = employeeResult.error || divisionResult.error || locationResult.error || shiftResult.error || attendanceResult.error || payrollResult.error || overtimeResult.error || payrollComponentResult.error || appUserResult.error || faceProfileResult.error
 
   if (error) throw error
 
   const divisionMap = new Map((divisionResult.data || []).map((row) => [String(row.id), String(row.name || "")]))
   const locationRows = (locationResult.data || []) as Array<Record<string, unknown>>
   const locationMap = new Map(locationRows.map((row) => [String(row.id), row]))
+  const shiftMap = new Map(((shiftResult.data || []) as Array<Record<string, unknown>>).map((row) => [String(row.id), row]))
   const appUserRows = (appUserResult.data || []) as Array<Record<string, unknown>>
   const appUserByEmployee = new Map<string, Record<string, unknown>>()
   appUserRows.forEach((row) => {
@@ -5957,16 +6249,16 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey()): Pro
     if (attendanceDate) {
       const key = `${employeeId}:${attendanceDate}`
       const dateEntry = logsByEmployeeDate.get(key) || {}
-      if (row.event_type === "check_in" && !dateEntry.checkIn) dateEntry.checkIn = row
-      if (row.event_type === "check_out" && !dateEntry.checkOut) dateEntry.checkOut = row
+      if (row.event_type === "check_in") dateEntry.checkIn = pickEarliestAttendanceLog(dateEntry.checkIn, row)
+      if (row.event_type === "check_out") dateEntry.checkOut = pickLatestAttendanceLog(dateEntry.checkOut, row)
       logsByEmployeeDate.set(key, dateEntry)
     }
 
     if (row.attendance_date !== selectedDate) return
 
     const entry = selectedLogsByEmployee.get(employeeId) || {}
-    if (row.event_type === "check_in" && !entry.checkIn) entry.checkIn = row
-    if (row.event_type === "check_out" && !entry.checkOut) entry.checkOut = row
+    if (row.event_type === "check_in") entry.checkIn = pickEarliestAttendanceLog(entry.checkIn, row)
+    if (row.event_type === "check_out") entry.checkOut = pickLatestAttendanceLog(entry.checkOut, row)
     selectedLogsByEmployee.set(employeeId, entry)
   })
 
@@ -5977,6 +6269,7 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey()): Pro
   ): AttendanceMonitorRow => {
     const employeeId = String(employee.id)
     const location = locationMap.get(String(employee.work_location_id || ""))
+    const shift = shiftMap.get(String(employee.shift_id || ""))
     const attendance = selectedAttendance?.checkIn
     const checkOut = selectedAttendance?.checkOut
     const payroll = payrollByEmployee.get(employeeId)
@@ -5987,6 +6280,21 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey()): Pro
     const overtimeAmount = Number(payroll?.overtime_amount || 0)
     const payrollAmount = Number(payroll?.net_amount || 0) || basePayrollAmount + overtimeAmount
     const attendanceStatus = getDailyAttendanceMonitorStatus(attendance, checkOut)
+    const shiftId = String(employee.shift_id || "")
+    const shiftName = String(shift?.name || "Belum pilih shift")
+    const shiftStartTime = String(shift?.start_time || "")
+    const shiftEndTime = String(shift?.end_time || "")
+    const checkInAt = attendance ? String(attendance.event_at || "") : ""
+    const checkOutAt = checkOut ? String(checkOut.event_at || "") : ""
+    const settlement = calculateAttendanceSettlement({
+      attendanceDate: attendance ? String(attendance.attendance_date || "") : dateKey,
+      checkInAt,
+      checkOutAt,
+      shiftName,
+      shiftStartTime,
+      shiftEndTime,
+      attendanceStatus,
+    })
 
     return {
       id: attendance ? String(attendance.id) : `missing-${employeeId}-${dateKey}`,
@@ -5997,10 +6305,14 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey()): Pro
       employeePhotoUrl: getEmployeePhotoPublicUrl(String(employee.photo_path || "")),
       divisionName: divisionMap.get(String(employee.division_id || "")) || "Belum pilih divisi",
       workLocationName: String(location?.name || "Belum pilih lokasi"),
+      shiftId,
+      shiftName,
+      shiftStartTime,
+      shiftEndTime,
       attendanceDate: attendance ? String(attendance.attendance_date || "") : dateKey,
       eventAt: attendance ? String(attendance.event_at || "") : "",
       checkInId: attendance ? String(attendance.id || "") : "",
-      checkInAt: attendance ? String(attendance.event_at || "") : "",
+      checkInAt,
       checkInStatus: attendance ? (attendance.status === "valid" || attendance.status === "rejected" ? attendance.status : "review") : "missing",
       checkInGpsStatus: attendance ? (attendance.gps_status === "valid" || attendance.gps_status === "out_of_radius" ? attendance.gps_status : "missing") : "missing",
       checkInFaceStatus: attendance ? (attendance.face_status === "verified" || attendance.face_status === "failed" || attendance.face_status === "review" ? attendance.face_status : "not_required") : "not_required",
@@ -6012,7 +6324,7 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey()): Pro
       checkInBiofingerEventId: String(attendance?.biofinger_event_id || ""),
       checkInNotes: String(attendance?.notes || ""),
       checkOutId: checkOut ? String(checkOut.id || "") : "",
-      checkOutAt: checkOut ? String(checkOut.event_at || "") : "",
+      checkOutAt,
       checkOutStatus: checkOut ? (checkOut.status === "valid" || checkOut.status === "rejected" ? checkOut.status : "review") : "missing",
       checkOutGpsStatus: checkOut ? (checkOut.gps_status === "valid" || checkOut.gps_status === "out_of_radius" ? checkOut.gps_status : "missing") : "missing",
       checkOutFaceStatus: checkOut ? (checkOut.face_status === "verified" || checkOut.face_status === "failed" || checkOut.face_status === "review" ? checkOut.face_status : "not_required") : "not_required",
@@ -6044,7 +6356,19 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey()): Pro
       basePayrollAmount,
       overtimeAmount,
       salaryType,
-      workDurationLabel: attendance ? formatAttendanceWorkDuration(String(attendance.event_at || ""), checkOut ? String(checkOut.event_at || "") : null, dateKey) : "Belum mulai",
+      workDurationLabel: attendance ? formatAttendanceWorkDuration(checkInAt, checkOutAt || null, dateKey) : "Belum mulai",
+      scheduledStartAt: settlement.scheduledStartAt,
+      scheduledEndAt: settlement.scheduledEndAt,
+      expectedWorkMinutes: settlement.expectedWorkMinutes,
+      actualWorkMinutes: settlement.actualWorkMinutes,
+      lateMinutes: settlement.lateMinutes,
+      earlyLeaveMinutes: settlement.earlyLeaveMinutes,
+      shortageMinutes: settlement.shortageMinutes,
+      overtimeMinutes: settlement.overtimeMinutes,
+      lastActivityAt: settlement.lastActivityAt,
+      settlementStatus: settlement.settlementStatus,
+      settlementLabel: settlement.settlementLabel,
+      settlementTone: settlement.settlementTone,
       notes: String(attendance?.notes || ""),
     }
   }
@@ -7808,6 +8132,7 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
   const [savingDeviceId, setSavingDeviceId] = useState("")
   const [errorMessage, setErrorMessage] = useState("")
   const [toast, setToast] = useState<ToastMessage | null>(null)
+  const [, setConnectionClock] = useState(0)
   const canManage = hasPermission(profile, "biofinger.manage") || hasPermission(profile, "attendance.review") || hasPermission(profile, "employees.manage")
 
   const showToast = (message: Omit<ToastMessage, "id">) => {
@@ -7845,6 +8170,11 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
     if (biofingerDataCache) return
     void refreshData()
   }, [refreshData])
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => setConnectionClock((current) => current + 1), 30_000)
+    return () => window.clearInterval(intervalId)
+  }, [])
 
   useEffect(() => {
     biofingerSelectedDeviceCache = selectedDeviceId
@@ -7927,6 +8257,13 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
   const pendingLinks = data.links.filter((row) => row.status === "pending").length
   const scopedActiveLinks = deviceLinks.filter((row) => row.status === "active" && row.employeeId).length
   const scopedPendingLinks = deviceLinks.filter((row) => row.status === "pending").length
+  const onlineDeviceCount = data.devices.filter((device) => getBiofingerDeviceConnectionState(device) === "online").length
+  const idleDeviceCount = data.devices.filter((device) => getBiofingerDeviceConnectionState(device) === "idle").length
+  const unavailableDeviceCount = Math.max(0, data.devices.length - onlineDeviceCount - idleDeviceCount)
+  const selectedConnectionState = selectedDevice ? getBiofingerDeviceConnectionState(selectedDevice) : null
+  const selectedConnectionLabel = selectedDevice
+    ? biofingerConnectionLabel[selectedConnectionState || "never"]
+    : `${formatNumber(onlineDeviceCount)} online`
   const totalRawEvents = data.eventCount || totalEventSummary.totalEvents || data.events.length
   const scopedRawEvents = isAllDeviceSelected ? totalRawEvents : selectedEventSummary.totalEvents || deviceEvents.length
   const mappedReadyEvents = selectedEventSummary.mappedEvents
@@ -7937,10 +8274,10 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
   const syncSteps = [
     {
       label: "Baca Mesin",
-      value: biofingerDataValue(isAllDeviceSelected ? `${formatNumber(data.devices.length)} device ready` : selectedDevice ? formatBiofingerConnection(selectedDevice) : "Belum pilih", "stepValue"),
-      description: "ADMS Cloud AT-301",
+      value: biofingerDataValue(isAllDeviceSelected ? `${formatNumber(onlineDeviceCount)} online` : selectedConnectionLabel, "stepValue"),
+      description: selectedDevice ? formatBiofingerConnectionDetail(selectedDevice) : `${formatNumber(data.devices.length)} registry AT-301`,
       icon: Fingerprint,
-      complete: !biofingerDataLoading && data.devices.length > 0,
+      complete: !biofingerDataLoading && (isAllDeviceSelected ? onlineDeviceCount > 0 : selectedConnectionState === "online"),
     },
     {
       label: "Import User",
@@ -7971,6 +8308,36 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
       complete: !biofingerDataLoading && convertedEvents > 0,
     },
   ]
+  const attendanceRuleCards = [
+    {
+      label: "Masuk",
+      title: "Scan pertama dipakai",
+      description: "Jika user scan beberapa kali pagi hari, DMS mengambil check-in paling awal untuk tanggal itu.",
+      icon: LogIn,
+      tone: "green",
+    },
+    {
+      label: "Pulang",
+      title: "Scan terakhir dipakai",
+      description: "Untuk event pulang, DMS memakai check-out paling akhir agar scan ulang tidak membuat jam pulang mundur.",
+      icon: LogOut,
+      tone: "amber",
+    },
+    {
+      label: "Duplikat",
+      title: "Event lain diabaikan",
+      description: "Raw event dobel tetap tersimpan sebagai jejak, tetapi diberi status ignored saat bukan event representatif.",
+      icon: Archive,
+      tone: "slate",
+    },
+    {
+      label: "Shift Malam",
+      title: "Masih basis tanggal mesin",
+      description: "Checkout lewat tengah malam perlu policy shift final sebelum otomatis digabung ke hari kerja sebelumnya.",
+      icon: AlertTriangle,
+      tone: "red",
+    },
+  ] as const
   const deviceOptions = biofingerDataLoading
     ? [{ value: "", label: <FoundationSkeleton className="selectValue" />, searchLabel: "memuat device", disabled: true }]
     : [
@@ -7979,7 +8346,7 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
         value: device.id,
         label: device.name,
         searchLabel: `${device.name} ${device.workLocationName} ${device.serialNumber} ${device.deviceCode} ${device.ipAddress}`,
-        description: `${device.workLocationName || "Belum pilih lokasi"} / ${device.serialNumber || device.deviceCode}`,
+        description: `${biofingerConnectionLabel[getBiofingerDeviceConnectionState(device)]} / ${device.workLocationName || "Belum pilih lokasi"} / ${device.serialNumber || device.deviceCode}`,
       })),
     ]
   const workLocationOptions = [
@@ -8034,8 +8401,8 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
   const selectedDeviceSubtitle = biofingerDataLoading
     ? "Device registry dari Supabase"
     : selectedDevice
-    ? `${selectedDevice.workLocationName || "Belum pilih lokasi"} / ${formatBiofingerConnection(selectedDevice)} / ${selectedDevice.status}`
-    : `${formatNumber(data.devices.length)} device registry / ${formatNumber(data.workLocations.length)} lokasi kerja`
+    ? `${selectedConnectionLabel} / ${formatBiofingerConnectionDetail(selectedDevice)} / ${formatBiofingerConnection(selectedDevice)}`
+    : `${formatNumber(onlineDeviceCount)} online / ${formatNumber(idleDeviceCount)} idle / ${formatNumber(unavailableDeviceCount)} offline`
 
   const resetFilters = () => {
     setSearchTerm("")
@@ -8316,6 +8683,7 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
             items={biofingerDataLoading
               ? biofingerInlineLoadingStats(4)
               : [
+                `${formatNumber(onlineDeviceCount)} online`,
                 `${formatNumber(data.links.length)} ID mesin`,
                 `${formatNumber(activeLinks)} mapped`,
                 `${formatNumber(pendingLinks)} pending`,
@@ -8337,7 +8705,7 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
       ) : (
         <>
           <OperationalKpiGrid>
-            <OperationalKpiCard label="Total Device" value={biofingerDataValue(data.devices.length, "metricValue")} detail="Registry mesin AT-301" icon={Fingerprint} tone="blue" />
+            <OperationalKpiCard label="Total Device" value={biofingerDataValue(data.devices.length, "metricValue")} detail={biofingerDataLoading ? "Registry mesin AT-301" : `${formatNumber(onlineDeviceCount)} online / ${formatNumber(unavailableDeviceCount)} offline`} icon={Fingerprint} tone="blue" />
             <OperationalKpiCard label="User Mapped" value={biofingerDataValue(activeLinks, "metricValue")} detail="Siap jadi absensi" icon={UserRoundCheck} tone="green" />
             <OperationalKpiCard label="Belum Mapping" value={biofingerDataValue(pendingLinks, "metricValue")} detail="Perlu pilih karyawan" icon={AlertTriangle} tone="amber" />
             <OperationalKpiCard label="Event Staging" value={biofingerDataValue(formatNumber(totalRawEvents), "metricValue wide")} detail={biofingerDataLoading ? "Raw log mesin" : `${formatNumber(totalEventSummary.convertedEvents)} converted / ${formatNumber(totalEventSummary.mappedEvents)} siap`} icon={FileBarChart} tone="violet" />
@@ -8371,6 +8739,10 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
             </div>
             <div className="biofingerScopeStats">
               <div>
+                <span>Koneksi</span>
+                <strong>{biofingerDataValue(selectedDevice ? <BiofingerDeviceConnectionText device={selectedDevice} /> : `${formatNumber(onlineDeviceCount)} / ${formatNumber(data.devices.length)} online`, "scopeValue")}</strong>
+              </div>
+              <div>
                 <span>Lokasi Kerja</span>
                 <strong>{biofingerDataValue(selectedDevice ? selectedDevice.workLocationName || "Belum pilih lokasi" : `${formatNumber(data.workLocations.length)} lokasi`, "scopeValue")}</strong>
               </div>
@@ -8385,12 +8757,6 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
               <div>
                 <span>Raw Event</span>
                 <strong>{biofingerDataValue(`${formatNumber(scopedRawEvents)} log`, "scopeValue short")}</strong>
-              </div>
-              <div>
-                <span>User Sync</span>
-                <strong className="biofingerUserSyncScopeValue">
-                  {biofingerDataLoading ? <FoundationSkeleton className="scopeValue short" /> : <BiofingerUserSyncStatusText summary={userSyncStatus} />}
-                </strong>
               </div>
             </div>
             {selectedDevice && (
@@ -8411,31 +8777,58 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
           </div>
 
           {activeBiofingerTab === "overview" && (
-            <section className="surfacePanel biofingerSyncPanel">
-              <div className="biofingerSyncHeader">
-                <div>
-                  <h2>Sync Pipeline</h2>
-                  <p>{biofingerDataLoading ? "Menunggu data sinkronisasi dari Supabase." : selectedDevice ? `${selectedDevice.name} / ${formatBiofingerConnection(selectedDevice)} / last sync ${formatUserDateTime(selectedDevice.lastSyncAt, "Belum sync")}` : `${formatNumber(data.devices.length)} device / sample terakhir / last sync mengikuti masing-masing device.`}</p>
-                  {!biofingerDataLoading && <small className="biofingerCommandHint">User sync: {userSyncDetail}</small>}
+            <>
+              <section className="surfacePanel biofingerSyncPanel">
+                <div className="biofingerSyncHeader">
+                  <div>
+                    <h2>Sync Pipeline</h2>
+                    <p>{biofingerDataLoading ? "Menunggu data sinkronisasi dari Supabase." : selectedDevice ? `${selectedDevice.name} / ${selectedConnectionLabel} / last sync ${formatUserDateTime(selectedDevice.lastSyncAt, "Belum sync")}` : `${formatNumber(data.devices.length)} device / ${formatNumber(onlineDeviceCount)} online / last sync mengikuti masing-masing device.`}</p>
+                    {!biofingerDataLoading && <small className="biofingerCommandHint">User sync: {userSyncDetail}</small>}
+                  </div>
+                  <InlinePageStats items={biofingerDataLoading ? biofingerInlineLoadingStats(3) : [`${formatNumber(mappedReadyEvents)} siap proses`, `${formatNumber(convertedEvents)} converted`, `${formatNumber(data.events.length)} sample tampil`]} />
                 </div>
-                <InlinePageStats items={biofingerDataLoading ? biofingerInlineLoadingStats(3) : [`${formatNumber(mappedReadyEvents)} siap proses`, `${formatNumber(convertedEvents)} converted`, `${formatNumber(data.events.length)} sample tampil`]} />
-              </div>
-              <div className="biofingerSyncSteps">
-                {syncSteps.map((step) => {
-                  const Icon = step.icon
-                  return (
-                    <div className={clsx("biofingerSyncStep", step.complete && "complete")} key={step.label}>
-                      <span><Icon size={17} /></span>
-                      <div>
-                        <small>{step.label}</small>
-                        <strong>{step.value}</strong>
-                        <em>{step.description}</em>
+                <div className="biofingerSyncSteps">
+                  {syncSteps.map((step) => {
+                    const Icon = step.icon
+                    return (
+                      <div className={clsx("biofingerSyncStep", step.complete && "complete")} key={step.label}>
+                        <span><Icon size={17} /></span>
+                        <div>
+                          <small>{step.label}</small>
+                          <strong>{step.value}</strong>
+                          <em>{step.description}</em>
+                        </div>
                       </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </section>
+                    )
+                  })}
+                </div>
+              </section>
+
+              <section className="surfacePanel biofingerAttendanceRulesPanel">
+                <div className="biofingerSyncHeader">
+                  <div>
+                    <h2>Aturan Absensi Biofinger</h2>
+                    <p>Rule yang dipakai saat raw event berstatus mapped diproses menjadi attendance final.</p>
+                  </div>
+                  <InlinePageStats items={["audit aktif", "manual/mobile tidak ditimpa"]} />
+                </div>
+                <div className="biofingerAttendanceRulesGrid">
+                  {attendanceRuleCards.map((rule) => {
+                    const Icon = rule.icon
+                    return (
+                      <article className={clsx("biofingerAttendanceRuleCard", rule.tone)} key={rule.label}>
+                        <span><Icon size={16} /></span>
+                        <div>
+                          <small>{rule.label}</small>
+                          <strong>{rule.title}</strong>
+                          <p>{rule.description}</p>
+                        </div>
+                      </article>
+                    )
+                  })}
+                </div>
+              </section>
+            </>
           )}
 
           {activeBiofingerTab === "devices" && (
@@ -8446,7 +8839,7 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
                   <p>Tambah mesin baru, set lokasi kerja, lalu arahkan ADMS Cloud mesin ke receiver DMS.</p>
                 </div>
                 <div className="biofingerDeviceHeaderActions">
-                  <InlinePageStats items={biofingerDataLoading ? biofingerInlineLoadingStats(2) : [`${data.devices.length} device`, `${data.workLocations.length} lokasi kerja`]} />
+                  <InlinePageStats items={biofingerDataLoading ? biofingerInlineLoadingStats(3) : [`${data.devices.length} device`, `${onlineDeviceCount} online`, `${data.workLocations.length} lokasi kerja`]} />
                   <button className="biofingerGuideTrigger" type="button" aria-label="Buka panduan setup device" title="Panduan Setup" onClick={() => setDeviceGuideOpen(true)}>
                     <ClipboardList size={18} />
                     <span className="srOnly">Panduan Setup</span>
@@ -8505,10 +8898,11 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
                     </div>
                     <div className="biofingerRegistryMeta">
                       <span>Koneksi</span>
-                      <strong>{formatBiofingerConnection(device)}</strong>
+                      <strong><BiofingerDeviceConnectionText device={device} /></strong>
+                      <small>{formatBiofingerConnection(device)}</small>
                     </div>
                     <div className="biofingerRegistryMeta">
-                      <span>Status</span>
+                      <span>Registry</span>
                       <BiofingerDeviceStatusText status={device.status} />
                     </div>
                     <button className="secondaryButton" type="button" disabled={!canManage} onClick={() => openDeviceDialog(device)}>
@@ -8558,7 +8952,7 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
                 <div className="tableHeader">
                   <div>
                     <h2>Mapping User Biofinger</h2>
-                    <p>{biofingerDataLoading ? "Mengambil user mesin dan mapping karyawan dari Supabase." : selectedDevice ? `${formatBiofingerConnection(selectedDevice)} / ${selectedDevice.status} / sync ${formatUserDateTime(selectedDevice.lastSyncAt, "Belum sync")}` : "Semua device / mapping user mesin ke karyawan DMS."}</p>
+                    <p>{biofingerDataLoading ? "Mengambil user mesin dan mapping karyawan dari Supabase." : selectedDevice ? `${selectedConnectionLabel} / ${formatBiofingerConnection(selectedDevice)} / sync ${formatUserDateTime(selectedDevice.lastSyncAt, "Belum sync")}` : "Semua device / mapping user mesin ke karyawan DMS."}</p>
                   </div>
                   <InlinePageStats items={biofingerDataLoading ? biofingerInlineLoadingStats(3) : [`${filteredLinks.length} user`, `${scopedActiveLinks} active`, `${scopedPendingLinks} pending`]} />
                 </div>
@@ -8906,7 +9300,7 @@ function BiofingerMappingDrawer({
               <span><Fingerprint size={16} /></span>
               <div>
                 <strong>{device?.name || "Device tidak ditemukan"}</strong>
-                <small>{device ? `${device.ipAddress}:${device.port} / ${device.workLocationName || "Belum pilih lokasi"}` : row.attendanceDeviceId}</small>
+                <small>{device ? `${biofingerConnectionLabel[getBiofingerDeviceConnectionState(device)]} / ${formatBiofingerConnectionDetail(device)} / ${device.workLocationName || "Belum pilih lokasi"}` : row.attendanceDeviceId}</small>
               </div>
             </div>
           </section>
@@ -8953,6 +9347,11 @@ function BiofingerMappingDrawer({
                 <span>Karyawan ini sudah aktif di User ID {conflictRow.externalUserId}. Pilih karyawan lain atau kosongkan mapping lama dulu.</span>
               </div>
             )}
+
+            <div className="biofingerDrawerAuditNote">
+              <ClipboardList size={16} />
+              <span>Perubahan mapping, pending, ignore, dan kosongkan mapping tercatat di Audit Log.</span>
+            </div>
           </section>
 
           <section className="biofingerDrawerSection">
@@ -9139,6 +9538,10 @@ function BiofingerDeviceDialog({
             </section>
 
             <div className="biofingerDeviceFacts">
+              <div>
+                <span>Koneksi</span>
+                <strong><BiofingerDeviceConnectionText device={device} /></strong>
+              </div>
               <div>
                 <span>Receiver</span>
                 <strong>{BIOFINGER_ADMS_RECEIVER_HOST}:{BIOFINGER_ADMS_RECEIVER_PORT}</strong>
@@ -12950,7 +13353,10 @@ function AttendanceMonitorDetailDialog({
   const summaryRows = [
     { label: "Karyawan", value: `${row.employeeCode} · ${row.divisionName || "-"}` },
     { label: "Lokasi kerja", value: `${row.workLocationName || "-"} · radius ${row.radiusM || "-"}m` },
+    { label: "Shift", value: `${row.shiftName} / ${getAttendanceShiftScheduleLabel(row)}` },
     { label: "Jam kerja real", value: row.workDurationLabel },
+    { label: "Settlement", value: row.shortageMinutes > 0 ? `${row.settlementLabel} / wajib ${row.expectedWorkMinutes === null ? "-" : formatMinutesDuration(row.expectedWorkMinutes)}` : row.settlementLabel },
+    { label: "Telat / Pulang cepat", value: `${row.lateMinutes ? formatMinutesDuration(row.lateMinutes) : "0m"} / ${row.earlyLeaveMinutes ? formatMinutesDuration(row.earlyLeaveMinutes) : "0m"}` },
     { label: "Sumber check-in", value: row.checkInId ? formatAttendanceSourceMeta(row.checkInSource, row.checkInMedia) : "Belum masuk" },
     { label: "Sumber check-out", value: row.checkOutId ? formatAttendanceSourceMeta(row.checkOutSource, row.checkOutMedia) : "Belum pulang" },
     { label: "Payroll cycle", value: row.payrollCycleNumber ? `Cycle ${row.payrollCycleNumber} · ${row.cycleDays}/${row.targetDays} hari` : `${row.cycleDays}/${row.targetDays} hari` },
@@ -13005,6 +13411,15 @@ function AttendanceMonitorDetailDialog({
                   {event.notes && <em>{event.notes}</em>}
                 </div>
               ))}
+            </div>
+
+            <div className={clsx("attendanceDetailSettlementPanel", `tone-${row.settlementTone}`)}>
+              <AttendanceSettlementCell row={row} />
+              <div className="attendanceDetailSettlementCopy">
+                <small>Settlement shift</small>
+                <strong>{row.settlementLabel}</strong>
+                <p>{getAttendanceSettlementDescription(row)}</p>
+              </div>
             </div>
 
             <dl className="attendanceDetailList">
@@ -13359,6 +13774,8 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
           row.fullName,
           row.divisionName,
           row.workLocationName,
+          row.shiftName,
+          row.settlementLabel,
           row.logStatus,
           row.gpsStatus,
           row.faceStatus,
@@ -13374,6 +13791,9 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
 
     return matchesDate && matchesSearch && matchesStatus
   })
+  const latestFirstRows = activeView === "attendance-live"
+    ? [...filteredRows].sort(compareAttendanceRowsByLatestActivity)
+    : filteredRows
   const filteredReviewRows = data.reviews.filter((row) => {
     const matchesSearch = normalizedSearch
       ? [row.employeeCode, row.fullName, row.divisionName, row.workLocationName, row.status, row.gpsStatus, row.faceStatus, row.issueLabel].join(" ").toLowerCase().includes(normalizedSearch)
@@ -13486,7 +13906,7 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
         meta={
           <InlinePageStats
             items={[
-              `${filteredRows.length} karyawan`,
+              `${latestFirstRows.length} karyawan`,
               activeView === "attendance-review" ? `${filteredReviewRows.length} antrian review` : `${gpsReadyLocations.length} lokasi GPS siap`,
               `${faceVerifiedRows.length} face valid`,
               activeView === "payroll" ? `${readyPayrollRows.length} siap · ${lockedPayrollRows.length} locked · ${paidPayrollRows.length} terbayar · ${voidPayrollRows.length} void` : `${readyPayrollRows.length} cycle siap`,
@@ -13580,7 +14000,7 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
       </OperationalFilterPanel>
 
       {(activeView === "attendance-live" || activeView === "attendance-requests") && (
-        <AttendanceLiveRecap rows={activeView === "attendance-requests" ? filteredRecapRows : filteredRows} selectedDate={selectedDate} range={activeView === "attendance-requests" ? recapRange : "day"} />
+        <AttendanceLiveRecap rows={activeView === "attendance-requests" ? filteredRecapRows : latestFirstRows} selectedDate={selectedDate} range={activeView === "attendance-requests" ? recapRange : "day"} />
       )}
 
       {activeView === "field-monitoring" ? (
@@ -13598,7 +14018,7 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
           <OvertimeReviewTable rows={filteredOvertimeRows} loading={loading} errorMessage={errorMessage} onReview={setOvertimeTarget} />
         </>
       ) : (
-        <LiveAttendanceTable rows={filteredRows} loading={loading} errorMessage={errorMessage} selectedDate={selectedDate} onResetDay={setResetAttendanceRow} onCorrectCheckout={setCheckoutCorrectionRow} />
+        <LiveAttendanceTable rows={latestFirstRows} loading={loading} errorMessage={errorMessage} selectedDate={selectedDate} onResetDay={setResetAttendanceRow} onCorrectCheckout={setCheckoutCorrectionRow} />
       )}
 
       <FieldAttendanceDialog
@@ -13773,59 +14193,74 @@ function LiveAttendanceTable({
   onResetDay: (row: AttendanceMonitorRow) => void
   onCorrectCheckout: (row: AttendanceMonitorRow) => void
 }) {
-  const [detailRow, setDetailRow] = useState<AttendanceMonitorRow | null>(null)
+  const [expandedRowId, setExpandedRowId] = useState("")
+  const liveTableDrag = useHorizontalDragScroll<HTMLDivElement>()
+  const toggleExpandedRow = (rowId: string) => {
+    setExpandedRowId((current) => current === rowId ? "" : rowId)
+  }
 
   return (
-    <>
-      <OperationalTableCard>
-        <div className="tableHeader">
-          <div>
-            <h2>Realtime Attendance Feed</h2>
-            <p>Data check-in dan check-out {formatWorkDate(selectedDate)} dari GPS radius, face verification, dan workday counted.</p>
-          </div>
+    <OperationalTableCard>
+      <div className="tableHeader">
+        <div>
+          <h2>Realtime Attendance Feed</h2>
+          <p>Update terbaru tampil paling atas. Klik baris untuk membuka detail tanpa keluar dari tabel.</p>
         </div>
-        <div className="tableScroller uiDataTableScroller uiDataTableHasColumns liveAttendanceTableScroller">
-          <table>
-            <colgroup>
-              <col className="tableNumberColumn" />
-              <col style={{ width: "270px" }} />
-              <col style={{ width: "390px" }} />
-              <col style={{ width: "330px" }} />
-              <col style={{ width: "150px" }} />
-              <col style={{ width: "150px" }} />
-              <col style={{ width: "86px" }} />
-            </colgroup>
-            <thead>
-              <tr>
-                <th>No</th>
-                <th>Karyawan</th>
-                <th>Aktivitas Hari Ini</th>
-                <th>Validasi Lapangan</th>
-                <th>Cycle</th>
-                <th>Status</th>
-                <th>Aksi</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading && <tr><td className="tableStateCell" colSpan={7}><TableState title="Memuat absensi" description="Mengambil live feed absensi." icon={Megaphone} /></td></tr>}
-              {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={7}><TableState title="Gagal memuat" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
-              {!loading && !errorMessage && rows.map((row, index) => {
-                const canCorrectCheckout = Boolean(row.checkInId && !row.checkOutId && isMissingCheckoutShift(row.checkInAt, row.checkOutAt, row.attendanceDate))
+      </div>
+      <div
+        ref={liveTableDrag.ref}
+        className={clsx("tableScroller uiDataTableScroller uiDataTableHasColumns liveAttendanceTableScroller", liveTableDrag.dragging && "dragging")}
+        {...liveTableDrag.handlers}
+      >
+        <table>
+          <colgroup>
+            <col className="tableNumberColumn" />
+            <col style={{ width: "220px" }} />
+            <col style={{ width: "330px" }} />
+            <col style={{ width: "260px" }} />
+            <col style={{ width: "300px" }} />
+            <col style={{ width: "110px" }} />
+            <col style={{ width: "110px" }} />
+            <col style={{ width: "80px" }} />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>No</th>
+              <th>Karyawan</th>
+              <th>Aktivitas Hari Ini</th>
+              <th>Jadwal & Jam</th>
+              <th>Validasi Lapangan</th>
+              <th>Cycle</th>
+              <th>Status</th>
+              <th>Aksi</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading && <FoundationTableSkeletonRows colSpan={8} columns={8} />}
+            {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={8}><TableState title="Gagal memuat" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
+            {!loading && !errorMessage && rows.map((row, index) => {
+              const isExpanded = expandedRowId === row.id
+              const canCorrectCheckout = Boolean(row.checkInId && !row.checkOutId && isMissingCheckoutShift(row.checkInAt, row.checkOutAt, row.attendanceDate))
 
-                return (
-                  <ClickableTableRow key={row.id} label={`Lihat detail absensi ${row.fullName}`} onOpen={() => setDetailRow(row)}>
+              return (
+                <Fragment key={row.id}>
+                  <ClickableTableRow className={clsx("liveAttendanceDataRow", isExpanded && "active")} label={`${isExpanded ? "Tutup" : "Lihat"} detail absensi ${row.fullName}`} onOpen={() => toggleExpandedRow(row.id)}>
                     <td><TableNumberCell value={index + 1} /></td>
                     <td><EmployeeIdentityCell fullName={row.fullName} code={row.employeeCode} photoUrl={row.employeePhotoUrl} /></td>
                     <td><AttendanceTimelineCell row={row} /></td>
+                    <td><AttendanceSettlementCell row={row} /></td>
                     <td><AttendanceValidationCell row={row} /></td>
                     <td><span className="cycleCell"><ProgressRing value={row.cycleDays} /><span>{row.cycleDays}/{row.targetDays}</span></span></td>
                     <td><StatusBadge status={row.attendanceStatus} /></td>
                     <td className="tableActionCell">
                       <div className="rowActions" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+                        <button className="rowExpandButton" type="button" aria-label={isExpanded ? "Tutup detail absensi" : "Buka detail absensi"} onClick={() => toggleExpandedRow(row.id)} data-row-action="true">
+                          <ChevronDown size={16} />
+                        </button>
                         <RowActionMenu label={`Aksi absensi ${row.fullName}`}>
-                          <RowActionMenuItem onClick={() => setDetailRow(row)}>
+                          <RowActionMenuItem onClick={() => toggleExpandedRow(row.id)}>
                             <Eye size={15} />
-                            Detail
+                            {isExpanded ? "Tutup Detail" : "Buka Detail"}
                           </RowActionMenuItem>
                           <RowActionMenuItem disabled={!canCorrectCheckout} onClick={() => onCorrectCheckout(row)}>
                             <CalendarCheck2 size={15} />
@@ -13839,15 +14274,119 @@ function LiveAttendanceTable({
                       </div>
                     </td>
                   </ClickableTableRow>
-                )
-              })}
-              {!loading && !errorMessage && rows.length === 0 && <tr><td className="tableStateCell" colSpan={7}><TableState title="Tidak ada data" description="Belum ada feed sesuai filter." icon={Search} /></td></tr>}
-            </tbody>
-          </table>
+                  {isExpanded && (
+                    <tr className="liveAttendanceExpandRow">
+                      <td className="liveAttendanceExpandCell" colSpan={8}>
+                        <LiveAttendanceInlineDetail row={row} canCorrectCheckout={canCorrectCheckout} onClose={() => setExpandedRowId("")} onResetDay={onResetDay} onCorrectCheckout={onCorrectCheckout} />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              )
+            })}
+            {!loading && !errorMessage && rows.length === 0 && <tr><td className="tableStateCell" colSpan={8}><TableState title="Tidak ada data" description="Belum ada feed sesuai filter." icon={Search} /></td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </OperationalTableCard>
+  )
+}
+
+function LiveAttendanceInlineDetail({
+  row,
+  canCorrectCheckout,
+  onClose,
+  onResetDay,
+  onCorrectCheckout,
+}: {
+  row: AttendanceMonitorRow
+  canCorrectCheckout: boolean
+  onClose: () => void
+  onResetDay: (row: AttendanceMonitorRow) => void
+  onCorrectCheckout: (row: AttendanceMonitorRow) => void
+}) {
+  const detailItems = [
+    { label: "Tanggal", value: formatEmployeeDate(row.attendanceDate), meta: row.lastActivityAt ? `Update ${formatAttendanceTime(row.lastActivityAt)}` : "Belum ada update" },
+    { label: "Shift", value: row.shiftName, meta: getAttendanceShiftScheduleLabel(row) },
+    { label: "Jam kerja", value: row.workDurationLabel, meta: getAttendanceSettlementDescription(row) },
+    { label: "Payroll", value: row.payrollCycleNumber ? `Cycle ${row.payrollCycleNumber}` : "Cycle aktif", meta: `${row.cycleDays}/${row.targetDays} hari / ${payrollLabel[row.payrollStatus]}` },
+  ]
+  const sourceItems = [
+    { label: "Masuk", value: row.checkInAt ? formatAttendanceTime(row.checkInAt) : "Belum", meta: row.checkInId ? formatAttendanceSourceMeta(row.checkInSource, row.checkInMedia) : "Belum ada log" },
+    { label: "Pulang", value: row.checkOutAt ? formatAttendanceTime(row.checkOutAt) : "Belum", meta: row.checkOutId ? formatAttendanceSourceMeta(row.checkOutSource, row.checkOutMedia) : "Menunggu log pulang" },
+  ]
+  const settlementItems = [
+    { label: "Wajib", value: row.expectedWorkMinutes === null ? "-" : formatMinutesDuration(row.expectedWorkMinutes), tone: "neutral" },
+    { label: "Aktual", value: row.actualWorkMinutes === null ? "-" : formatMinutesDuration(row.actualWorkMinutes), tone: row.actualWorkMinutes === null ? "missing" : "valid" },
+    { label: "Telat", value: row.lateMinutes ? formatMinutesDuration(row.lateMinutes) : "0m", tone: row.lateMinutes > 0 ? "pending" : "neutral" },
+    { label: "Pulang cepat", value: row.earlyLeaveMinutes ? formatMinutesDuration(row.earlyLeaveMinutes) : "0m", tone: row.earlyLeaveMinutes > 0 ? "failed" : "neutral" },
+    { label: "Kurang jam", value: row.shortageMinutes ? formatMinutesDuration(row.shortageMinutes) : "0m", tone: row.shortageMinutes > 0 ? "failed" : "neutral" },
+    { label: "Kelebihan", value: row.overtimeMinutes ? formatMinutesDuration(row.overtimeMinutes) : "0m", tone: row.overtimeMinutes > 0 ? "valid" : "neutral" },
+  ]
+
+  return (
+    <div className="liveAttendanceInlineDetail">
+      <div className="liveAttendanceInlineHeader">
+        <EmployeeIdentityCell fullName={row.fullName} code={row.employeeCode} photoUrl={row.employeePhotoUrl} />
+        <span className={clsx("liveAttendanceInlineStatus", `tone-${row.settlementTone}`)}>
+          <span aria-hidden="true" />
+          {row.settlementLabel}
+        </span>
+      </div>
+
+      <div className="liveAttendanceInlineGrid">
+        <div className="liveAttendanceInlinePanel">
+          <small>Ringkasan kerja</small>
+          <div className="liveAttendanceInlineMetrics">
+            {detailItems.map((item) => (
+              <span key={item.label}>
+                <small>{item.label}</small>
+                <strong>{item.value}</strong>
+                <em>{item.meta}</em>
+              </span>
+            ))}
+          </div>
+          <div className="liveAttendanceInlineBreakdown" aria-label="Detail perhitungan jam">
+            {settlementItems.map((item) => (
+              <span className={clsx(`tone-${item.tone}`)} key={item.label}>
+                <small>{item.label}</small>
+                <strong>{item.value}</strong>
+              </span>
+            ))}
+          </div>
         </div>
-      </OperationalTableCard>
-      <AttendanceMonitorDetailDialog row={detailRow} onClose={() => setDetailRow(null)} onResetDay={onResetDay} onCorrectCheckout={onCorrectCheckout} />
-    </>
+
+        <div className="liveAttendanceInlinePanel">
+          <small>Sumber absensi</small>
+          <div className="liveAttendanceInlineSources">
+            {sourceItems.map((item) => (
+              <span key={item.label}>
+                <small>{item.label}</small>
+                <strong>{item.value}</strong>
+                <em>{item.meta}</em>
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <div className="liveAttendanceInlinePanel compact">
+          <small>Validasi</small>
+          <AttendanceValidationCell row={row} />
+        </div>
+      </div>
+
+      <div className="liveAttendanceInlineActions">
+        <button className="secondaryButton compactButton" type="button" onClick={onClose}>Tutup</button>
+        <button className="secondaryButton compactButton" type="button" onClick={() => onCorrectCheckout(row)} disabled={!canCorrectCheckout}>
+          <CalendarCheck2 size={15} />
+          Koreksi Pulang
+        </button>
+        <button className="secondaryButton dangerSoftButton compactButton" type="button" onClick={() => onResetDay(row)} disabled={!row.checkInId && !row.checkOutId}>
+          <RotateCcw size={15} />
+          Reset Tanggal Ini
+        </button>
+      </div>
+    </div>
   )
 }
 
@@ -13859,11 +14398,14 @@ function AttendanceLiveRecap({ rows, selectedDate, range = "day" }: { rows: Atte
   const missing = rows.filter((row) => !row.checkInId).length
   const missingCheckout = rows.filter((row) => row.checkInId && !row.checkOutId).length
   const workdayCounted = rows.filter((row) => row.attendanceStatus === "valid" && row.checkInId).length
+  const shortageRows = rows.filter((row) => row.shortageMinutes > 0).length
+  const totalShortageMinutes = rows.reduce((sum, row) => sum + row.shortageMinutes, 0)
   const rangeLabel = range === "month" ? "30 hari" : range === "week" ? "7 hari" : "Tanggal"
   const items = [
     { label: rangeLabel, value: formatWorkDate(selectedDate), tone: "neutral" },
     { label: "Masuk", value: checkedIn, tone: "valid" },
     { label: "Pulang", value: checkedOut, tone: "valid" },
+    { label: "Kurang jam", value: shortageRows ? `${shortageRows} / ${formatMinutesDuration(totalShortageMinutes)}` : "0", tone: shortageRows ? "pending" : "neutral" },
     { label: "Belum checkout", value: missingCheckout, tone: missingCheckout ? "pending" : "neutral" },
     { label: "Review", value: review, tone: review ? "pending" : "neutral" },
     { label: "Failed", value: failed, tone: failed ? "failed" : "neutral" },
@@ -13932,18 +14474,17 @@ function AttendanceRecapTable({
                 <th>Tanggal</th>
                 <th>Masuk</th>
                 <th>Pulang</th>
-                <th>Jam Kerja</th>
+                <th>Settlement</th>
                 <th>Validasi</th>
                 <th>Status</th>
                 <th>Aksi</th>
               </tr>
             </thead>
             <tbody>
-              {loading && <tr><td className="tableStateCell" colSpan={9}><TableState title="Memuat rekap" description="Mengambil data absensi dari attendance logs." icon={CalendarCheck2} /></td></tr>}
+              {loading && <FoundationTableSkeletonRows colSpan={9} columns={9} />}
               {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={9}><TableState title="Gagal memuat" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
               {!loading && !errorMessage && rows.map((row, index) => {
                 const canCorrectCheckout = Boolean(row.checkInId && !row.checkOutId && isMissingCheckoutShift(row.checkInAt, row.checkOutAt, row.attendanceDate))
-                const durationMeta = row.checkInId && row.checkOutId ? "Final" : row.checkInId ? canCorrectCheckout ? "Perlu koreksi HR" : "Berjalan" : "Belum mulai"
 
                 return (
                   <ClickableTableRow key={`${row.employeeId}-${row.attendanceDate}-${row.checkInId || "missing"}`} label={`Lihat rekap absensi ${row.fullName}`} onOpen={() => setDetailRow(row)}>
@@ -13952,7 +14493,7 @@ function AttendanceRecapTable({
                     <td><TableText primary={formatWorkDate(row.attendanceDate)} secondary={row.divisionName} /></td>
                     <td><RecapEventText eventType="check_in" time={row.checkInAt} status={row.checkInStatus} /></td>
                     <td><RecapEventText eventType="check_out" time={row.checkOutAt} status={row.checkOutStatus} /></td>
-                    <td><TableText primary={row.workDurationLabel} secondary={durationMeta} /></td>
+                    <td><AttendanceSettlementCell row={row} /></td>
                     <td><RecapValidationSummary row={row} /></td>
                     <td><StatusBadge status={row.attendanceStatus} /></td>
                     <td className="tableActionCell">
