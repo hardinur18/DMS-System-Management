@@ -171,6 +171,7 @@ Modul refresh reusable:
 - Semua tombol refresh data backend memakai komponen ini agar loading icon/spin, disabled state, dan label konsisten.
 - Refresh tidak boleh menghapus UI lama bila cache data sudah ada; hanya update data dari backend.
 - Untuk proses domain selain refresh, gunakan button biasa dengan loading label yang spesifik, misalnya `Proses Absensi`.
+- Command backend yang meminta perangkat eksternal melakukan aksi tidak memakai label refresh. Gunakan label domain yang jelas, misalnya `Sync User Mesin`, karena action ini membuat command ADMS dan menunggu mesin polling receiver.
 
 ## Modul UI Operasional
 
@@ -211,6 +212,18 @@ Aturan penggunaan:
 - Jangan memakai text `...` sebagai loading data. Gunakan skeleton shimmer.
 - Jangan memakai progress bar besar untuk table/dashboard data biasa. Progress bar hanya untuk proses panjang yang punya tahapan nyata.
 - Empty state hanya muncul setelah request selesai dan hasil data memang kosong.
+
+## Attendance Source Pattern
+
+Setiap UI yang menampilkan `attendance_logs` harus mempertahankan sumber data absensi, terutama saat Biofinger sudah online.
+
+- Query attendance wajib membawa `source`, `attendance_media`, `attendance_device_id`, dan `biofinger_event_id` bila tersedia.
+- Tabel Live Absensi menampilkan sumber per event, misalnya `Biofinger / Fingerprint`, `App Lapangan / GPS`, `Kiosk / Barcode`, atau `Manual HR / Manual`.
+- Detail absensi harus menampilkan sumber check-in dan check-out agar HR bisa audit tanpa membuka raw event.
+- Label sumber cukup berupa text/chip kecil, bukan tombol aksi.
+- Biofinger yang sudah dikonversi ke absensi final tetap bisa ditelusuri dari `biofinger_event_id`.
+- Tabel mapping Biofinger punya kontrol `Urutan`; default-nya `User ID Tertinggi`, dengan opsi `Terbaru dari Mesin` dan `User ID Terendah`.
+- Biofinger punya dua action berbeda: `Sync User Mesin` untuk meminta payload USERINFO dari AT-301, dan `Refresh Data` untuk membaca ulang data Supabase yang sudah masuk.
 
 ## Master Data Form Mapping
 
@@ -340,6 +353,18 @@ Animasi yang harus dihindari:
 - Motion yang menggeser layout.
 - Efek terlalu ramai di table atau form.
 - Gradient/orb dekoratif yang tidak membantu workflow.
+
+## Dropdown Select Pattern
+
+Dropdown untuk filter dan form wajib memakai komponen foundation, bukan native select browser, kecuali kebutuhan sistem benar-benar sederhana.
+
+- Trigger mengikuti tinggi, radius, border, focus ring, dan typography input form.
+- Menu menggunakan portal agar tidak kepotong oleh table, drawer, atau dialog.
+- Search muncul untuk opsi panjang.
+- Scroll di dalam menu tidak boleh menutup dropdown.
+- Scroll container luar harus menjaga posisi menu, bukan membuat menu terasa loncat.
+- Option aktif memakai highlight ringan dan ikon check, bukan warna blok berat.
+- Dropdown di mobile tetap nyaman disentuh dan tidak membuat dialog melebar.
 
 ## Mobile Standard
 

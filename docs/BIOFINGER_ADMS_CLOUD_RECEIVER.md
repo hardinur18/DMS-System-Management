@@ -109,7 +109,10 @@ Flow resmi untuk mesin AT-301 tambahan:
    - HTTPS: `Off`
    - Proxy: `Off`
 7. Hubungkan mesin ke LAN/WiFi internet.
-8. Lakukan 1 scan test; `last_seen_at` dan raw event akan bergerak ketika push masuk.
+8. Setelah user/finger baru dibuat di mesin, lakukan 1 scan jari agar User ID dikirim ke receiver.
+9. Jika `Nama di Mesin` belum terkirim, klik `Sync User Mesin` di DMS untuk meminta `USERINFO` lewat polling ADMS.
+10. Klik `Refresh Data` di DMS; user baru akan muncul `pending` di tab `Mapping User`.
+11. Lakukan mapping ke karyawan DMS, lalu klik `Proses Absensi` jika raw event sudah siap dikonversi.
 
 Dengan flow ini, mesin tidak harus dicolok ke PC admin. PC admin hanya dipakai untuk troubleshooting lokal port `4370` jika ADMS/cloud push bermasalah.
 
@@ -146,11 +149,62 @@ Receiver mendukung pola umum ADMS/iClock:
 - `GET /iclock/getrequest?SN=...`
 - `POST /iclock/cdata?SN=...&table=ATTLOG`
 - `POST /iclock/cdata?SN=...&table=USER`
+- `POST /iclock/cdata?SN=...&table=USERINFO`
 - `POST /iclock/devicecmd?SN=...`
 
 Data `ATTLOG` masuk ke `biofinger_attendance_events`.
 
-Data `USER` membuat/memperbarui `employee_attendance_device_links` sebagai `pending` tanpa mengubah mapping aktif yang sudah dipilih admin.
+Data `USER`/`USERINFO` membuat/memperbarui `employee_attendance_device_links` sebagai `pending` tanpa mengubah mapping aktif yang sudah dipilih admin.
+
+Catatan praktis: beberapa firmware AT-301 tidak langsung mengirim daftar `USER` saat admin baru selesai registrasi fingerprint. Jika user baru belum muncul di DMS, lakukan scan jari sekali dari user tersebut. Receiver juga akan membuat baris `Mapping User` dari `ATTLOG`, sehingga User ID tetap bisa dimapping meski paket `USER` belum dikirim mesin.
+
+Temuan dari AT-301 `GED7244800117`: command `DATA QUERY USERINFO` tanpa `PIN=ALL` dapat mengirim daftar user sebagai `table=OPERLOG` dengan baris `USER PIN=... Name=...`, bukan `table=USER`. Receiver DMS memproses baris `USER` dari `OPERLOG` dan mengabaikan baris template fingerprint `FP`.
+
+## Pull User Dari Mesin
+
+DMS menyediakan tombol `Sync User Mesin` di halaman `Biofinger`. Tombol ini membuat request agar receiver mengirim command ke mesin saat AT-301 polling endpoint:
+
+```text
+GET /iclock/getrequest?SN=...
+```
+
+Default command yang dikirim receiver:
+
+```text
+C:{id}:DATA QUERY USERINFO
+```
+
+Default ini meminta daftar user dari mesin. Jika firmware AT-301 membutuhkan format lain, ubah env receiver:
+
+```bash
+BIOFINGER_USER_SYNC_PIN=ALL
+BIOFINGER_USER_SYNC_COMMAND_TEMPLATE="C:{id}:DATA QUERY USERINFO"
+BIOFINGER_ADMS_COMMAND_BATCH_SIZE=3
+BIOFINGER_ADMS_COMMAND_RETRY_MS=120000
+```
+
+Status command disimpan di tabel `biofinger_device_commands` jika migration `20260826000100_biofinger_user_sync_commands.sql` sudah diterapkan. Jika tabel/function belum ada, frontend memakai fallback `attendance_devices.metadata.biofinger_user_sync_request`; receiver tetap bisa membaca fallback ini agar POC tidak berhenti.
+
+Alur status:
+
+1. DMS membuat request `pending`.
+2. Receiver mengirim command di `/iclock/getrequest`, lalu status menjadi `sent`.
+3. Jika mesin mengirim `/iclock/devicecmd`, status menjadi `acknowledged` atau `failed`.
+4. Jika mesin mengirim payload `USER`, status menjadi `completed` dan `external_name` pada mapping akan terisi.
+5. Jika firmware tidak mendukung command, status akan retry lalu `failed` setelah batas percobaan.
+
+Halaman Biofinger menampilkan status `User Sync`:
+
+- `Belum diminta`: belum ada command sync user.
+- `Menunggu mesin`: request sudah dibuat, menunggu AT-301 polling receiver.
+- `Dikirim ke mesin`: receiver sudah mengirim command, menunggu balasan `USER`.
+- `USER masuk`: mesin berhasil mengirim data user/nama, baik dari `USER`, `USERINFO`, atau `OPERLOG`.
+- `Gagal` atau `Kedaluwarsa`: cek format command, firmware, dan log receiver.
+
+`Sync User Mesin` berbeda dari `Refresh Data`:
+
+- `Sync User Mesin`: meminta mesin mengirim data user/nama.
+- `Refresh Data`: mengambil ulang data yang sudah masuk ke Supabase.
 
 ## Perilaku Database
 
@@ -158,10 +212,11 @@ Receiver melakukan:
 
 1. Cari/auto-register device di `attendance_devices` berdasarkan serial number.
 2. Buat link user mesin baru di `employee_attendance_device_links` dengan status `pending`.
-3. Insert raw event ke `biofinger_attendance_events` memakai `source_hash`, sehingga event dobel diabaikan.
-4. Jika User ID sudah punya mapping `active`, event baru langsung diberi `employee_id` dan `import_status = mapped`.
-5. Jika `BIOFINGER_CONVERT_ON_IMPORT=true`, panggil `convert_biofinger_attendance_events` untuk membuat `attendance_logs` dari event yang sudah `mapped`. Default env tetap `false` sampai sample manual sudah valid.
-6. Update `last_seen_at`, `last_sync_at`, dan `sync_cursor_at`.
+3. Jika ada command pending, kirim command ke mesin melalui `/iclock/getrequest`.
+4. Insert raw event ke `biofinger_attendance_events` memakai `source_hash`, sehingga event dobel diabaikan.
+5. Jika User ID sudah punya mapping `active`, event baru langsung diberi `employee_id` dan `import_status = mapped`.
+6. Jika `BIOFINGER_CONVERT_ON_IMPORT=true`, panggil `convert_biofinger_attendance_events` untuk membuat `attendance_logs` dari event yang sudah `mapped`. Default env tetap `false` sampai sample manual sudah valid.
+7. Update `last_seen_at`, `last_sync_at`, dan `sync_cursor_at`.
 
 Konversi memakai aturan aman:
 

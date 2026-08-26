@@ -1,7 +1,9 @@
-import type { CSSProperties, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react"
+import { Children, isValidElement } from "react"
+import type { CSSProperties, ChangeEvent, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react"
 import clsx from "clsx"
 
 import { DatePickerField } from "./date-picker-field"
+import { FoundationSelect, type FoundationSelectOption } from "./foundation-select"
 
 type BaseFieldProps = {
   label: string
@@ -42,9 +44,49 @@ export function SelectFormField({
   label: string
   children: ReactNode
 }) {
+  const options = Children.toArray(children).flatMap((child): FoundationSelectOption[] => {
+    if (!isValidElement(child)) return []
+    if (child.type !== "option") return []
+
+    const optionProps = child.props as {
+      children?: ReactNode
+      disabled?: boolean
+      value?: string | number | readonly string[]
+    }
+    const optionLabel = optionProps.children
+    const optionValue = Array.isArray(optionProps.value)
+      ? optionProps.value.join(",")
+      : String(optionProps.value ?? (typeof optionLabel === "string" || typeof optionLabel === "number" ? optionLabel : ""))
+
+    return [{
+      value: optionValue,
+      label: optionLabel,
+      searchLabel: typeof optionLabel === "string" || typeof optionLabel === "number" ? String(optionLabel) : optionValue,
+      disabled: optionProps.disabled,
+    }]
+  })
+  const selectedValue = Array.isArray(props.value)
+    ? props.value[0] || ""
+    : String(props.value ?? props.defaultValue ?? "")
+  const placeholder = String(options.find((option) => option.value === "")?.label || "Pilih data")
+  const handleChange = (nextValue: string) => {
+    props.onChange?.({
+      target: { value: nextValue },
+      currentTarget: { value: nextValue },
+    } as ChangeEvent<HTMLSelectElement>)
+  }
+
   return (
     <FormField label={label} required={Boolean(props.required)}>
-      <select {...props}>{children}</select>
+      <FoundationSelect
+        label={label}
+        value={selectedValue}
+        options={options}
+        placeholder={placeholder}
+        disabled={props.disabled}
+        searchable={options.length > 8}
+        onChange={handleChange}
+      />
     </FormField>
   )
 }

@@ -1,5 +1,5 @@
 import { Fragment, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import type { CSSProperties, ChangeEvent, KeyboardEvent, ReactNode } from "react"
+import type { CSSProperties, ChangeEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react"
 import { createPortal } from "react-dom"
 import {
   AlertCircle,
@@ -143,6 +143,10 @@ interface AttendanceMonitorRow {
   checkInFaceStatus: AttendanceFaceStatus
   checkInFaceScore: number | null
   checkInDistanceM: number | null
+  checkInSource: string
+  checkInMedia: string
+  checkInDeviceId: string
+  checkInBiofingerEventId: string
   checkInNotes: string
   checkOutId: string
   checkOutAt: string
@@ -151,6 +155,10 @@ interface AttendanceMonitorRow {
   checkOutFaceStatus: AttendanceFaceStatus
   checkOutFaceScore: number | null
   checkOutDistanceM: number | null
+  checkOutSource: string
+  checkOutMedia: string
+  checkOutDeviceId: string
+  checkOutBiofingerEventId: string
   checkOutNotes: string
   attendanceStatus: AttendanceStatus
   logStatus: AttendanceLogStatus | "missing"
@@ -512,6 +520,7 @@ interface EmployeeDirectoryRow {
   faceProfileSubmittedAt: string
   faceProfileReviewedAt: string
   faceProfileReviewNotes: string
+  biofingerLinks: EmployeeBiofingerLink[]
   notes: string
   deletedAt: string
 }
@@ -582,6 +591,23 @@ interface AttendanceKioskOption {
 type BiofingerLinkStatus = "pending" | "active" | "ignored" | "inactive"
 type BiofingerImportStatus = "pending" | "mapped" | "converted" | "ignored" | "error"
 type BiofingerWorkspaceTab = "overview" | "devices" | "mapping" | "events"
+type BiofingerMappingSort = "user_id_desc" | "latest" | "user_id_asc"
+type BiofingerCommandStatus = "pending" | "sent" | "acknowledged" | "completed" | "failed" | "expired" | "cancelled"
+
+interface EmployeeBiofingerLink {
+  id: string
+  attendanceDeviceId: string
+  deviceCode: string
+  deviceName: string
+  deviceSerialNumber: string
+  externalUserId: string
+  externalUid: number | null
+  externalName: string
+  status: BiofingerLinkStatus
+  matchedBy: string
+  lastSeenAt: string
+  lastSyncedAt: string
+}
 
 const BIOFINGER_ALL_DEVICES = "all"
 const BIOFINGER_ADMS_RECEIVER_HOST = String(import.meta.env.VITE_BIOFINGER_ADMS_RECEIVER_HOST || "187.77.127.179")
@@ -604,6 +630,7 @@ interface BiofingerDeviceRow {
   lastSeenAt: string
   lastSyncAt: string
   syncCursorAt: string
+  metadata: Record<string, unknown>
   notes: string
 }
 
@@ -680,6 +707,30 @@ interface BiofingerEventSummaryRow {
   latestEventAt: string
 }
 
+interface BiofingerDeviceCommandRow {
+  id: string
+  attendanceDeviceId: string
+  requestNo: number | null
+  commandType: string
+  status: BiofingerCommandStatus
+  attempts: number
+  maxAttempts: number
+  responseCode: number | null
+  lastError: string
+  requestedAt: string
+  sentAt: string
+  respondedAt: string
+  expiresAt: string
+}
+
+interface BiofingerUserSyncStatusSummary {
+  status: BiofingerCommandStatus | "idle"
+  detail: string
+  updatedAt: string
+  lastError: string
+  source: "queue" | "metadata" | "none"
+}
+
 interface BiofingerData {
   schemaReady: boolean
   devices: BiofingerDeviceRow[]
@@ -690,6 +741,8 @@ interface BiofingerData {
   eventSummary: BiofingerEventSummaryRow[]
   eventSummaryLoadError?: string
   eventSummaryIsFallback?: boolean
+  commands: BiofingerDeviceCommandRow[]
+  commandLoadError?: string
   employees: BiofingerEmployeeOption[]
   workLocations: BiofingerWorkLocationOption[]
 }
@@ -706,7 +759,7 @@ interface BiofingerConversionSummary {
 type BiofingerDataUpdater = BiofingerData | ((current: BiofingerData) => BiofingerData)
 
 function createEmptyBiofingerData(): BiofingerData {
-  return { schemaReady: true, devices: [], links: [], events: [], eventCount: 0, eventSummary: [], employees: [], workLocations: [] }
+  return { schemaReady: true, devices: [], links: [], events: [], eventCount: 0, eventSummary: [], commands: [], employees: [], workLocations: [] }
 }
 
 let biofingerDataCache: BiofingerData | null = null
@@ -715,6 +768,7 @@ let biofingerActiveTabCache: BiofingerWorkspaceTab = "overview"
 let biofingerStatusFilterCache: "all" | BiofingerLinkStatus = "all"
 let biofingerSearchTermCache = ""
 let biofingerPageSizeCache = 25
+let biofingerMappingSortCache: BiofingerMappingSort = "user_id_desc"
 
 interface FaceEnrollmentTarget {
   id?: string
@@ -1085,6 +1139,8 @@ const guideArticles: GuideArticle[] = [
       "Buka Biofinger > Device > Tambah Device, isi serial yang sama persis, nama display, status, dan lokasi kerja.",
       "Di mesin buka COMM. Settings > Pengaturan Server cloud, isi server receiver, port, Server Mode ADMS, HTTPS Off, dan Proxy Off.",
       "Pastikan mesin mendapat internet via LAN atau WiFi tanpa PC admin menyala terus.",
+      "Setelah user/finger baru dibuat di mesin, lakukan scan jari sekali agar User ID terkirim dan muncul di Mapping User.",
+      "Jika nama user dari mesin belum ikut masuk, klik Sync User Mesin untuk meminta AT-301 mengirim USERINFO lewat ADMS.",
       "Klik Refresh Data di DMS untuk menarik ulang data yang sudah masuk ke Supabase.",
       "Mapping User ID mesin ke karyawan DMS sebelum raw event dipakai sebagai absensi payroll.",
       "Klik Proses Absensi untuk mengubah event mapped menjadi attendance final, atau aktifkan auto-convert di receiver VPS.",
@@ -1092,13 +1148,15 @@ const guideArticles: GuideArticle[] = [
     checks: [
       "Serial di DMS sama persis dengan Serial Number mesin.",
       "Device status Active atau Maintenance agar receiver mengizinkan push.",
-      "Last Seen, User ID mesin, dan Raw Event bertambah setelah mesin online.",
+      "Last Seen, User ID mesin, dan Raw Event bertambah setelah mesin online dan user melakukan scan.",
       "Setiap User ID aktif sudah dipetakan ke satu karyawan DMS.",
       "Raw Event berstatus converted mulai terlihat di Live Absensi dan Payroll cycle.",
     ],
     pitfalls: [
       "Jangan menukar Serial Number dengan User ID fingerprint.",
-      "Refresh Data tidak memaksa mesin sync, hanya mengambil ulang data backend.",
+      "User/finger yang baru dibuat di mesin bisa belum muncul sebelum user tersebut scan sekali.",
+      "Refresh Data tidak memaksa mesin sync, hanya mengambil ulang data backend. Gunakan Sync User Mesin untuk command USERINFO.",
+      "Nama di mesin tetap tergantung dukungan firmware AT-301; jika command tidak didukung, mapping by User ID tetap menjadi sumber stabil.",
       "Jika data belum masuk, cek internet mesin, alamat server, port, dan allowlist serial.",
       "Event yang bentrok dengan absensi manual/mobile masuk status error dan perlu dicek, bukan ditimpa otomatis.",
     ],
@@ -2935,6 +2993,89 @@ function TableState({
   )
 }
 
+function isHorizontalDragInteractiveTarget(target: EventTarget | null) {
+  if (!(target instanceof Element)) return false
+  return Boolean(target.closest("button, a, input, select, textarea, [data-row-action='true']"))
+}
+
+function useHorizontalDragScroll<T extends HTMLElement>() {
+  const scrollRef = useRef<T | null>(null)
+  const dragStateRef = useRef({
+    active: false,
+    moved: false,
+    pointerId: -1,
+    startX: 0,
+    startY: 0,
+    scrollLeft: 0,
+    suppressClickUntil: 0,
+  })
+  const [dragging, setDragging] = useState(false)
+
+  const finishDrag = (event: ReactPointerEvent<T>) => {
+    const node = scrollRef.current
+    const dragState = dragStateRef.current
+    if (!dragState.active || dragState.pointerId !== event.pointerId) return
+
+    dragState.active = false
+    dragState.pointerId = -1
+    if (dragState.moved) dragState.suppressClickUntil = Date.now() + 160
+    setDragging(false)
+    if (node?.hasPointerCapture(event.pointerId)) node.releasePointerCapture(event.pointerId)
+  }
+
+  return {
+    ref: scrollRef,
+    dragging,
+    handlers: {
+      onPointerDown: (event: ReactPointerEvent<T>) => {
+        const node = scrollRef.current
+        if (!node || node.scrollWidth <= node.clientWidth) return
+        if (event.pointerType === "mouse" && event.button !== 0) return
+        if (isHorizontalDragInteractiveTarget(event.target)) return
+
+        dragStateRef.current = {
+          active: true,
+          moved: false,
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startY: event.clientY,
+          scrollLeft: node.scrollLeft,
+          suppressClickUntil: dragStateRef.current.suppressClickUntil,
+        }
+        node.setPointerCapture(event.pointerId)
+      },
+      onPointerMove: (event: ReactPointerEvent<T>) => {
+        const node = scrollRef.current
+        const dragState = dragStateRef.current
+        if (!node || !dragState.active || dragState.pointerId !== event.pointerId) return
+
+        const deltaX = event.clientX - dragState.startX
+        const deltaY = event.clientY - dragState.startY
+        if (!dragState.moved) {
+          if (Math.abs(deltaX) < 8 && Math.abs(deltaY) < 8) return
+          if (Math.abs(deltaX) <= Math.abs(deltaY)) {
+            finishDrag(event)
+            return
+          }
+          dragState.moved = true
+          setDragging(true)
+        }
+        node.scrollLeft = dragState.scrollLeft - deltaX
+        if (dragState.moved) event.preventDefault()
+      },
+      onPointerUp: finishDrag,
+      onPointerCancel: finishDrag,
+      onPointerLeave: finishDrag,
+      onClickCapture: (event: ReactMouseEvent<T>) => {
+        if (isHorizontalDragInteractiveTarget(event.target)) return
+        if (Date.now() > dragStateRef.current.suppressClickUntil) return
+        event.preventDefault()
+        event.stopPropagation()
+      },
+    },
+  }
+}
+
 function ToastViewport({
   toast,
   onClose,
@@ -3053,18 +3194,107 @@ function EmployeeIdentityCell({
   code,
   photoUrl,
   secondary,
+  onOpen,
 }: {
   fullName: string
   code: string
   photoUrl?: string
   secondary?: ReactNode
+  onOpen?: () => void
 }) {
-  return (
+  const content = (
     <span className="employeeTableIdentity">
       <span className="employeeMiniAvatar">
         {photoUrl ? <img src={photoUrl} alt="" /> : getProfileInitials(fullName || code)}
       </span>
       <TableText primary={fullName} secondary={secondary ?? code} />
+    </span>
+  )
+
+  if (!onOpen) return content
+
+  return (
+    <button
+      className="employeeIdentityButton"
+      type="button"
+      aria-label={`Lihat detail ${fullName}`}
+      data-row-action="true"
+      onClick={(event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        onOpen()
+      }}
+    >
+      {content}
+    </button>
+  )
+}
+
+function formatAttendanceLogStatus(status: AttendanceLogStatus | "missing") {
+  const labels: Record<AttendanceLogStatus | "missing", string> = {
+    valid: "Valid",
+    review: "Review",
+    rejected: "Ditolak",
+    missing: "Belum ada",
+  }
+  return labels[status]
+}
+
+function getAttendanceSourceTone(source: string, media: string) {
+  const normalizedSource = source.trim().toLowerCase()
+  const normalizedMedia = media.trim().toLowerCase()
+  if (normalizedSource === "biofinger" || normalizedMedia === "fingerprint") return "biofinger"
+  if (normalizedSource === "field_app" || normalizedMedia === "gps" || normalizedMedia === "face") return "field"
+  if (normalizedSource === "kiosk" || normalizedMedia === "barcode" || normalizedMedia === "rfid") return "kiosk"
+  if (normalizedSource === "management" || normalizedMedia === "manual") return "manual"
+  if (normalizedSource === "seed") return "seed"
+  return "legacy"
+}
+
+function getAttendanceSourceIcon(source: string, media: string) {
+  const tone = getAttendanceSourceTone(source, media)
+  if (tone === "biofinger") return Fingerprint
+  if (tone === "field") return LocateFixed
+  if (tone === "kiosk") return ScanLine
+  return ClipboardList
+}
+
+function getAttendanceSourceLabel(source: string, media: string) {
+  const tone = getAttendanceSourceTone(source, media)
+  const normalizedSource = source.trim().toLowerCase()
+  if (tone === "biofinger") return "Biofinger"
+  if (tone === "field") return "App Lapangan"
+  if (tone === "kiosk") return "Kiosk"
+  if (tone === "manual") return "Manual HR"
+  if (tone === "seed") return "Seed"
+  return normalizedSource ? normalizedSource : "Sumber lama"
+}
+
+function getAttendanceMediaLabel(media: string) {
+  const normalizedMedia = media.trim().toLowerCase()
+  const labels: Record<string, string> = {
+    barcode: "Barcode",
+    rfid: "RFID",
+    face: "Face",
+    gps: "GPS",
+    manual: "Manual",
+    fingerprint: "Fingerprint",
+  }
+  return labels[normalizedMedia] || ""
+}
+
+function formatAttendanceSourceMeta(source: string, media: string) {
+  const sourceLabel = getAttendanceSourceLabel(source, media)
+  const mediaLabel = getAttendanceMediaLabel(media)
+  return mediaLabel ? `${sourceLabel} / ${mediaLabel}` : sourceLabel
+}
+
+function AttendanceSourceTag({ source, media }: { source: string; media: string }) {
+  const Icon = getAttendanceSourceIcon(source, media)
+  return (
+    <span className={clsx("attendanceSourceTag", getAttendanceSourceTone(source, media))}>
+      <Icon size={13} />
+      <span>{formatAttendanceSourceMeta(source, media)}</span>
     </span>
   )
 }
@@ -3079,14 +3309,14 @@ function AttendanceTimelineCell({ row }: { row: AttendanceMonitorRow }) {
       key: "check-in",
       label: "Masuk",
       value: row.checkInAt ? formatAttendanceTime(row.checkInAt) : "Belum",
-      meta: row.checkInStatus === "missing" ? formatEmployeeDate(row.attendanceDate) : row.checkInStatus,
+      meta: row.checkInStatus === "missing" ? formatEmployeeDate(row.attendanceDate) : `${formatAttendanceLogStatus(row.checkInStatus)} / ${formatAttendanceSourceMeta(row.checkInSource, row.checkInMedia)}`,
       tone: checkInTone,
     },
     {
       key: "check-out",
       label: "Pulang",
       value: row.checkOutAt ? formatAttendanceTime(row.checkOutAt) : "Belum",
-      meta: row.checkOutStatus === "missing" ? "Menunggu" : row.checkOutStatus,
+      meta: row.checkOutStatus === "missing" ? "Menunggu" : `${formatAttendanceLogStatus(row.checkOutStatus)} / ${formatAttendanceSourceMeta(row.checkOutSource, row.checkOutMedia)}`,
       tone: checkOutTone,
     },
     {
@@ -3917,6 +4147,50 @@ const employeePayrollMethodLabel: Record<EmployeePayrollMethod, string> = {
   custom: "Custom",
 }
 
+const employeeBiofingerStatusLabel: Record<BiofingerLinkStatus, string> = {
+  active: "Aktif",
+  pending: "Pending",
+  ignored: "Ignored",
+  inactive: "Nonaktif",
+}
+
+const biofingerCommandStatusLabel: Record<BiofingerCommandStatus | "idle", string> = {
+  idle: "Belum diminta",
+  pending: "Menunggu mesin",
+  sent: "Dikirim ke mesin",
+  acknowledged: "Command diterima",
+  completed: "USER masuk",
+  failed: "Gagal",
+  expired: "Kedaluwarsa",
+  cancelled: "Dibatalkan",
+}
+
+const biofingerCommandStatusMeta: Record<BiofingerCommandStatus | "idle", string> = {
+  idle: "Klik Sync User Mesin",
+  pending: "Menunggu polling ADMS",
+  sent: "Menunggu balasan USER",
+  acknowledged: "Menunggu payload USER",
+  completed: "Nama user tersimpan",
+  failed: "Cek receiver atau firmware",
+  expired: "Klik sync ulang",
+  cancelled: "Request dibatalkan",
+}
+
+const biofingerMachineNamePendingLabel = "Belum dikirim mesin"
+
+function formatBiofingerMachineName(value?: string | null) {
+  const name = value?.trim()
+  return name || biofingerMachineNamePendingLabel
+}
+
+function getBiofingerMachineNameMeta(row: Pick<BiofingerUserLinkRow, "externalName" | "employeeName" | "privilege">) {
+  if (row.externalName.trim()) {
+    return row.privilege === 14 ? "Admin device" : `Privilege ${row.privilege ?? "-"}`
+  }
+
+  return row.employeeName ? `Referensi DMS: ${row.employeeName}` : "Menunggu USER dari mesin"
+}
+
 const maxEmployeeDailySalary = 5000000
 const maxEmployeeMonthlySalary = 100000000
 const maxEmployeePhotoSize = 2 * 1024 * 1024
@@ -3940,6 +4214,37 @@ function EmployeeStatusBadge({ status }: { status: EmployeeStatus }) {
   }
 
   return <UiStatusBadge tone={tone[status]}>{employeeStatusLabel[status]}</UiStatusBadge>
+}
+
+function getPrimaryEmployeeBiofingerLink(row: Pick<EmployeeDirectoryRow, "biofingerLinks">) {
+  return row.biofingerLinks.find((link) => link.status === "active")
+    || row.biofingerLinks.find((link) => link.status === "pending")
+    || row.biofingerLinks[0]
+    || null
+}
+
+function EmployeeBiofingerCell({ row }: { row: EmployeeDirectoryRow }) {
+  const primaryLink = getPrimaryEmployeeBiofingerLink(row)
+  const extraCount = Math.max(0, row.biofingerLinks.length - 1)
+
+  if (!primaryLink) {
+    return (
+      <span className="employeeBiofingerCell empty">
+        <span><Fingerprint size={15} /></span>
+        <TableText primary="Belum mapped" secondary="Mapping di Biofinger" />
+      </span>
+    )
+  }
+
+  return (
+    <span className={clsx("employeeBiofingerCell", primaryLink.status)}>
+      <span><Fingerprint size={15} /></span>
+      <TableText
+        primary={`User ID ${primaryLink.externalUserId || "-"}`}
+        secondary={`${primaryLink.deviceName}${extraCount ? ` +${extraCount}` : ""} / ${employeeBiofingerStatusLabel[primaryLink.status]}`}
+      />
+    </span>
+  )
 }
 
 function EmployeeFaceProfileBadge({ status }: { status: EmployeeFaceProfileStatus }) {
@@ -4318,6 +4623,14 @@ function isMissingBiofingerSchema(error: unknown) {
   return schemaHints.some((hint) => message.includes(hint))
 }
 
+function isMissingBiofingerCommandSchema(error: unknown) {
+  const errorObject = error && typeof error === "object" ? error as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown } : null
+  const message = `${String(errorObject?.code || "")} ${String(errorObject?.message || "")} ${String(errorObject?.details || "")} ${String(errorObject?.hint || "")}`.toLowerCase()
+  return message.includes("biofinger_device_commands")
+    || message.includes("schema cache")
+    || message.includes("relation")
+}
+
 function mapBiofingerLinkStatus(value: unknown): BiofingerLinkStatus {
   if (value === "active" || value === "ignored" || value === "inactive") return value
   return "pending"
@@ -4325,6 +4638,11 @@ function mapBiofingerLinkStatus(value: unknown): BiofingerLinkStatus {
 
 function mapBiofingerImportStatus(value: unknown): BiofingerImportStatus {
   if (value === "mapped" || value === "converted" || value === "ignored" || value === "error") return value
+  return "pending"
+}
+
+function mapBiofingerCommandStatus(value: unknown): BiofingerCommandStatus {
+  if (value === "sent" || value === "acknowledged" || value === "completed" || value === "failed" || value === "expired" || value === "cancelled") return value
   return "pending"
 }
 
@@ -4485,6 +4803,49 @@ function formatBiofingerConnection(device: BiofingerDeviceRow) {
   return `${protocol} / ${address}`
 }
 
+function compareBiofingerUserIds(a: Pick<BiofingerUserLinkRow, "externalUserId" | "externalUid">, b: Pick<BiofingerUserLinkRow, "externalUserId" | "externalUid">) {
+  const aId = a.externalUserId.trim()
+  const bId = b.externalUserId.trim()
+  const aNumeric = /^\d+$/.test(aId)
+  const bNumeric = /^\d+$/.test(bId)
+
+  if (aNumeric && bNumeric) {
+    const userIdCompare = Number(aId) - Number(bId)
+    if (userIdCompare !== 0) return userIdCompare
+  }
+
+  const naturalCompare = aId.localeCompare(bId, undefined, { numeric: true, sensitivity: "base" })
+  if (naturalCompare !== 0) return naturalCompare
+
+  return Number(a.externalUid ?? Number.MAX_SAFE_INTEGER) - Number(b.externalUid ?? Number.MAX_SAFE_INTEGER)
+}
+
+function compareBiofingerLinksByLatestActivity(a: BiofingerUserLinkRow, b: BiofingerUserLinkRow) {
+  const aLatest = Date.parse(a.lastSeenAt || a.lastSyncedAt || "")
+  const bLatest = Date.parse(b.lastSeenAt || b.lastSyncedAt || "")
+  const aHasLatest = Number.isFinite(aLatest)
+  const bHasLatest = Number.isFinite(bLatest)
+
+  if (aHasLatest && bHasLatest && aLatest !== bLatest) return bLatest - aLatest
+  if (aHasLatest !== bHasLatest) return aHasLatest ? -1 : 1
+
+  return compareBiofingerUserIds(a, b)
+}
+
+function compareBiofingerUserIdsDescending(a: BiofingerUserLinkRow, b: BiofingerUserLinkRow) {
+  return compareBiofingerUserIds(b, a)
+}
+
+function sortBiofingerLinks(links: BiofingerUserLinkRow[], sortMode: BiofingerMappingSort) {
+  const compare = sortMode === "latest"
+    ? compareBiofingerLinksByLatestActivity
+    : sortMode === "user_id_asc"
+      ? compareBiofingerUserIds
+      : compareBiofingerUserIdsDescending
+
+  return [...links].sort(compare)
+}
+
 function formatBiofingerEventType(value: BiofingerEventRow["normalizedEventType"]) {
   if (value === "check_in") return "Masuk"
   if (value === "check_out") return "Pulang"
@@ -4503,6 +4864,22 @@ function BiofingerDeviceStatusText({ status }: { status: string }) {
 
 function BiofingerLinkStatusText({ status }: { status: BiofingerLinkStatus }) {
   return <span className={clsx("biofingerLinkStatusText", status)}>{status}</span>
+}
+
+function BiofingerUserSyncStatusText({ summary }: { summary: BiofingerUserSyncStatusSummary }) {
+  const tone = summary.status === "completed"
+    ? "completed"
+    : summary.status === "failed" || summary.status === "expired"
+      ? "failed"
+      : summary.status === "pending" || summary.status === "sent" || summary.status === "acknowledged"
+        ? "pending"
+        : "idle"
+
+  return (
+    <span className={clsx("biofingerUserSyncStatusText", tone)}>
+      {biofingerCommandStatusLabel[summary.status]}
+    </span>
+  )
 }
 
 function BiofingerEmployeeMappingChip({
@@ -4527,6 +4904,82 @@ function BiofingerEmployeeMappingChip({
   )
 }
 
+function getPlainRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+function getBiofingerCommandTimestamp(command: Pick<BiofingerDeviceCommandRow, "respondedAt" | "sentAt" | "requestedAt" | "expiresAt">) {
+  const timestamps = [command.respondedAt, command.sentAt, command.requestedAt, command.expiresAt]
+    .map((value) => Date.parse(value || ""))
+    .filter(Number.isFinite)
+  return timestamps.length ? Math.max(...timestamps) : 0
+}
+
+function mapBiofingerDeviceCommandRecord(row: Record<string, unknown>): BiofingerDeviceCommandRow {
+  return {
+    id: String(row.id || ""),
+    attendanceDeviceId: String(row.attendance_device_id || ""),
+    requestNo: row.request_no === null || row.request_no === undefined ? null : Number(row.request_no),
+    commandType: String(row.command_type || "sync_users"),
+    status: mapBiofingerCommandStatus(row.status),
+    attempts: Number(row.attempts || 0),
+    maxAttempts: Number(row.max_attempts || 3),
+    responseCode: row.response_code === null || row.response_code === undefined ? null : Number(row.response_code),
+    lastError: String(row.last_error || ""),
+    requestedAt: String(row.requested_at || ""),
+    sentAt: String(row.sent_at || ""),
+    respondedAt: String(row.responded_at || ""),
+    expiresAt: String(row.expires_at || ""),
+  }
+}
+
+function getBiofingerMetadataUserSyncStatus(device: BiofingerDeviceRow): BiofingerUserSyncStatusSummary | null {
+  const request = getPlainRecord(device.metadata.biofinger_user_sync_request)
+  if (!Object.keys(request).length) return null
+
+  const status = mapBiofingerCommandStatus(request.status)
+  const updatedAt = String(request.completed_at || request.responded_at || request.sent_at || request.requested_at || "")
+  return {
+    status,
+    detail: String(request.last_error || biofingerCommandStatusMeta[status]),
+    updatedAt,
+    lastError: String(request.last_error || ""),
+    source: "metadata",
+  }
+}
+
+function getLatestBiofingerUserSyncStatus(
+  devices: BiofingerDeviceRow[],
+  commands: BiofingerDeviceCommandRow[],
+): BiofingerUserSyncStatusSummary {
+  const latestCommand = commands
+    .filter((command) => command.commandType === "sync_users")
+    .sort((a, b) => getBiofingerCommandTimestamp(b) - getBiofingerCommandTimestamp(a))[0]
+
+  if (latestCommand) {
+    return {
+      status: latestCommand.status,
+      detail: latestCommand.lastError || biofingerCommandStatusMeta[latestCommand.status],
+      updatedAt: latestCommand.respondedAt || latestCommand.sentAt || latestCommand.requestedAt,
+      lastError: latestCommand.lastError,
+      source: "queue",
+    }
+  }
+
+  const metadataStatus = devices
+    .map(getBiofingerMetadataUserSyncStatus)
+    .filter((status): status is BiofingerUserSyncStatusSummary => Boolean(status))
+    .sort((a, b) => (Date.parse(b.updatedAt || "") || 0) - (Date.parse(a.updatedAt || "") || 0))[0]
+
+  return metadataStatus || {
+    status: "idle",
+    detail: biofingerCommandStatusMeta.idle,
+    updatedAt: "",
+    lastError: "",
+    source: "none",
+  }
+}
+
 function mapBiofingerDeviceRecord(row: Record<string, unknown>, workLocationMap: Map<string, BiofingerWorkLocationOption>): BiofingerDeviceRow {
   return {
     workLocationId: String(row.work_location_id || ""),
@@ -4545,6 +4998,7 @@ function mapBiofingerDeviceRecord(row: Record<string, unknown>, workLocationMap:
     lastSeenAt: String(row.last_seen_at || ""),
     lastSyncAt: String(row.last_sync_at || ""),
     syncCursorAt: String(row.sync_cursor_at || ""),
+    metadata: getPlainRecord(row.metadata),
     notes: String(row.notes || ""),
   }
 }
@@ -4552,7 +5006,7 @@ function mapBiofingerDeviceRecord(row: Record<string, unknown>, workLocationMap:
 async function loadBiofingerData(): Promise<BiofingerData> {
   const devicesQuery = supabase
     .from("attendance_devices")
-    .select("id, device_code, name, vendor, model, serial_number, mac_address, ip_address, port, protocol, work_location_id, status, last_seen_at, last_sync_at, sync_cursor_at, notes")
+    .select("id, device_code, name, vendor, model, serial_number, mac_address, ip_address, port, protocol, work_location_id, status, last_seen_at, last_sync_at, sync_cursor_at, metadata, notes")
     .order("name", { ascending: true })
   const linksQuery = supabase
     .from("employee_attendance_device_links")
@@ -4564,6 +5018,11 @@ async function loadBiofingerData(): Promise<BiofingerData> {
     .order("device_event_at", { ascending: false })
     .limit(200)
   const eventSummaryQuery = supabase.rpc("get_biofinger_attendance_event_summary")
+  const commandsQuery = supabase
+    .from("biofinger_device_commands")
+    .select("id, attendance_device_id, request_no, command_type, status, attempts, max_attempts, response_code, last_error, requested_at, sent_at, responded_at, expires_at")
+    .order("requested_at", { ascending: false })
+    .limit(100)
   const employeesQuery = supabase
     .from("employees")
     .select("id, employee_code, full_name, status")
@@ -4575,24 +5034,25 @@ async function loadBiofingerData(): Promise<BiofingerData> {
     .order("sort_order", { ascending: true })
     .order("code", { ascending: true })
 
-  const [devicesResult, linksResult, employeesResult, workLocationsResult, eventsResult, eventSummaryResult] = await Promise.all([
+  const [devicesResult, linksResult, employeesResult, workLocationsResult, eventsResult, eventSummaryResult, commandsResult] = await Promise.all([
     devicesQuery,
     linksQuery,
     employeesQuery,
     workLocationsQuery,
     eventsQuery,
     eventSummaryQuery,
+    commandsQuery,
   ])
 
   const biofingerSchemaError = devicesResult.error || linksResult.error
   if (biofingerSchemaError) {
     if (isMissingBiofingerSchema(biofingerSchemaError)) {
-      return { schemaReady: false, devices: [], links: [], events: [], eventCount: 0, eventSummary: [], employees: [], workLocations: [] }
+      return { schemaReady: false, devices: [], links: [], events: [], eventCount: 0, eventSummary: [], commands: [], employees: [], workLocations: [] }
     }
     throw biofingerSchemaError
   }
   if (eventsResult.error && isMissingBiofingerSchema(eventsResult.error)) {
-    return { schemaReady: false, devices: [], links: [], events: [], eventCount: 0, eventSummary: [], employees: [], workLocations: [] }
+    return { schemaReady: false, devices: [], links: [], events: [], eventCount: 0, eventSummary: [], commands: [], employees: [], workLocations: [] }
   }
   if (employeesResult.error) throw employeesResult.error
   if (workLocationsResult.error) throw workLocationsResult.error
@@ -4613,6 +5073,10 @@ async function loadBiofingerData(): Promise<BiofingerData> {
   const workLocationMap = new Map(workLocations.map((location) => [location.id, location]))
 
   const devices = (devicesResult.data || []).map((row: Record<string, unknown>) => mapBiofingerDeviceRecord(row, workLocationMap))
+  const commandLoadError = commandsResult.error && !isMissingBiofingerCommandSchema(commandsResult.error)
+    ? getFriendlySupabaseError(commandsResult.error, "Status command Biofinger belum bisa dimuat.")
+    : ""
+  const commands = commandsResult.error ? [] : (commandsResult.data || []).map((row: Record<string, unknown>) => mapBiofingerDeviceCommandRecord(row))
 
   const links = (linksResult.data || []).map((row: Record<string, unknown>) => {
     const employeeId = row.employee_id ? String(row.employee_id) : ""
@@ -4634,7 +5098,7 @@ async function loadBiofingerData(): Promise<BiofingerData> {
       lastSyncedAt: String(row.last_synced_at || ""),
       notes: String(row.notes || ""),
     }
-  })
+  }).sort(compareBiofingerLinksByLatestActivity)
 
   const eventLoadError = eventsResult.error ? getFriendlySupabaseError(eventsResult.error, "Raw event Biofinger belum bisa dimuat.") : ""
   const events = eventsResult.error ? [] : (eventsResult.data || []).map((row: Record<string, unknown>) => {
@@ -4679,6 +5143,8 @@ async function loadBiofingerData(): Promise<BiofingerData> {
     eventSummary,
     eventSummaryLoadError,
     eventSummaryIsFallback,
+    commands,
+    commandLoadError,
     employees,
     workLocations,
   }
@@ -4725,6 +5191,77 @@ async function convertBiofingerAttendanceEvents(deviceId: string) {
   if (error) throw error
   const row = Array.isArray(data) ? data[0] as Record<string, unknown> | undefined : data as Record<string, unknown> | null
   return mapBiofingerConversionSummary(row)
+}
+
+function isMissingBiofingerUserSyncRpc(error: unknown) {
+  if (!error || typeof error !== "object") return false
+  const record = error as { code?: string; message?: string }
+  const message = String(record.message || "").toLowerCase()
+  return record.code === "PGRST202"
+    || record.code === "42883"
+    || message.includes("request_biofinger_user_sync")
+    || message.includes("could not find the function")
+}
+
+async function requestBiofingerUserSyncFallback(devices: BiofingerDeviceRow[]) {
+  const eligibleDevices = devices.filter((device) => device.id && ["active", "maintenance"].includes(device.status.toLowerCase()))
+  if (!eligibleDevices.length) {
+    throw new Error("Tidak ada device Biofinger aktif untuk diminta sync user.")
+  }
+
+  const requestedAt = new Date().toISOString()
+  const requestNonce = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}`
+
+  await Promise.all(eligibleDevices.map((device) => {
+    const metadata = {
+      ...device.metadata,
+      biofinger_user_sync_request: {
+        status: "pending",
+        pin: "ALL",
+        source: "dms-ui-metadata-fallback",
+        requested_at: requestedAt,
+        nonce: requestNonce,
+      },
+    }
+
+    return supabase
+      .from("attendance_devices")
+      .update({ metadata, updated_at: requestedAt })
+      .eq("id", device.id)
+      .then(({ error }) => {
+        if (error) throw error
+      })
+  }))
+
+  return {
+    commandsCreated: eligibleDevices.length,
+    commandsSkipped: 0,
+    fallback: true,
+  }
+}
+
+async function requestBiofingerUserSync(deviceId: string, devices: BiofingerDeviceRow[]) {
+  const targetDeviceId = deviceId && deviceId !== BIOFINGER_ALL_DEVICES ? deviceId : null
+  const targetDevices = targetDeviceId ? devices.filter((device) => device.id === targetDeviceId) : devices
+  const { data, error } = await supabase.rpc("request_biofinger_user_sync", {
+    target_device_id: targetDeviceId,
+    target_pin: null,
+  })
+
+  if (!error) {
+    const row = getPlainRecord(data)
+    return {
+      commandsCreated: Number(row.commands_created || 0),
+      commandsSkipped: Number(row.commands_skipped || 0),
+      fallback: false,
+    }
+  }
+
+  if (isMissingBiofingerUserSyncRpc(error)) {
+    return requestBiofingerUserSyncFallback(targetDevices)
+  }
+
+  throw error
 }
 
 async function createBiofingerDeviceRegistry(values: BiofingerDeviceFormValues, devices: BiofingerDeviceRow[] = []) {
@@ -4791,6 +5328,7 @@ function mapEmployeeRow(
   policyMap = new Map<string, AttendancePolicyOption>(),
   faceProfileMap = new Map<string, Record<string, unknown>>(),
   faceUrlMap = new Map<string, string>(),
+  biofingerLinkMap = new Map<string, EmployeeBiofingerLink[]>(),
 ): EmployeeDirectoryRow {
   const divisionId = row.division_id ? String(row.division_id) : ""
   const positionId = row.position_id ? String(row.position_id) : ""
@@ -4840,6 +5378,7 @@ function mapEmployeeRow(
     faceProfileSubmittedAt: String(faceProfile?.submitted_at || ""),
     faceProfileReviewedAt: String(faceProfile?.reviewed_at || ""),
     faceProfileReviewNotes: String(faceProfile?.review_notes || ""),
+    biofingerLinks: biofingerLinkMap.get(String(row.id)) || [],
     notes: String(row.notes || ""),
     deletedAt: row.deleted_at ? String(row.deleted_at) : "",
   }
@@ -4849,7 +5388,7 @@ async function loadEmployeeData() {
   const baseEmployeeSelect = "id, employee_code, full_name, photo_path, nik, phone, email, division_id, position_id, work_location_id, shift_id, salary_type, daily_salary, monthly_salary, payroll_method, prorate_enabled, join_date, payroll_cycle_days, status, notes, deleted_at, created_at"
   const kioskEmployeeSelect = `${baseEmployeeSelect}, qr_token, rfid_uid, attendance_policy_id, kiosk_access_enabled, last_card_issued_at`
   const employeeQuery = supabase.from("employees").select(kioskEmployeeSelect).order("employee_code", { ascending: true })
-  const [initialEmployeesResult, divisions, positions, locations, shifts, faceProfiles, policies] = await Promise.all([
+  const [initialEmployeesResult, divisions, positions, locations, shifts, faceProfiles, policies, biofingerLinksResult, biofingerDevicesResult] = await Promise.all([
     employeeQuery,
     supabase.from("divisions").select("id, code, name, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
     supabase.from("positions").select("id, code, name, division_id, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
@@ -4857,6 +5396,8 @@ async function loadEmployeeData() {
     supabase.from("shifts").select("id, code, name, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
     supabase.from("employee_face_profiles").select("id, employee_id, status, verification_required, face_score_threshold, reference_image_path, submitted_at, reviewed_at, review_notes"),
     supabase.from("attendance_policies").select("id, code, name, allowed_media, require_face, require_location, status").order("code", { ascending: true }),
+    supabase.from("employee_attendance_device_links").select("id, employee_id, attendance_device_id, external_user_id, external_uid, external_name, status, matched_by, last_seen_at, last_synced_at"),
+    supabase.from("attendance_devices").select("id, device_code, name, serial_number"),
   ])
   const kioskSchemaReady = !initialEmployeesResult.error || !isMissingKioskEmployeeSchema(initialEmployeesResult.error)
   const employeesResult = kioskSchemaReady
@@ -4909,9 +5450,34 @@ async function loadEmployeeData() {
   const faceReferencePaths = Array.from(new Set(((faceProfiles.data || []) as Array<Record<string, unknown>>).map((row) => String(row.reference_image_path || "")).filter(Boolean)))
   const faceUrlEntries = await Promise.all(faceReferencePaths.map(async (path) => [path, await getEmployeeFaceSignedUrl(path)] as const))
   const faceUrlMap = new Map(faceUrlEntries)
+  const biofingerDeviceMap = new Map(((biofingerDevicesResult.error ? [] : biofingerDevicesResult.data || []) as Array<Record<string, unknown>>).map((row) => [String(row.id || ""), row]))
+  const biofingerLinkMap = new Map<string, EmployeeBiofingerLink[]>()
+
+  ;((biofingerLinksResult.error ? [] : biofingerLinksResult.data || []) as Array<Record<string, unknown>>).forEach((row) => {
+    const employeeId = String(row.employee_id || "")
+    if (!employeeId) return
+
+    const attendanceDeviceId = String(row.attendance_device_id || "")
+    const device = biofingerDeviceMap.get(attendanceDeviceId)
+    const link: EmployeeBiofingerLink = {
+      id: String(row.id || ""),
+      attendanceDeviceId,
+      deviceCode: String(device?.device_code || ""),
+      deviceName: String(device?.name || "Biofinger"),
+      deviceSerialNumber: String(device?.serial_number || ""),
+      externalUserId: String(row.external_user_id || ""),
+      externalUid: row.external_uid === null || row.external_uid === undefined ? null : Number(row.external_uid),
+      externalName: String(row.external_name || ""),
+      status: mapBiofingerLinkStatus(row.status),
+      matchedBy: String(row.matched_by || ""),
+      lastSeenAt: String(row.last_seen_at || ""),
+      lastSyncedAt: String(row.last_synced_at || ""),
+    }
+    biofingerLinkMap.set(employeeId, [...(biofingerLinkMap.get(employeeId) || []), link])
+  })
 
   return {
-    rows: (employeesResult.data || []).map((row) => mapEmployeeRow(row, divisionMap, positionMap, locationMap, shiftMap, policyMap, faceProfileMap, faceUrlMap)),
+    rows: (employeesResult.data || []).map((row) => mapEmployeeRow(row, divisionMap, positionMap, locationMap, shiftMap, policyMap, faceProfileMap, faceUrlMap, biofingerLinkMap)),
     divisions: divisionOptions,
     positions: positionOptions,
     locations: locationOptions,
@@ -5083,7 +5649,7 @@ async function restoreEmployee(row: EmployeeDirectoryRow) {
 }
 
 function exportEmployeeCsv(rows: EmployeeDirectoryRow[]) {
-  const header = ["No", "Kode", "Nama", "Foto Path", "NIK", "Phone", "Email", "Divisi", "Jabatan", "Lokasi", "Shift", "Tipe Gaji", "Gaji Harian", "Gaji Bulanan", "Metode Payroll", "Hitung Proporsional", "Tanggal Masuk", "Cycle", "Status", "Catatan"]
+  const header = ["No", "Kode", "Nama", "Foto Path", "NIK", "Phone", "Email", "Divisi", "Jabatan", "Lokasi", "Shift", "Biofinger User ID", "Biofinger Device", "Biofinger Status", "Tipe Gaji", "Gaji Harian", "Gaji Bulanan", "Metode Payroll", "Hitung Proporsional", "Tanggal Masuk", "Cycle", "Status", "Catatan"]
   const body = rows.map((row, index) => [
     index + 1,
     row.employeeCode,
@@ -5096,6 +5662,9 @@ function exportEmployeeCsv(rows: EmployeeDirectoryRow[]) {
     row.positionName,
     row.workLocationName,
     row.shiftName,
+    getPrimaryEmployeeBiofingerLink(row)?.externalUserId || "",
+    getPrimaryEmployeeBiofingerLink(row)?.deviceName || "",
+    getPrimaryEmployeeBiofingerLink(row) ? employeeBiofingerStatusLabel[getPrimaryEmployeeBiofingerLink(row)!.status] : "",
     employeeSalaryTypeLabel[row.salaryType],
     row.dailySalary,
     row.monthlySalary,
@@ -5328,7 +5897,7 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey()): Pro
     supabase.from("work_locations").select("id, code, name, address, latitude, longitude, radius_m, is_active").order("sort_order", { ascending: true }).order("code", { ascending: true }),
     supabase
       .from("attendance_logs")
-      .select("id, employee_id, work_location_id, attendance_date, event_type, event_at, latitude, longitude, distance_m, radius_m, gps_status, face_status, face_score, face_snapshot_path, status, workday_counted, notes")
+      .select("id, employee_id, work_location_id, attendance_date, event_type, event_at, latitude, longitude, distance_m, radius_m, gps_status, face_status, face_score, face_snapshot_path, status, workday_counted, source, attendance_media, attendance_device_id, biofinger_event_id, notes")
       .order("event_at", { ascending: false })
       .limit(1000),
     supabase
@@ -5437,6 +6006,10 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey()): Pro
       checkInFaceStatus: attendance ? (attendance.face_status === "verified" || attendance.face_status === "failed" || attendance.face_status === "review" ? attendance.face_status : "not_required") : "not_required",
       checkInFaceScore: attendance?.face_score === null || attendance?.face_score === undefined ? null : Number(attendance.face_score),
       checkInDistanceM: attendance?.distance_m === null || attendance?.distance_m === undefined ? null : Number(attendance.distance_m),
+      checkInSource: String(attendance?.source || ""),
+      checkInMedia: String(attendance?.attendance_media || ""),
+      checkInDeviceId: String(attendance?.attendance_device_id || ""),
+      checkInBiofingerEventId: String(attendance?.biofinger_event_id || ""),
       checkInNotes: String(attendance?.notes || ""),
       checkOutId: checkOut ? String(checkOut.id || "") : "",
       checkOutAt: checkOut ? String(checkOut.event_at || "") : "",
@@ -5445,6 +6018,10 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey()): Pro
       checkOutFaceStatus: checkOut ? (checkOut.face_status === "verified" || checkOut.face_status === "failed" || checkOut.face_status === "review" ? checkOut.face_status : "not_required") : "not_required",
       checkOutFaceScore: checkOut?.face_score === null || checkOut?.face_score === undefined ? null : Number(checkOut.face_score),
       checkOutDistanceM: checkOut?.distance_m === null || checkOut?.distance_m === undefined ? null : Number(checkOut.distance_m),
+      checkOutSource: String(checkOut?.source || ""),
+      checkOutMedia: String(checkOut?.attendance_media || ""),
+      checkOutDeviceId: String(checkOut?.attendance_device_id || ""),
+      checkOutBiofingerEventId: String(checkOut?.biofinger_event_id || ""),
       checkOutNotes: String(checkOut?.notes || ""),
       attendanceStatus,
       logStatus: attendance ? (attendance.status === "valid" || attendance.status === "rejected" ? attendance.status : "review") : "missing",
@@ -6323,6 +6900,21 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
     { id: "inactive", label: "Nonaktif", icon: Lock, count: liveRows.filter((row) => row.status === "inactive").length },
     { id: "archived", label: "Arsip", icon: Archive, count: archivedRows.length },
   ]
+  const divisionFilterOptions = [
+    { value: "all", label: "Semua Divisi", searchLabel: "semua divisi" },
+    ...divisions.map((division) => ({
+      value: division.id,
+      label: division.name,
+      searchLabel: `${division.name} ${division.code}`,
+      description: division.code,
+    })),
+  ]
+  const statusFilterOptions = [
+    { value: "all", label: "Semua Status", searchLabel: "semua status" },
+    { value: "active", label: "Aktif", searchLabel: "aktif active" },
+    { value: "review", label: "Review", searchLabel: "review" },
+    { value: "inactive", label: "Nonaktif", searchLabel: "nonaktif inactive" },
+  ]
 
   useEffect(() => {
     setPage(1)
@@ -6557,6 +7149,7 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
     setDivisionFilter("all")
     setStatusFilter("all")
   }
+  const employeeTableDrag = useHorizontalDragScroll<HTMLDivElement>()
 
   return (
         <OperationalPageShell className="kioskPageShell">
@@ -6611,21 +7204,11 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
           </div>
           <div className="filterField">
             <label>Divisi</label>
-            <select className="uiSelectTrigger" value={divisionFilter} onChange={(event) => setDivisionFilter(event.target.value)}>
-              <option value="all">Semua Divisi</option>
-              {divisions.map((division) => (
-                <option value={division.id} key={division.id}>{division.name}</option>
-              ))}
-            </select>
+            <FoundationSelect label="Filter divisi karyawan" value={divisionFilter} options={divisionFilterOptions} searchable onChange={setDivisionFilter} />
           </div>
           <div className="filterField">
             <label>Status</label>
-            <select className="uiSelectTrigger" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-              <option value="all">Semua Status</option>
-              <option value="active">Aktif</option>
-              <option value="review">Review</option>
-              <option value="inactive">Nonaktif</option>
-            </select>
+            <FoundationSelect label="Filter status karyawan" value={statusFilter} options={statusFilterOptions} onChange={(value) => setStatusFilter(value as EmployeeStatus | "all")} />
           </div>
           <button className="secondaryButton" type="button" onClick={resetFilters}>Reset Filter</button>
         </OperationalFilterPanel>
@@ -6634,10 +7217,14 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
           <div className="tableHeader">
             <div>
               <h2>Employee Directory</h2>
-              <p>Klik baris untuk melihat detail karyawan. Aksi cepat tersedia di titik tiga.</p>
+              <p>Klik foto atau nama karyawan untuk melihat detail. Aksi cepat tersedia di titik tiga.</p>
             </div>
           </div>
-          <div className="tableScroller uiDataTableScroller uiDataTableHasColumns employeeTableScroller">
+          <div
+            ref={employeeTableDrag.ref}
+            className={clsx("tableScroller uiDataTableScroller uiDataTableHasColumns employeeTableScroller", employeeTableDrag.dragging && "dragging")}
+            {...employeeTableDrag.handlers}
+          >
             <table>
               <colgroup>
                 <col className="tableNumberColumn" />
@@ -6647,6 +7234,7 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
                 <col style={{ width: "16%" }} />
                 <col style={{ width: "13%" }} />
                 <col style={{ width: "10%" }} />
+                <col style={{ width: "12%" }} />
                 <col style={{ width: "9%" }} />
                 <col className="tableActionColumn" />
               </colgroup>
@@ -6659,6 +7247,7 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
                   <th>Lokasi / Shift</th>
                   <th>Gaji</th>
                   <th>Cycle</th>
+                  <th>Biofinger</th>
                   <th>Status</th>
                   <th className="tableActionHeader">Aksi</th>
                 </tr>
@@ -6666,21 +7255,21 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
               <tbody>
                 {loading && (
                   <tr>
-                    <td className="tableStateCell" colSpan={9}>
+                    <td className="tableStateCell" colSpan={10}>
                       <TableState title="Memuat karyawan" description="Mengambil direktori karyawan dari Supabase." icon={UsersRound} />
                     </td>
                   </tr>
                 )}
                 {!loading && errorMessage && rows.length === 0 && (
                   <tr>
-                    <td className="tableStateCell" colSpan={9}>
+                    <td className="tableStateCell" colSpan={10}>
                       <TableState title="Gagal memuat data" description={errorMessage} icon={AlertTriangle} tone="danger" />
                     </td>
                   </tr>
                 )}
                 {!loading && !errorMessage && filteredRows.length === 0 && (
                   <tr>
-                    <td className="tableStateCell" colSpan={9}>
+                    <td className="tableStateCell" colSpan={10}>
                       <TableState
                         title={activeTab === "archived" ? "Arsip karyawan kosong" : "Karyawan tidak ditemukan"}
                         description={activeTab === "archived" ? "Karyawan yang diarsipkan akan muncul di tab ini dan bisa dipulihkan." : "Ubah filter atau tambah karyawan baru."}
@@ -6693,7 +7282,7 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
                   <ClickableTableRow key={row.id} label={`Lihat detail ${row.fullName}`} onOpen={() => setDetailRow(row)}>
                     <td className="tableNumberCell"><TableNumberCell value={(currentPage - 1) * Math.min(pageSize, 50) + index + 1} /></td>
                     <td>
-                      <EmployeeIdentityCell fullName={row.fullName} code={row.employeeCode} photoUrl={row.photoUrl} />
+                      <EmployeeIdentityCell fullName={row.fullName} code={row.employeeCode} photoUrl={row.photoUrl} onOpen={() => setDetailRow(row)} />
                     </td>
                     <td><TableText primary={row.divisionName} secondary={row.nik || "NIK belum diisi"} /></td>
                     <td><TableText primary={row.positionName} secondary={row.phone || "No HP belum diisi"} /></td>
@@ -6705,6 +7294,7 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
                         <span>{row.payrollCycleDays}/26</span>
                       </span>
                     </td>
+                    <td><EmployeeBiofingerCell row={row} /></td>
                     <td><EmployeeStatusBadge status={row.status} /></td>
                     <td className="tableActionCell">
                       <div className="rowActions">
@@ -7201,6 +7791,7 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
   const [activeBiofingerTab, setActiveBiofingerTab] = useState<BiofingerWorkspaceTab>(() => biofingerActiveTabCache)
   const [statusFilter, setStatusFilter] = useState<"all" | BiofingerLinkStatus>(() => biofingerStatusFilterCache)
   const [searchTerm, setSearchTerm] = useState(() => biofingerSearchTermCache)
+  const [mappingSort, setMappingSort] = useState<BiofingerMappingSort>(() => biofingerMappingSortCache)
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(() => biofingerPageSizeCache)
   const [editingDeviceId, setEditingDeviceId] = useState("")
@@ -7211,6 +7802,7 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
   const [deviceFormValues, setDeviceFormValues] = useState<BiofingerDeviceFormValues>(() => createEmptyBiofingerDeviceForm())
   const [loading, setLoading] = useState(() => !biofingerDataCache)
   const [converting, setConverting] = useState(false)
+  const [syncingUsers, setSyncingUsers] = useState(false)
   const [convertConfirmOpen, setConvertConfirmOpen] = useState(false)
   const [savingId, setSavingId] = useState("")
   const [savingDeviceId, setSavingDeviceId] = useState("")
@@ -7271,12 +7863,16 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
   }, [searchTerm])
 
   useEffect(() => {
+    biofingerMappingSortCache = mappingSort
+  }, [mappingSort])
+
+  useEffect(() => {
     biofingerPageSizeCache = pageSize
   }, [pageSize])
 
   useEffect(() => {
     setCurrentPage(1)
-  }, [searchTerm, selectedDeviceId, statusFilter, pageSize])
+  }, [searchTerm, selectedDeviceId, statusFilter, mappingSort, pageSize])
 
   const biofingerDataLoading = loading && !biofingerDataCache
   const biofingerDataValue = (value: ReactNode, className?: string) => biofingerDataLoading ? <FoundationSkeleton className={className} /> : value
@@ -7292,7 +7888,7 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
     ? data.links.find((row) => row.id !== mappingDetailRow.id && row.employeeId === mappingDraftEmployeeId && row.status === "active") || null
     : null
   const deviceLinks = !isAllDeviceSelected ? data.links.filter((row) => row.attendanceDeviceId === selectedDeviceId) : data.links
-  const filteredLinks = deviceLinks.filter((row) => {
+  const filteredLinks = sortBiofingerLinks(deviceLinks.filter((row) => {
     const matchesStatus = statusFilter === "all" || row.status === statusFilter
     const searchableText = [
       row.externalUserId,
@@ -7303,7 +7899,7 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
     ].join(" ").toLowerCase()
 
     return matchesStatus && (!normalizedTerm || searchableText.includes(normalizedTerm))
-  })
+  }), mappingSort)
   const safePageSize = Math.min(50, Math.max(1, pageSize))
   const pageCount = Math.max(1, Math.ceil(filteredLinks.length / safePageSize))
   const safeCurrentPage = Math.min(Math.max(1, currentPage), pageCount)
@@ -7313,6 +7909,16 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
   const selectedEventSummary = isAllDeviceSelected
     ? totalEventSummary
     : data.eventSummary.find((summary) => summary.attendanceDeviceId === selectedDeviceId) || createEmptyBiofingerEventSummary(selectedDeviceId)
+  const scopedDevicesForUserSync = selectedDevice ? [selectedDevice] : data.devices
+  const scopedUserSyncCommands = selectedDevice
+    ? data.commands.filter((command) => command.attendanceDeviceId === selectedDevice.id)
+    : data.commands
+  const userSyncStatus = getLatestBiofingerUserSyncStatus(scopedDevicesForUserSync, scopedUserSyncCommands)
+  const userSyncDetail = data.commandLoadError && userSyncStatus.source === "none"
+    ? data.commandLoadError
+    : userSyncStatus.updatedAt
+      ? `${userSyncStatus.detail} / ${formatUserDateTime(userSyncStatus.updatedAt, "-")}`
+      : userSyncStatus.detail
   const convertScopeLabel = selectedDevice ? selectedDevice.name : "Semua device Biofinger"
   const mappingDetailEvents = mappingDetailRow
     ? data.events.filter((event) => event.attendanceDeviceId === mappingDetailRow.attendanceDeviceId && event.externalUserId === mappingDetailRow.externalUserId).slice(0, 6)
@@ -7397,6 +8003,11 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
     { value: "ignored", label: "Ignored", searchLabel: "ignored diabaikan" },
     { value: "inactive", label: "Inactive", searchLabel: "inactive nonaktif" },
   ]
+  const mappingSortOptions: Array<{ value: BiofingerMappingSort; label: string; searchLabel: string }> = [
+    { value: "user_id_desc", label: "User ID Tertinggi", searchLabel: "user id tertinggi" },
+    { value: "latest", label: "Terbaru dari Mesin", searchLabel: "terbaru dari mesin" },
+    { value: "user_id_asc", label: "User ID Terendah", searchLabel: "user id terendah" },
+  ]
   const employeeOptions = [
     { value: "", label: "Pilih karyawan DMS", searchLabel: "pilih karyawan dms" },
     ...data.employees.map((employee) => ({
@@ -7430,6 +8041,7 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
     setSearchTerm("")
     setStatusFilter("all")
     setSelectedDeviceId(BIOFINGER_ALL_DEVICES)
+    setMappingSort("user_id_desc")
   }
 
   const openCreateDeviceDialog = () => {
@@ -7656,6 +8268,31 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
     }
   }
 
+  const handleRequestUserSync = async () => {
+    setSyncingUsers(true)
+    try {
+      const result = await requestBiofingerUserSync(selectedDeviceId, data.devices)
+      const createdText = `${formatNumber(result.commandsCreated)} request`
+      const skippedText = result.commandsSkipped > 0 ? `, ${formatNumber(result.commandsSkipped)} masih menunggu` : ""
+      showToast({
+        tone: "success",
+        title: result.fallback ? "Request sync dicatat" : "Sync user mesin diminta",
+        description: result.fallback
+          ? `${createdText}${skippedText}. Receiver VPS harus versi baru agar request metadata ini dikirim ke mesin.`
+          : `${createdText}${skippedText}. Tunggu mesin polling ADMS, lalu Refresh Data beberapa saat lagi.`,
+      })
+      await refreshData()
+    } catch (error) {
+      showToast({
+        tone: "error",
+        title: "Gagal minta sync user",
+        description: getFriendlySupabaseError(error, "Receiver belum bisa diberi command sync user."),
+      })
+    } finally {
+      setSyncingUsers(false)
+    }
+  }
+
   return (
     <OperationalPageShell>
       <PageHeader
@@ -7663,11 +8300,15 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
         subtitle="Mapping user fingerprint AT-301 ke master karyawan DMS sebelum raw event dikonversi ke absensi payroll."
         actions={
           <>
+            <button className="secondaryButton" type="button" disabled={!canManage || biofingerDataLoading || loading || converting || syncingUsers || !data.schemaReady || data.devices.length === 0} onClick={() => void handleRequestUserSync()}>
+              <Download size={17} />
+              {syncingUsers ? "Meminta Sync..." : "Sync User Mesin"}
+            </button>
             <button className="primaryButton" type="button" disabled={!canManage || biofingerDataLoading || converting || !data.schemaReady || (!eventSummaryIsFallback && mappedReadyEvents <= 0)} onClick={() => setConvertConfirmOpen(true)}>
               <FileCheck2 size={17} />
               {converting ? "Memproses..." : "Proses Absensi"}
             </button>
-            <FoundationRefreshButton loading={loading} disabled={converting} onClick={() => void refreshData()} />
+            <FoundationRefreshButton loading={loading} disabled={converting || syncingUsers} onClick={() => void refreshData()} />
           </>
         }
         meta={
@@ -7745,6 +8386,12 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
                 <span>Raw Event</span>
                 <strong>{biofingerDataValue(`${formatNumber(scopedRawEvents)} log`, "scopeValue short")}</strong>
               </div>
+              <div>
+                <span>User Sync</span>
+                <strong className="biofingerUserSyncScopeValue">
+                  {biofingerDataLoading ? <FoundationSkeleton className="scopeValue short" /> : <BiofingerUserSyncStatusText summary={userSyncStatus} />}
+                </strong>
+              </div>
             </div>
             {selectedDevice && (
               <button className="secondaryButton" type="button" disabled={!canManage} onClick={() => openDeviceDialog(selectedDevice)}>
@@ -7769,6 +8416,7 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
                 <div>
                   <h2>Sync Pipeline</h2>
                   <p>{biofingerDataLoading ? "Menunggu data sinkronisasi dari Supabase." : selectedDevice ? `${selectedDevice.name} / ${formatBiofingerConnection(selectedDevice)} / last sync ${formatUserDateTime(selectedDevice.lastSyncAt, "Belum sync")}` : `${formatNumber(data.devices.length)} device / sample terakhir / last sync mengikuti masing-masing device.`}</p>
+                  {!biofingerDataLoading && <small className="biofingerCommandHint">User sync: {userSyncDetail}</small>}
                 </div>
                 <InlinePageStats items={biofingerDataLoading ? biofingerInlineLoadingStats(3) : [`${formatNumber(mappedReadyEvents)} siap proses`, `${formatNumber(convertedEvents)} converted`, `${formatNumber(data.events.length)} sample tampil`]} />
               </div>
@@ -7893,6 +8541,16 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
                     onChange={(nextValue) => setStatusFilter(nextValue as typeof statusFilter)}
                   />
                 </div>
+                <div className="filterField">
+                  <label>Urutan</label>
+                  <FoundationSelect
+                    label="Urutan mapping Biofinger"
+                    value={mappingSort}
+                    options={mappingSortOptions}
+                    searchable={false}
+                    onChange={(nextValue) => setMappingSort(nextValue as BiofingerMappingSort)}
+                  />
+                </div>
                 <button className="secondaryButton" type="button" onClick={resetFilters}>Reset Filter</button>
               </OperationalFilterPanel>
 
@@ -7945,8 +8603,8 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
                       {!biofingerDataLoading && !errorMessage && paginatedLinks.map((row, index) => (
                         <ClickableTableRow key={row.id} label={`Mapping Biofinger ${row.externalUserId}`} onOpen={() => openMappingDrawer(row)}>
                           <td className="tableNumberCell"><TableNumberCell value={(safeCurrentPage - 1) * safePageSize + index + 1} /></td>
-                          <td><TableText primary={row.externalUserId} secondary={row.externalUid === null ? "UID -" : `UID ${row.externalUid}`} /></td>
-                          <td><TableText primary={row.externalName || "Tanpa nama"} secondary={row.privilege === 14 ? "Admin device" : `Privilege ${row.privilege ?? "-"}`} /></td>
+                          <td><TableText primary={row.externalUserId} secondary={row.externalUid === null ? "UID internal -" : `UID internal ${row.externalUid}`} /></td>
+                          <td><TableText primary={formatBiofingerMachineName(row.externalName)} secondary={getBiofingerMachineNameMeta(row)} /></td>
                           <td>
                             <BiofingerEmployeeMappingChip row={row} disabled={!canManage || savingId === row.id} onClick={() => openMappingDrawer(row)} />
                           </td>
@@ -8167,6 +8825,8 @@ function BiofingerMappingDrawer({
   const hasMappingChange = selectedEmployeeId !== row.employeeId || row.status !== nextStatus
   const replaceWarning = Boolean(row.employeeId && selectedEmployeeId && selectedEmployeeId !== row.employeeId)
   const saveDisabled = !canManage || saving || Boolean(conflictRow) || !hasMappingChange || (!selectedEmployeeId && !row.employeeId)
+  const machineNameSynced = Boolean(row.externalName.trim())
+  const deviceName = device?.name || "Device belum terdaftar"
 
   return (
     <FoundationDialog
@@ -8180,9 +8840,33 @@ function BiofingerMappingDrawer({
         <FoundationDialogCloseButton label="Tutup detail mapping" disabled={saving} onClose={onClose} />
 
         <div className="biofingerDrawerHeader">
-          <span className="dialogEyebrow"><UserRoundCheck size={15} /> Mapping Control</span>
-          <h2 id="biofinger-mapping-title">User ID {row.externalUserId}</h2>
-          <p>{row.externalName || "Tanpa nama di mesin"} / {device?.name || "Device belum terdaftar"}</p>
+          <div className="biofingerDrawerHero">
+            <span className="biofingerDrawerHeroIcon"><UserRoundCheck size={18} /></span>
+            <div>
+              <span className="dialogEyebrow">Mapping Control</span>
+              <h2 id="biofinger-mapping-title">User ID {row.externalUserId}</h2>
+              <div className="biofingerDrawerSubline">
+                <span className={clsx("biofingerMachineNameState", machineNameSynced ? "synced" : "pending")}>
+                  {machineNameSynced ? row.externalName : "Nama mesin belum dikirim"}
+                </span>
+                <span>{deviceName}</span>
+              </div>
+            </div>
+          </div>
+          <div className="biofingerDrawerHeaderStats" aria-label="Ringkasan mapping Biofinger">
+            <div>
+              <span>Status</span>
+              <strong><BiofingerLinkStatusText status={row.status} /></strong>
+            </div>
+            <div>
+              <span>Data user</span>
+              <strong>{machineNameSynced ? "Terkirim" : "Belum terkirim"}</strong>
+            </div>
+            <div>
+              <span>Karyawan DMS</span>
+              <strong>{row.employeeId ? row.employeeName || row.employeeCode || "Mapped" : "Belum mapped"}</strong>
+            </div>
+          </div>
         </div>
 
         <div className="biofingerDrawerBody">
@@ -8192,6 +8876,10 @@ function BiofingerMappingDrawer({
               <div>
                 <span>User ID</span>
                 <strong>{row.externalUserId}</strong>
+              </div>
+              <div>
+                <span>Nama mesin</span>
+                <strong>{formatBiofingerMachineName(row.externalName)}</strong>
               </div>
               <div>
                 <span>UID</span>
@@ -8204,6 +8892,10 @@ function BiofingerMappingDrawer({
               <div>
                 <span>Status</span>
                 <BiofingerLinkStatusText status={row.status} />
+              </div>
+              <div>
+                <span>Data user</span>
+                <strong>{machineNameSynced ? "Terkirim" : "Belum terkirim"}</strong>
               </div>
             </div>
           </section>
@@ -8502,6 +9194,16 @@ function BiofingerDeviceGuideDrawer({
       title: "Arahkan cloud server AT-301",
       text: "Di mesin buka COMM. Settings > Pengaturan Server cloud, gunakan Server Mode ADMS, HTTPS Off, Proxy Off, alamat server dan port receiver DMS.",
       meta: "Mesin harus punya internet via LAN atau WiFi.",
+    },
+    {
+      title: "Scan user baru sekali",
+      text: "Setelah user atau fingerprint dibuat di mesin, lakukan scan jari satu kali supaya mesin mengirim User ID ke receiver.",
+      meta: "User baru akan muncul Pending di Mapping User setelah Refresh Data.",
+    },
+    {
+      title: "Tarik data nama user",
+      text: "Jika Nama di Mesin masih Belum dikirim mesin, klik Sync User Mesin dari halaman Biofinger untuk meminta USERINFO lewat ADMS.",
+      meta: "Tergantung dukungan firmware AT-301.",
     },
     {
       title: "Validasi device online",
@@ -9228,6 +9930,22 @@ function EmployeeDetailDialog({
     { label: "QR / barcode", value: row.qrToken || "Belum dibuat" },
     { label: "RFID", value: row.rfidUid || "Belum terdaftar" },
   ]
+  const primaryBiofingerLink = getPrimaryEmployeeBiofingerLink(row)
+  const biofingerRows = primaryBiofingerLink ? [
+    { label: "Status mapping", value: employeeBiofingerStatusLabel[primaryBiofingerLink.status] },
+    { label: "User ID mesin", value: primaryBiofingerLink.externalUserId || "Belum ada" },
+    { label: "Nama di mesin", value: formatBiofingerMachineName(primaryBiofingerLink.externalName) },
+    { label: "Device", value: primaryBiofingerLink.deviceName || primaryBiofingerLink.deviceCode || "Biofinger" },
+    { label: "Serial device", value: primaryBiofingerLink.deviceSerialNumber || "Belum ada" },
+    { label: "Last seen", value: formatUserDateTime(primaryBiofingerLink.lastSeenAt, "-") },
+    { label: "Last sync", value: formatUserDateTime(primaryBiofingerLink.lastSyncedAt, "-") },
+    { label: "Total mapping", value: `${row.biofingerLinks.length} user/device` },
+  ] : [
+    { label: "Status mapping", value: "Belum mapped" },
+    { label: "User ID mesin", value: "Belum terhubung" },
+    { label: "Device", value: "Mapping di modul Biofinger" },
+    { label: "Last sync", value: "-" },
+  ]
 
   return createPortal(
     <div className="dialogBackdrop employeeDialogBackdrop" role="presentation" onMouseDown={onClose}>
@@ -9260,7 +9978,7 @@ function EmployeeDetailDialog({
             <p>
               <strong>{row.fullName}</strong> adalah karyawan {row.positionName} di divisi {row.divisionName},
               ditempatkan di {row.workLocationName} untuk shift {row.shiftName}. Data ini menjadi acuan absensi
-              lapangan, radius GPS, face verification, dan perhitungan payroll.
+              lapangan, Biofinger, radius GPS, face verification, dan perhitungan payroll.
             </p>
           </section>
 
@@ -9305,6 +10023,18 @@ function EmployeeDetailDialog({
               <h3>Akses Kiosk</h3>
               <div className="employeeDetailList compact employeeKioskDetailList">
                 {kioskRows.map((field) => (
+                  <div className="employeeDetailLine" key={field.label}>
+                    <span>{field.label}</span>
+                    <strong>{field.value}</strong>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="employeeDetailSection wide">
+              <h3>Biofinger</h3>
+              <div className="employeeDetailList compact employeeBiofingerDetailList">
+                {biofingerRows.map((field) => (
                   <div className="employeeDetailLine" key={field.label}>
                     <span>{field.label}</span>
                     <strong>{field.value}</strong>
@@ -11956,7 +12686,7 @@ function MasterDataDialog({
 }
 
 function DashboardPage({ activeView }: { activeView: ViewId }) {
-  const [data, setData] = useState<OperationsFoundationData>({ rows: [], allRows: [], locations: [], reviews: [], overtime: [] })
+  const [data, setData] = useState<OperationsFoundationData>({ rows: [], allRows: [], locations: [], fieldReadiness: [], reviews: [], overtime: [] })
   const [loading, setLoading] = useState(true)
   const [errorMessage, setErrorMessage] = useState("")
 
@@ -12200,6 +12930,8 @@ function AttendanceMonitorDetailDialog({
       status: logStatusLabel[row.checkInStatus],
       gps: row.checkInDistanceM === null ? gpsLogLabel[row.checkInGpsStatus] : `${gpsLogLabel[row.checkInGpsStatus]} · ${row.checkInDistanceM}m / ${row.radiusM || "-"}m`,
       face: row.checkInFaceScore === null ? faceLogLabel[row.checkInFaceStatus] : `${row.checkInFaceScore}% · ${faceLogLabel[row.checkInFaceStatus]}`,
+      source: row.checkInSource,
+      media: row.checkInMedia,
       notes: row.checkInNotes,
       tone: row.checkInStatus === "valid" ? "valid" : row.checkInStatus === "rejected" ? "failed" : row.checkInStatus === "missing" ? "missing" : "pending",
     },
@@ -12209,6 +12941,8 @@ function AttendanceMonitorDetailDialog({
       status: logStatusLabel[row.checkOutStatus],
       gps: row.checkOutDistanceM === null ? gpsLogLabel[row.checkOutGpsStatus] : `${gpsLogLabel[row.checkOutGpsStatus]} · ${row.checkOutDistanceM}m / ${row.radiusM || "-"}m`,
       face: row.checkOutFaceScore === null ? faceLogLabel[row.checkOutFaceStatus] : `${row.checkOutFaceScore}% · ${faceLogLabel[row.checkOutFaceStatus]}`,
+      source: row.checkOutSource,
+      media: row.checkOutMedia,
       notes: row.checkOutNotes,
       tone: row.checkOutStatus === "valid" ? "valid" : row.checkOutStatus === "rejected" ? "failed" : row.checkOutStatus === "missing" ? "missing" : "pending",
     },
@@ -12217,6 +12951,8 @@ function AttendanceMonitorDetailDialog({
     { label: "Karyawan", value: `${row.employeeCode} · ${row.divisionName || "-"}` },
     { label: "Lokasi kerja", value: `${row.workLocationName || "-"} · radius ${row.radiusM || "-"}m` },
     { label: "Jam kerja real", value: row.workDurationLabel },
+    { label: "Sumber check-in", value: row.checkInId ? formatAttendanceSourceMeta(row.checkInSource, row.checkInMedia) : "Belum masuk" },
+    { label: "Sumber check-out", value: row.checkOutId ? formatAttendanceSourceMeta(row.checkOutSource, row.checkOutMedia) : "Belum pulang" },
     { label: "Payroll cycle", value: row.payrollCycleNumber ? `Cycle ${row.payrollCycleNumber} · ${row.cycleDays}/${row.targetDays} hari` : `${row.cycleDays}/${row.targetDays} hari` },
     { label: "Periode", value: formatPayrollPeriod(row) },
     { label: "Tipe gaji", value: `${employeeSalaryTypeLabel[row.salaryType]} · ${row.basePayrollAmount ? formatCurrency(row.basePayrollAmount) : "-"}` },
@@ -12265,6 +13001,7 @@ function AttendanceMonitorDetailDialog({
                   </div>
                   <p><LocateFixed size={15} />{event.gps}</p>
                   <p><ScanFace size={15} />{event.face}</p>
+                  {(event.source || event.media) && <AttendanceSourceTag source={event.source} media={event.media} />}
                   {event.notes && <em>{event.notes}</em>}
                 </div>
               ))}
@@ -12617,7 +13354,19 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
       || attendanceDateMode === "all"
       || (row.attendanceDate >= attendanceDateRange.start && row.attendanceDate <= attendanceDateRange.end)
     const matchesSearch = normalizedSearch
-      ? [row.employeeCode, row.fullName, row.divisionName, row.workLocationName, row.logStatus, row.gpsStatus, row.faceStatus].join(" ").toLowerCase().includes(normalizedSearch)
+      ? [
+          row.employeeCode,
+          row.fullName,
+          row.divisionName,
+          row.workLocationName,
+          row.logStatus,
+          row.gpsStatus,
+          row.faceStatus,
+          row.checkInSource,
+          row.checkInMedia,
+          row.checkOutSource,
+          row.checkOutMedia,
+        ].join(" ").toLowerCase().includes(normalizedSearch)
       : true
     const matchesStatus = statusFilter === "all"
       || row.attendanceStatus === statusFilter

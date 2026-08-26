@@ -87,26 +87,33 @@ export function FoundationSelect({
   useEffect(() => {
     if (!open) return
 
+    const isSelectTarget = (target: EventTarget | null) => {
+      if (!(target instanceof Node)) return false
+      return Boolean(buttonRef.current?.contains(target) || menuRef.current?.contains(target))
+    }
+
     const handlePointerDown = (event: PointerEvent) => {
-      const target = event.target
-      if (!(target instanceof Node)) return
-      if (buttonRef.current?.contains(target) || menuRef.current?.contains(target)) return
+      if (isSelectTarget(event.target)) return
       setOpen(false)
     }
     const close = () => setOpen(false)
+    const handleScroll = (event: Event) => {
+      if (isSelectTarget(event.target)) return
+      syncPosition()
+    }
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") close()
     }
 
     window.addEventListener("pointerdown", handlePointerDown)
     window.addEventListener("resize", close)
-    window.addEventListener("scroll", close, true)
+    window.addEventListener("scroll", handleScroll, true)
     window.addEventListener("keydown", handleKeyDown)
 
     return () => {
       window.removeEventListener("pointerdown", handlePointerDown)
       window.removeEventListener("resize", close)
-      window.removeEventListener("scroll", close, true)
+      window.removeEventListener("scroll", handleScroll, true)
       window.removeEventListener("keydown", handleKeyDown)
     }
   }, [open])
@@ -143,7 +150,7 @@ export function FoundationSelect({
         <ChevronDown className="foundationSelectChevron" size={17} />
       </button>
       {open && createPortal(
-        <div ref={menuRef} className="foundationSelectMenu" style={position} data-row-action="true">
+        <div ref={menuRef} className="foundationSelectMenu" style={position} data-row-action="true" onWheel={(event) => event.stopPropagation()}>
           {enableSearch && (
             <label className="foundationSelectSearch">
               <Search size={15} />

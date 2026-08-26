@@ -10,6 +10,11 @@ const DEFAULT_DEVICE_PORT = 4370;
 const DEFAULT_COMMAND_RESPONSE = "OK\n";
 const REGISTRY_ALLOWLIST_CACHE_MS = 60_000;
 const DEFAULT_CONVERSION_BATCH_SIZE = 1000;
+const DEFAULT_COMMAND_BATCH_SIZE = 3;
+const DEFAULT_COMMAND_RETRY_MS = 120_000;
+const DEFAULT_USER_SYNC_PIN = "ALL";
+const DEFAULT_USER_SYNC_COMMAND_TEMPLATE = "C:{id}:DATA QUERY USERINFO";
+const RECEIVER_VERSION = "2026-08-26-user-sync-v1";
 
 const env = process.env;
 
@@ -26,6 +31,10 @@ const config = {
   receiverToken: env.BIOFINGER_RECEIVER_TOKEN || "",
   convertOnImport: ["1", "true", "yes", "on"].includes(String(env.BIOFINGER_CONVERT_ON_IMPORT || "false").trim().toLowerCase()),
   conversionBatchSize: toInteger(env.BIOFINGER_CONVERSION_BATCH_SIZE, DEFAULT_CONVERSION_BATCH_SIZE),
+  commandBatchSize: toInteger(env.BIOFINGER_ADMS_COMMAND_BATCH_SIZE, DEFAULT_COMMAND_BATCH_SIZE),
+  commandRetryMs: toInteger(env.BIOFINGER_ADMS_COMMAND_RETRY_MS, DEFAULT_COMMAND_RETRY_MS),
+  userSyncPin: env.BIOFINGER_USER_SYNC_PIN || DEFAULT_USER_SYNC_PIN,
+  userSyncCommandTemplate: env.BIOFINGER_USER_SYNC_COMMAND_TEMPLATE || DEFAULT_USER_SYNC_COMMAND_TEMPLATE,
   dryRun: parseBoolean(env.BIOFINGER_RECEIVER_DRY_RUN),
   logPayload: parseBoolean(env.BIOFINGER_RECEIVER_LOG_PAYLOAD),
   supabaseUrl: env.SUPABASE_URL || env.VITE_SUPABASE_URL || "",
@@ -38,6 +47,8 @@ const supabase = config.dryRun
 
 const requestLogPrefix = () => new Date().toISOString();
 const registrySerialCache = new Map();
+let commandQueueTableAvailable = true;
+let commandQueueMissingLogged = false;
 
 function parseCsv(value) {
   return String(value || "")
@@ -333,6 +344,10 @@ function parsePayloadLines(body) {
     .filter(Boolean);
 }
 
+function isUserOperlogLine(line) {
+  return /^USER\s+/i.test(String(line || "").trim());
+}
+
 function buildDeviceCode(serialNumber) {
   if (config.deviceCode && (!config.allowedSerials.length || config.allowedSerials.includes(serialNumber))) {
     return config.deviceCode;
@@ -352,6 +367,7 @@ async function ensureDevice({ serialNumber, remoteIp }) {
       device_code: buildDeviceCode(serialNumber),
       serial_number: serialNumber,
       sync_cursor_at: null,
+      metadata: {},
     };
   }
 
@@ -385,7 +401,7 @@ async function ensureDevice({ serialNumber, remoteIp }) {
         },
       })
       .eq("id", existingDevice.id)
-      .select("id, device_code, serial_number, sync_cursor_at")
+      .select("id, device_code, serial_number, sync_cursor_at, metadata")
       .single();
 
     if (error) throw error;
@@ -408,11 +424,409 @@ async function ensureDevice({ serialNumber, remoteIp }) {
       metadata,
       notes: "Auto-registered by DMS Biofinger ADMS receiver.",
     })
-    .select("id, device_code, serial_number, sync_cursor_at")
+    .select("id, device_code, serial_number, sync_cursor_at, metadata")
     .single();
 
   if (error) throw error;
   return data;
+}
+
+function isPlainObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value);
+}
+
+function isMissingCommandQueueError(error) {
+  const message = String(error?.message || error || "").toLowerCase();
+  return error?.code === "42P01"
+    || error?.code === "PGRST205"
+    || message.includes("biofinger_device_commands")
+    || message.includes("does not exist")
+    || message.includes("schema cache");
+}
+
+function noteCommandQueueError(error) {
+  if (!isMissingCommandQueueError(error)) return false;
+
+  commandQueueTableAvailable = false;
+  if (!commandQueueMissingLogged) {
+    console.warn(`${requestLogPrefix()} command queue table unavailable, using attendance_devices.metadata fallback`);
+    commandQueueMissingLogged = true;
+  }
+  return true;
+}
+
+function normalizeAdmsCommandLine(value) {
+  return String(value || "").replace(/\r?\n/g, " ").trim();
+}
+
+function buildUserSyncCommandLine({ requestId, pin }) {
+  const commandPin = String(pin || config.userSyncPin || DEFAULT_USER_SYNC_PIN).trim() || DEFAULT_USER_SYNC_PIN;
+  return normalizeAdmsCommandLine(
+    config.userSyncCommandTemplate
+      .replace(/\{id\}/g, String(requestId))
+      .replace(/\{pin\}/g, commandPin),
+  );
+}
+
+function getMetadataUserSyncRequest(metadata) {
+  if (!isPlainObject(metadata)) return null;
+  const request = metadata.biofinger_user_sync_request;
+  if (!isPlainObject(request)) return null;
+  return request;
+}
+
+async function updateDeviceSyncRequestMetadata({ device, request }) {
+  if (config.dryRun || !supabase) return;
+  const metadata = isPlainObject(device.metadata) ? device.metadata : {};
+  const nextMetadata = {
+    ...metadata,
+    biofinger_user_sync_request: request,
+  };
+
+  const { error } = await supabase
+    .from("attendance_devices")
+    .update({ metadata: nextMetadata })
+    .eq("id", device.id);
+
+  if (error) throw error;
+  device.metadata = nextMetadata;
+}
+
+async function claimMetadataUserSyncCommand(device) {
+  const request = getMetadataUserSyncRequest(device.metadata);
+  if (!request) return null;
+
+  const status = String(request.status || "");
+  if (!["pending", "retry"].includes(status)) return null;
+
+  const expiresAt = request.expires_at ? Date.parse(String(request.expires_at)) : null;
+  if (expiresAt && Number.isFinite(expiresAt) && expiresAt < Date.now()) {
+    await updateDeviceSyncRequestMetadata({
+      device,
+      request: {
+        ...request,
+        status: "expired",
+        last_error: "Request expired before device poll.",
+        responded_at: new Date().toISOString(),
+      },
+    });
+    return null;
+  }
+
+  const attempts = toInteger(request.attempts, 0);
+  const maxAttempts = toInteger(request.max_attempts, 3);
+  if (attempts >= maxAttempts) {
+    await updateDeviceSyncRequestMetadata({
+      device,
+      request: {
+        ...request,
+        status: "failed",
+        last_error: "Max attempts reached before device acknowledged request.",
+        responded_at: new Date().toISOString(),
+      },
+    });
+    return null;
+  }
+
+  const requestId = toInteger(request.request_id, null) || (Date.now() % 2_147_483_647);
+  const commandText = buildUserSyncCommandLine({ requestId, pin: request.pin });
+  await updateDeviceSyncRequestMetadata({
+    device,
+    request: {
+      ...request,
+      status: "sent",
+      request_id: requestId,
+      command_text: commandText,
+      attempts: attempts + 1,
+      sent_at: new Date().toISOString(),
+      last_error: null,
+    },
+  });
+
+  return {
+    source: "metadata",
+    requestId,
+    commandText,
+  };
+}
+
+async function resetStaleCommandQueueRows(deviceId) {
+  if (config.dryRun || !supabase || !commandQueueTableAvailable) return;
+
+  const cutoffIso = new Date(Date.now() - Math.max(config.commandRetryMs || DEFAULT_COMMAND_RETRY_MS, 30_000)).toISOString();
+  const { data, error } = await supabase
+    .from("biofinger_device_commands")
+    .select("id, attempts, max_attempts")
+    .eq("attendance_device_id", deviceId)
+    .eq("status", "sent")
+    .lt("sent_at", cutoffIso)
+    .limit(25);
+
+  if (error) {
+    if (noteCommandQueueError(error)) return;
+    throw error;
+  }
+
+  const retryIds = [];
+  const failedIds = [];
+  for (const row of data || []) {
+    const attempts = toInteger(row.attempts, 0);
+    const maxAttempts = toInteger(row.max_attempts, 3);
+    if (attempts < maxAttempts) retryIds.push(row.id);
+    else failedIds.push(row.id);
+  }
+
+  if (retryIds.length) {
+    const { error: retryError } = await supabase
+      .from("biofinger_device_commands")
+      .update({ status: "pending", last_error: "Retry after device did not acknowledge command." })
+      .in("id", retryIds);
+    if (retryError) throw retryError;
+  }
+
+  if (failedIds.length) {
+    const { error: failedError } = await supabase
+      .from("biofinger_device_commands")
+      .update({ status: "failed", last_error: "Device did not acknowledge command after max attempts.", responded_at: new Date().toISOString() })
+      .in("id", failedIds);
+    if (failedError) throw failedError;
+  }
+}
+
+async function claimCommandQueueRows(device) {
+  if (config.dryRun || !supabase || !commandQueueTableAvailable) return [];
+
+  await resetStaleCommandQueueRows(device.id);
+  if (!commandQueueTableAvailable) return [];
+
+  const nowIso = new Date().toISOString();
+  const { error: expireError } = await supabase
+    .from("biofinger_device_commands")
+    .update({ status: "expired", last_error: "Command expired before device poll.", responded_at: nowIso })
+    .eq("attendance_device_id", device.id)
+    .eq("status", "pending")
+    .lt("expires_at", nowIso);
+
+  if (expireError) {
+    if (noteCommandQueueError(expireError)) return [];
+    throw expireError;
+  }
+
+  const { data, error } = await supabase
+    .from("biofinger_device_commands")
+    .select("id, request_no, command_type, command_text, pin, attempts, max_attempts")
+    .eq("attendance_device_id", device.id)
+    .eq("status", "pending")
+    .gt("expires_at", nowIso)
+    .order("requested_at", { ascending: true })
+    .limit(Math.max(1, Math.min(config.commandBatchSize || DEFAULT_COMMAND_BATCH_SIZE, 10)));
+
+  if (error) {
+    if (noteCommandQueueError(error)) return [];
+    throw error;
+  }
+
+  const commands = [];
+  for (const row of data || []) {
+    const attempts = toInteger(row.attempts, 0);
+    const maxAttempts = toInteger(row.max_attempts, 3);
+    if (attempts >= maxAttempts) {
+      const { error: failedError } = await supabase
+        .from("biofinger_device_commands")
+        .update({ status: "failed", last_error: "Max attempts reached before device poll.", responded_at: nowIso })
+        .eq("id", row.id);
+      if (failedError) throw failedError;
+      continue;
+    }
+
+    const requestId = toInteger(row.request_no, null);
+    if (!requestId) continue;
+
+    const commandText = normalizeAdmsCommandLine(row.command_text)
+      || (row.command_type === "sync_users" ? buildUserSyncCommandLine({ requestId, pin: row.pin }) : "");
+    if (!commandText) continue;
+
+    const { error: updateError } = await supabase
+      .from("biofinger_device_commands")
+      .update({
+        status: "sent",
+        command_text: commandText,
+        attempts: attempts + 1,
+        sent_at: nowIso,
+        last_error: null,
+      })
+      .eq("id", row.id);
+
+    if (updateError) throw updateError;
+
+    commands.push({
+      source: "queue",
+      id: row.id,
+      requestId,
+      commandText,
+    });
+  }
+
+  return commands;
+}
+
+async function claimAdmsCommands(device) {
+  const queueCommands = await claimCommandQueueRows(device);
+  const metadataCommand = await claimMetadataUserSyncCommand(device);
+  return metadataCommand ? [...queueCommands, metadataCommand] : queueCommands;
+}
+
+function parseDeviceCommandResult(body, url) {
+  const values = {};
+  for (const [key, value] of url.searchParams.entries()) {
+    values[key.toLowerCase()] = value;
+  }
+
+  const bodyText = String(body || "").trim();
+  if (bodyText) {
+    for (const part of bodyText.split(/[&\r\n]+/)) {
+      const index = part.indexOf("=");
+      if (index <= 0) continue;
+      const key = part.slice(0, index).trim().toLowerCase();
+      const rawValue = part.slice(index + 1).trim();
+      try {
+        values[key] = decodeURIComponent(rawValue.replace(/\+/g, " "));
+      } catch {
+        values[key] = rawValue;
+      }
+    }
+
+    const looseValues = parseKeyValueLine(bodyText.replace(/[&\r\n]+/g, " "));
+    Object.assign(values, looseValues);
+  }
+
+  return {
+    requestId: toInteger(values.id || values.command_id || values.request_id, null),
+    returnCode: toInteger(values.return || values.ret || values.result, null),
+    command: values.cmd || values.command || "",
+    responseText: bodyText,
+  };
+}
+
+async function markCommandQueueResult({ deviceId, requestId, returnCode, responseText }) {
+  if (config.dryRun || !supabase || !commandQueueTableAvailable || !requestId) return false;
+
+  const { data, error } = await supabase
+    .from("biofinger_device_commands")
+    .select("id, status")
+    .eq("attendance_device_id", deviceId)
+    .eq("request_no", requestId)
+    .order("requested_at", { ascending: false })
+    .limit(1);
+
+  if (error) {
+    if (noteCommandQueueError(error)) return false;
+    throw error;
+  }
+
+  const row = data?.[0];
+  if (!row) return false;
+
+  const status = returnCode === null || returnCode === 0
+    ? row.status === "completed" ? "completed" : "acknowledged"
+    : "failed";
+  const { error: updateError } = await supabase
+    .from("biofinger_device_commands")
+    .update({
+      status,
+      response_code: returnCode,
+      response_text: responseText || null,
+      responded_at: new Date().toISOString(),
+      last_error: status === "failed" ? `Device returned ${returnCode}` : null,
+    })
+    .eq("id", row.id);
+
+  if (updateError) throw updateError;
+  return true;
+}
+
+async function markMetadataUserSyncResult({ device, requestId, returnCode, responseText }) {
+  const request = getMetadataUserSyncRequest(device.metadata);
+  if (!request || !requestId || toInteger(request.request_id, null) !== requestId) return false;
+
+  const status = returnCode === null || returnCode === 0
+    ? String(request.status || "") === "completed" ? "completed" : "acknowledged"
+    : "failed";
+  await updateDeviceSyncRequestMetadata({
+    device,
+    request: {
+      ...request,
+      status,
+      response_code: returnCode,
+      response_text: responseText || null,
+      responded_at: new Date().toISOString(),
+      last_error: status === "failed" ? `Device returned ${returnCode}` : null,
+    },
+  });
+  return true;
+}
+
+async function markDeviceCommandResult({ device, result }) {
+  const queueMarked = await markCommandQueueResult({
+    deviceId: device.id,
+    requestId: result.requestId,
+    returnCode: result.returnCode,
+    responseText: result.responseText,
+  });
+  const metadataMarked = await markMetadataUserSyncResult({
+    device,
+    requestId: result.requestId,
+    returnCode: result.returnCode,
+    responseText: result.responseText,
+  });
+
+  return { queueMarked, metadataMarked };
+}
+
+async function markRecentUserSyncCompleted({ device, usersSeen }) {
+  const completedAt = new Date().toISOString();
+
+  if (!config.dryRun && supabase && commandQueueTableAvailable) {
+    const { data, error } = await supabase
+      .from("biofinger_device_commands")
+      .select("id")
+      .eq("attendance_device_id", device.id)
+      .eq("command_type", "sync_users")
+      .in("status", ["sent", "acknowledged"])
+      .order("sent_at", { ascending: false })
+      .limit(3);
+
+    if (error) {
+      if (!noteCommandQueueError(error)) throw error;
+    } else if (data?.length) {
+      const { error: updateError } = await supabase
+        .from("biofinger_device_commands")
+        .update({
+          status: "completed",
+          response_code: 0,
+          response_text: `USER payload received (${usersSeen} row).`,
+          responded_at: completedAt,
+          last_error: null,
+        })
+        .in("id", data.map((row) => row.id));
+      if (updateError) throw updateError;
+    }
+  }
+
+  const request = getMetadataUserSyncRequest(device.metadata);
+  if (request && ["sent", "acknowledged"].includes(String(request.status || ""))) {
+    await updateDeviceSyncRequestMetadata({
+      device,
+      request: {
+        ...request,
+        status: "completed",
+        response_code: 0,
+        response_text: `USER payload received (${usersSeen} row).`,
+        responded_at: completedAt,
+        last_error: null,
+      },
+    });
+  }
 }
 
 async function upsertPendingUsers({ deviceId, users }) {
@@ -607,6 +1021,14 @@ async function handleIClockRequest(request, response, { url, serialNumber, remot
       return textResponse(response, buildOptionsResponse(serialNumber));
     }
 
+    if (pathname.endsWith("/getrequest")) {
+      const commands = await claimAdmsCommands(device);
+      if (commands.length) {
+        console.log(`${requestLogPrefix()} command serial=${serialNumber || "-"} count=${commands.length} ids=${commands.map((command) => command.requestId).join(",")}`);
+        return textResponse(response, `${commands.map((command) => command.commandText).join("\n")}\n`);
+      }
+    }
+
     console.log(`${requestLogPrefix()} poll serial=${serialNumber || "-"} path=${url.pathname}`);
     return textResponse(response);
   }
@@ -624,10 +1046,31 @@ async function handleIClockRequest(request, response, { url, serialNumber, remot
   const device = await ensureDevice({ serialNumber, remoteIp });
   const lines = parsePayloadLines(body);
 
-  if (table === "USER") {
+  if (pathname.endsWith("/devicecmd")) {
+    const result = parseDeviceCommandResult(body, url);
+    const marked = await markDeviceCommandResult({ device, result });
+    console.log(`${requestLogPrefix()} devicecmd serial=${serialNumber || "-"} id=${result.requestId || "-"} return=${result.returnCode ?? "-"} queue=${marked.queueMarked ? "yes" : "no"} metadata=${marked.metadataMarked ? "yes" : "no"}`);
+    return textResponse(response);
+  }
+
+  if (table === "USER" || table === "USERINFO") {
     const users = lines.map(parseUserLine).filter(Boolean);
     const result = await upsertPendingUsers({ deviceId: device.id, users });
-    console.log(`${requestLogPrefix()} user serial=${serialNumber || "-"} seen=${result.seen} created=${result.created}`);
+    await markRecentUserSyncCompleted({ device, usersSeen: result.seen });
+    console.log(`${requestLogPrefix()} user serial=${serialNumber || "-"} table=${table} seen=${result.seen} created=${result.created}`);
+    return textResponse(response);
+  }
+
+  if (table === "OPERLOG") {
+    const userLines = lines.filter(isUserOperlogLine);
+    if (userLines.length) {
+      const users = userLines.map(parseUserLine).filter(Boolean);
+      const result = await upsertPendingUsers({ deviceId: device.id, users });
+      await markRecentUserSyncCompleted({ device, usersSeen: result.seen });
+      console.log(`${requestLogPrefix()} operlog-user serial=${serialNumber || "-"} seen=${result.seen} created=${result.created}`);
+    } else {
+      console.log(`${requestLogPrefix()} ack serial=${serialNumber || "-"} table=${table || "-"} lines=${lines.length}`);
+    }
     return textResponse(response);
   }
 
@@ -654,10 +1097,13 @@ async function handleRequest(request, response) {
     if (url.pathname === "/health" || url.pathname === "/healthz") {
       return jsonResponse(response, {
         ok: true,
+        version: RECEIVER_VERSION,
         dryRun: config.dryRun,
         port: config.port,
         allowedSerials: config.allowedSerials.length,
         registryAllowlist: !config.dryRun,
+        commandQueue: commandQueueTableAvailable ? "available" : "fallback-metadata",
+        commandBatchSize: config.commandBatchSize,
       });
     }
 
@@ -685,6 +1131,8 @@ const server = http.createServer((request, response) => {
 
 server.listen(config.port, config.host, () => {
   console.log(`${requestLogPrefix()} DMS Biofinger ADMS receiver listening on ${config.host}:${config.port}`);
+  console.log(`${requestLogPrefix()} version=${RECEIVER_VERSION}`);
   console.log(`${requestLogPrefix()} dryRun=${config.dryRun} allowedSerials=${config.allowedSerials.join(",") || "*"}`);
   console.log(`${requestLogPrefix()} convertOnImport=${config.convertOnImport} conversionBatchSize=${config.conversionBatchSize}`);
+  console.log(`${requestLogPrefix()} commandBatchSize=${config.commandBatchSize} userSyncTemplate=${config.userSyncCommandTemplate}`);
 });

@@ -1015,7 +1015,7 @@ button {
   height: 100%;
   min-height: var(--biofinger-scope-h);
   min-width: 0;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   overflow: hidden;
   border: 1px solid rgba(148, 163, 184, 0.22);
   border-radius: 14px;
@@ -1488,9 +1488,18 @@ button {
   line-height: 1.4;
 }
 
+.biofingerCommandHint {
+  display: block;
+  margin-top: 6px;
+  color: #738197;
+  font-size: 0.74rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
 .biofingerSyncSteps {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 0;
   overflow: hidden;
   border: 1px solid rgba(15, 23, 42, 0.08);
@@ -1796,6 +1805,64 @@ button {
   color: #be123c;
 }
 
+.biofingerUserSyncScopeValue {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.biofingerUserSyncStatusText {
+  display: inline-flex;
+  max-width: 100%;
+  min-height: 20px;
+  align-items: center;
+  gap: 7px;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 0.76rem;
+  font-weight: 850;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.biofingerUserSyncStatusText::before {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 999px;
+  background: #94a3b8;
+  box-shadow: 0 0 0 3px rgba(100, 116, 139, 0.1);
+  content: "";
+}
+
+.biofingerUserSyncStatusText.pending {
+  color: #b45309;
+}
+
+.biofingerUserSyncStatusText.pending::before {
+  background: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.13);
+}
+
+.biofingerUserSyncStatusText.completed {
+  color: #087f5b;
+}
+
+.biofingerUserSyncStatusText.completed::before {
+  background: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.12);
+}
+
+.biofingerUserSyncStatusText.failed {
+  color: #be123c;
+}
+
+.biofingerUserSyncStatusText.failed::before {
+  background: #f43f5e;
+  box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.12);
+}
+
 .biofingerMappingChip {
   display: grid;
   width: 100%;
@@ -1907,31 +1974,142 @@ button {
 }
 
 .dialogPanel.biofingerMappingDrawer .dialogClose {
+  position: absolute;
   top: 18px;
   right: 18px;
+  z-index: 3;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 999px;
+  color: #526179;
+  background: rgba(248, 251, 255, 0.92);
+  box-shadow: none;
+}
+
+.dialogPanel.biofingerMappingDrawer .dialogClose:hover {
+  color: var(--blue-ink);
+  background: rgba(230, 248, 252, 0.86);
 }
 
 .biofingerDrawerHeader {
+  display: grid;
   flex: 0 0 auto;
-  padding: 28px 30px 20px;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.78fr);
+  align-items: center;
+  gap: 22px;
+  padding: 22px 72px 18px 30px;
   border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  background:
+    radial-gradient(circle at 8% 0%, rgba(34, 174, 202, 0.1), transparent 34%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(247, 251, 255, 0.92));
+}
+
+.biofingerDrawerHero {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+}
+
+.biofingerDrawerHeroIcon {
+  display: grid;
+  width: 46px;
+  height: 46px;
+  place-items: center;
+  border-radius: 16px;
+  color: var(--blue-ink);
+  background: rgba(34, 174, 202, 0.1);
 }
 
 .biofingerDrawerHeader h2 {
-  margin: 9px 38px 0 0;
+  margin: 7px 0 0;
   color: var(--ops-ink);
-  font-size: 1.38rem;
+  font-size: clamp(1.26rem, 1.5vw, 1.48rem);
   font-weight: 880;
   letter-spacing: 0;
   line-height: 1.1;
 }
 
-.biofingerDrawerHeader p {
-  margin: 7px 38px 0 0;
+.biofingerDrawerSubline {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px 10px;
+  margin-top: 8px;
   color: var(--ops-muted);
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   font-weight: 650;
-  line-height: 1.35;
+  line-height: 1.3;
+}
+
+.biofingerDrawerSubline > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.biofingerDrawerSubline > span + span::before {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  margin: 0 10px 2px 0;
+  border-radius: 999px;
+  background: rgba(100, 116, 139, 0.42);
+}
+
+.biofingerMachineNameState {
+  color: #087f5b;
+}
+
+.biofingerMachineNameState.pending {
+  color: #b45309;
+}
+
+.biofingerDrawerHeaderStats {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.biofingerDrawerHeaderStats > div {
+  display: grid;
+  min-width: 0;
+  min-height: 64px;
+  align-content: center;
+  gap: 5px;
+  padding: 12px 14px;
+  border-right: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.biofingerDrawerHeaderStats > div:last-child {
+  border-right: 0;
+}
+
+.biofingerDrawerHeaderStats span {
+  color: #738197;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.biofingerDrawerHeaderStats strong {
+  display: block;
+  min-width: 0;
+  color: var(--ops-ink);
+  font-size: 0.82rem;
+  font-weight: 850;
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .biofingerDrawerBody {
@@ -4308,7 +4486,8 @@ button {
 }
 
 .formField input,
-.formField select {
+.formField select,
+.formField .foundationSelectButton {
   width: 100%;
   min-height: var(--ops-control-h);
   padding: 0 14px;
@@ -4332,18 +4511,22 @@ button {
 }
 
 .formField input:focus,
-.formField select:focus {
+.formField select:focus,
+.formField .foundationSelectButton:focus-visible,
+.formField .foundationSelectButton[aria-expanded="true"] {
   border-color: rgba(34, 174, 202, 0.66);
   box-shadow: 0 0 0 3px rgba(34, 174, 202, 0.12), 0 10px 24px -20px rgba(15, 23, 42, 0.5);
 }
 
 .formField input:hover,
-.formField select:hover {
+.formField select:hover,
+.formField .foundationSelectButton:hover:not(:disabled) {
   border-color: rgba(34, 174, 202, 0.28);
 }
 
 .formField input:disabled,
-.formField select:disabled {
+.formField select:disabled,
+.formField .foundationSelectButton:disabled {
   cursor: not-allowed;
   color: #526179;
   border-color: rgba(15, 23, 42, 0.08);
@@ -7174,6 +7357,60 @@ button {
   color: var(--ops-cyan);
 }
 
+.attendanceSourceTag {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 999px;
+  color: #526179;
+  background: rgba(248, 251, 255, 0.88);
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+.attendanceSourceTag svg {
+  flex: 0 0 auto;
+}
+
+.attendanceSourceTag span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attendanceSourceTag.biofinger {
+  border-color: rgba(34, 174, 202, 0.24);
+  color: #087f98;
+  background: rgba(224, 247, 251, 0.82);
+}
+
+.attendanceSourceTag.field {
+  border-color: rgba(31, 196, 106, 0.22);
+  color: #07835c;
+  background: rgba(232, 252, 240, 0.85);
+}
+
+.attendanceSourceTag.kiosk {
+  border-color: rgba(37, 99, 235, 0.18);
+  color: #1d4ed8;
+  background: rgba(239, 246, 255, 0.88);
+}
+
+.attendanceSourceTag.manual,
+.attendanceSourceTag.seed,
+.attendanceSourceTag.legacy {
+  border-color: rgba(148, 163, 184, 0.2);
+  color: #526179;
+  background: rgba(241, 245, 249, 0.8);
+}
+
 .attendanceDetailList {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -7961,10 +8198,13 @@ button {
 
 .inviteDialog .formField input,
 .inviteDialog .formField select,
+.inviteDialog .formField .foundationSelectButton,
 .masterDataDialog .formField input,
 .masterDataDialog .formField select,
+.masterDataDialog .formField .foundationSelectButton,
 .employeeDialog .formField input,
-.employeeDialog .formField select {
+.employeeDialog .formField select,
+.employeeDialog .formField .foundationSelectButton {
   min-height: 50px;
   border-radius: 18px;
   font-size: 0.88rem;
@@ -8006,6 +8246,69 @@ button {
   align-items: center;
   gap: 11px;
   min-width: 0;
+}
+
+.employeeIdentityButton {
+  display: inline-flex;
+  max-width: 100%;
+  min-width: 0;
+  margin: -6px 0;
+  padding: 6px 10px 6px 6px;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.employeeIdentityButton:hover {
+  background: rgba(34, 174, 202, 0.08);
+}
+
+.employeeIdentityButton:focus-visible {
+  outline: 2px solid rgba(34, 174, 202, 0.34);
+  outline-offset: 2px;
+  background: rgba(34, 174, 202, 0.1);
+}
+
+.employeeBiofingerCell {
+  display: inline-grid;
+  max-width: 100%;
+  min-width: 0;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.employeeBiofingerCell > span:first-child {
+  display: inline-grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 999px;
+  color: #07859d;
+  background: rgba(224, 247, 251, 0.76);
+}
+
+.employeeBiofingerCell.active .tableTextPrimary {
+  color: #047857;
+}
+
+.employeeBiofingerCell.pending .tableTextPrimary {
+  color: #b45309;
+}
+
+.employeeBiofingerCell.ignored .tableTextPrimary,
+.employeeBiofingerCell.inactive .tableTextPrimary,
+.employeeBiofingerCell.empty .tableTextPrimary {
+  color: #64748b;
+}
+
+.employeeBiofingerCell.empty > span:first-child {
+  color: #94a3b8;
+  background: #f1f5f9;
 }
 
 .employeeMiniAvatar {
@@ -8303,8 +8606,21 @@ button {
 }
 
 .employeeTableScroller {
-  --table-min-width: 1180px;
+  --table-min-width: 1500px;
   --table-text-max: 220px;
+  cursor: grab;
+  overflow-x: auto;
+  touch-action: pan-x pan-y;
+}
+
+.employeeTableScroller.dragging {
+  cursor: grabbing;
+  scroll-behavior: auto;
+  user-select: none;
+}
+
+.employeeTableScroller table {
+  min-width: 1500px;
 }
 
 .dialogActions {
@@ -8488,14 +8804,15 @@ button {
 
 .tableScroller {
   width: 100%;
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: auto;
   background: #ffffff;
   cursor: default;
   isolation: isolate;
   overscroll-behavior-x: contain;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
-  touch-action: pan-y;
+  touch-action: pan-x pan-y;
   user-select: auto;
   -webkit-overflow-scrolling: touch;
   -webkit-user-select: auto;
@@ -11174,6 +11491,26 @@ button {
     padding-inline: 18px;
   }
 
+  .biofingerDrawerHeader {
+    grid-template-columns: 1fr;
+    gap: 14px;
+    padding: 22px 58px 16px 18px;
+  }
+
+  .biofingerDrawerHeroIcon {
+    width: 42px;
+    height: 42px;
+  }
+
+  .biofingerDrawerHeaderStats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .biofingerDrawerHeaderStats > div {
+    min-height: 56px;
+    padding: 10px 12px;
+  }
+
   .biofingerDrawerSection:nth-child(3),
   .biofingerDrawerSection:nth-child(4) {
     grid-column: auto;
@@ -12216,10 +12553,13 @@ button {
 
   .inviteDialog .formField input,
   .inviteDialog .formField select,
+  .inviteDialog .formField .foundationSelectButton,
   .masterDataDialog .formField input,
   .masterDataDialog .formField select,
+  .masterDataDialog .formField .foundationSelectButton,
   .employeeDialog .formField input,
-  .employeeDialog .formField select {
+  .employeeDialog .formField select,
+  .employeeDialog .formField .foundationSelectButton {
     min-height: 48px;
     font-size: 0.84rem;
   }
@@ -13693,5 +14033,49 @@ button {
     min-height: 64px;
     font-size: 24px;
     padding: 0 18px;
+  }
+}
+
+@media (max-width: 560px) {
+  .dialogBackdrop.biofingerDrawerBackdrop {
+    padding: 10px;
+  }
+
+  .dialogPanel.biofingerMappingDrawer {
+    width: min(100%, calc(100vw - 20px));
+    max-height: calc(100dvh - 20px);
+    border-radius: 24px 24px 18px 18px;
+  }
+
+  .biofingerDrawerHeader {
+    padding: 20px 52px 15px 16px;
+  }
+
+  .biofingerDrawerHero {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .biofingerDrawerHeroIcon {
+    display: none;
+  }
+
+  .biofingerDrawerHeaderStats {
+    grid-template-columns: 1fr;
+  }
+
+  .biofingerDrawerHeaderStats > div {
+    min-height: 48px;
+    border-right: 0;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+  }
+
+  .biofingerDrawerHeaderStats > div:last-child {
+    border-bottom: 0;
+  }
+
+  .biofingerDrawerActions {
+    gap: 8px;
+    padding: 12px 14px max(14px, env(safe-area-inset-bottom));
   }
 }

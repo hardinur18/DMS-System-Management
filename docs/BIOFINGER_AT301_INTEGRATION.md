@@ -133,7 +133,8 @@ Untuk menambah mesin baru:
    - HTTPS: `Off`
    - Proxy: `Off`
 6. Sambungkan mesin ke LAN/WiFi internet.
-7. Lakukan scan test dan cek `last seen`/raw event di halaman Biofinger.
+7. Setelah user/finger baru dibuat di mesin, lakukan scan jari sekali.
+8. Klik `Refresh Data` dan cek `last seen`, `Mapping User`, serta raw event di halaman Biofinger.
 
 Receiver membaca serial aktif dari Device Registry sebagai allowlist dinamis. Jadi setelah serial tersimpan di DMS, penambahan mesin baru tidak perlu edit env VPS manual kecuali ada kebijakan firewall/IP khusus.
 
@@ -144,10 +145,12 @@ Urutan resmi untuk karyawan baru:
 1. HR/Admin membuat data karyawan di DMS lebih dulu.
 2. DMS menyimpan master karyawan, lokasi kerja, shift, status aktif, dan payroll profile.
 3. HR/Admin membuat user di mesin Biofinger AT-301 dan enroll sidik jari.
-4. User ID dari mesin muncul di menu Biofinger Management App setelah import user device.
-5. HR/Admin mapping User ID mesin ke karyawan DMS.
-6. Mapping dibuat `active` setelah employee yang dipilih sudah benar.
-7. Raw event fingerprint berikutnya bisa diproses ke staging dan kemudian dikonversi ke `attendance_logs`.
+4. Karyawan melakukan scan jari sekali agar User ID terkirim dari mesin ke receiver.
+5. Jika nama dari mesin belum ikut masuk, HR/Admin klik `Sync User Mesin` agar receiver meminta `USERINFO` lewat ADMS `/getrequest`.
+6. User ID dari mesin muncul di menu Biofinger Management App setelah `Refresh Data`.
+7. HR/Admin mapping User ID mesin ke karyawan DMS.
+8. Mapping dibuat `active` setelah employee yang dipilih sudah benar.
+9. Raw event fingerprint berikutnya bisa diproses ke staging dan kemudian dikonversi ke `attendance_logs`.
 
 DMS tetap menjadi sumber data utama. Biofinger hanya alat scan dan sumber raw transaction.
 
@@ -168,6 +171,35 @@ Migration tersebut menambah:
 - Tabel `biofinger_attendance_events`
 - Kolom `attendance_logs.attendance_device_id`
 - Kolom `attendance_logs.biofinger_event_id`
+
+Command queue untuk request data user mesin ada di:
+
+```text
+supabase/migrations/20260826000100_biofinger_user_sync_commands.sql
+```
+
+Migration ini menambah:
+
+- Tabel `biofinger_device_commands`
+- RPC `request_biofinger_user_sync`
+- RLS untuk baca/kelola command berdasarkan permission Biofinger
+
+UI `Sync User Mesin` memanggil RPC tersebut. Receiver kemudian mengirim command default:
+
+```text
+C:{id}:DATA QUERY USERINFO
+```
+
+Jika firmware AT-301 mendukung command ini, mesin akan mengirim payload `USER` dan kolom `Nama di Mesin` akan terisi otomatis. Status `User Sync` di halaman Biofinger membantu membaca posisinya:
+
+- `Menunggu mesin`: request sudah dibuat, tetapi AT-301 belum polling command.
+- `Dikirim ke mesin`: receiver sudah mengirim command lewat `/iclock/getrequest`.
+- `USER masuk`: payload `USER` berhasil diterima dan mapping user diperbarui.
+- `Gagal` atau `Kedaluwarsa`: firmware/format command perlu dicek.
+
+Jika firmware tidak mendukung command ini, mapping by `User ID Mesin` tetap menjadi flow stabil.
+
+Catatan firmware AT-301 `GED7244800117`: query user tanpa parameter `PIN=ALL` mengirim daftar user lewat `table=OPERLOG` berisi baris `USER PIN=... Name=...`. Receiver DMS ikut memproses format ini dan mengabaikan baris `FP` template sidik jari.
 - Source attendance baru: `biofinger`
 - Media attendance baru: `fingerprint`
 - Seed device AT-301 pertama: `BIO-AT301-001`
