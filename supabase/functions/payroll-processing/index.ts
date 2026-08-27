@@ -1,10 +1,15 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0"
 
 type PayrollProcessAction = "lock" | "mark_paid" | "unlock" | "void" | "restore"
+type PayrollPaymentMethod = "cash" | "bank_transfer" | "ewallet" | "other"
 
 interface PayrollProcessPayload {
   cycleId?: string
   notes?: string
+  paymentMethod?: PayrollPaymentMethod
+  paymentReference?: string
+  paidAt?: string
+  paidAmount?: number
 }
 
 const corsHeaders = {
@@ -26,6 +31,79 @@ function assertPayload(condition: unknown, message: string) {
 
 function appendPayrollNote(previous: unknown, next: string) {
   return [typeof previous === "string" ? previous : "", next].filter(Boolean).join("\n")
+}
+
+function normalizePaymentMethod(value: unknown): PayrollPaymentMethod {
+  if (value === "cash" || value === "ewallet" || value === "other") return value
+  return "bank_transfer"
+}
+
+function normalizePaidAt(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) return new Date().toISOString()
+
+  const cleaned = value.trim()
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(cleaned)
+    ? new Date(`${cleaned}T12:00:00+07:00`)
+    : new Date(cleaned)
+
+  assertPayload(Number.isFinite(date.getTime()), "Tanggal bayar tidak valid.")
+  return date.toISOString()
+}
+
+function normalizePaidAmount(value: unknown, fallback: number) {
+  if (value === undefined || value === null || value === "") return fallback
+  const amount = Number(value)
+  assertPayload(Number.isFinite(amount) && amount > 0, "Nominal pembayaran wajib lebih dari 0.")
+  return amount
+}
+
+function isMissingLedgerError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || "")
+  return /payroll_payments|payroll_cycle_items|mark_payroll_cycle_paid|rebuild_payroll_cycle_items|schema cache|PGRST202/i.test(message)
+}
+
+function ledgerMigrationMessage() {
+  return "Migration payroll payment ledger belum diterapkan. Jalankan migration 20260828000100_payroll_payment_ledger.sql lalu deploy ulang edge function."
+}
+
+async function assertNoOpenPayrollDependencies(adminClient: any, cycle: Record<string, unknown>) {
+  const employeeId = String(cycle.employee_id || "")
+  const periodStartedAt = String(cycle.period_started_at || "")
+  const periodClosedAt = String(cycle.period_closed_at || "")
+
+  let attendanceQuery = adminClient
+    .from("attendance_logs")
+    .select("id", { count: "exact", head: true })
+    .eq("employee_id", employeeId)
+    .eq("status", "review")
+
+  if (periodStartedAt) attendanceQuery = attendanceQuery.gte("attendance_date", periodStartedAt)
+  if (periodClosedAt) attendanceQuery = attendanceQuery.lte("attendance_date", periodClosedAt)
+
+  const { count: reviewCount, error: reviewError } = await attendanceQuery
+  if (reviewError) throw reviewError
+  assertPayload(!reviewCount, "Masih ada absensi review di periode payroll ini.")
+
+  let overtimeQuery = adminClient
+    .from("overtime_requests")
+    .select("id", { count: "exact", head: true })
+    .eq("employee_id", employeeId)
+    .in("status", ["draft", "pending"])
+
+  if (periodStartedAt) overtimeQuery = overtimeQuery.gte("overtime_date", periodStartedAt)
+  if (periodClosedAt) overtimeQuery = overtimeQuery.lte("overtime_date", periodClosedAt)
+
+  const { count: overtimeCount, error: overtimeError } = await overtimeQuery
+  if (overtimeError) throw overtimeError
+  assertPayload(!overtimeCount, "Masih ada lembur draft/pending di periode payroll ini.")
+}
+
+async function rebuildPayrollCycleItems(adminClient: any, cycleId: string) {
+  const { error } = await adminClient.rpc("rebuild_payroll_cycle_items", { target_cycle_id: cycleId })
+  if (!error) return
+
+  if (isMissingLedgerError(error)) throw new Error(ledgerMigrationMessage())
+  throw error
 }
 
 Deno.serve(async (request) => {
@@ -104,10 +182,35 @@ Deno.serve(async (request) => {
     const notes = payload.notes?.trim()
     const grossAmount = Number(cycle.gross_amount || 0)
     const overtimeAmount = Number(cycle.overtime_amount || 0)
-    const netAmount = Math.max(0, grossAmount + overtimeAmount)
+    const savedNetAmount = Number(cycle.net_amount || 0)
+    const netAmount = savedNetAmount > 0 ? savedNetAmount : Math.max(0, grossAmount + overtimeAmount)
     const currentStatus = String(cycle.status || "active")
     const employeeName = String(employee?.full_name || "Karyawan")
     const employeeCode = String(employee?.employee_code || "")
+
+    if (action === "mark_paid") {
+      assertPayload(currentStatus === "locked", "Payroll wajib dikunci sebelum ditandai terbayar.")
+
+      const paidAt = normalizePaidAt(payload.paidAt)
+      const paidAmount = normalizePaidAmount(payload.paidAmount, netAmount)
+      const { data: paymentResult, error: paymentError } = await adminClient.rpc("mark_payroll_cycle_paid", {
+        target_cycle_id: cycle.id,
+        actor_user_id: actor.id,
+        actor_name: String(actor.full_name || actor.email || "Finance"),
+        payment_method: normalizePaymentMethod(payload.paymentMethod),
+        payment_reference: payload.paymentReference?.trim() || null,
+        paid_at: paidAt,
+        paid_amount: paidAmount,
+        note_text: notes || "",
+      })
+
+      if (paymentError) {
+        if (isMissingLedgerError(paymentError)) throw new Error(ledgerMigrationMessage())
+        throw paymentError
+      }
+
+      return jsonResponse({ ok: true, ...paymentResult })
+    }
 
     let updatePayload: Record<string, unknown>
     let auditAction: string
@@ -116,6 +219,8 @@ Deno.serve(async (request) => {
     if (action === "lock") {
       assertPayload(currentStatus === "ready", "Payroll hanya bisa dikunci saat status Siap Gajian.")
       assertPayload(Number(cycle.work_days_count || 0) >= Number(cycle.target_work_days || 26), "Cycle belum mencapai target hari kerja.")
+      await assertNoOpenPayrollDependencies(adminClient, cycle)
+      await rebuildPayrollCycleItems(adminClient, String(cycle.id))
 
       nextStatus = "locked"
       auditAction = "Lock payroll cycle"
@@ -127,19 +232,6 @@ Deno.serve(async (request) => {
         overtime_amount: overtimeAmount,
         net_amount: netAmount,
         notes: appendPayrollNote(cycle.notes, notes ? `Finance lock payroll: ${notes}` : "Finance lock payroll."),
-        updated_at: now,
-      }
-    } else if (action === "mark_paid") {
-      assertPayload(currentStatus === "locked", "Payroll wajib dikunci sebelum ditandai terbayar.")
-
-      nextStatus = "paid"
-      auditAction = "Mark payroll paid"
-      updatePayload = {
-        status: nextStatus,
-        processed_at: now,
-        paid_at: now,
-        processed_by: actor.id,
-        notes: appendPayrollNote(cycle.notes, notes ? `Finance mark paid: ${notes}` : "Finance mark paid."),
         updated_at: now,
       }
     } else if (action === "unlock") {

@@ -1219,6 +1219,29 @@ button {
   --table-min-width: 1390px;
 }
 
+.overtimeReviewTableScroller table {
+  min-width: var(--table-min-width);
+}
+
+.overtimeReviewTableScroller .rowActions {
+  width: 100%;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.attendanceReviewTableScroller {
+  --table-row-min-h: 66px;
+  --table-cell-x: 16px;
+  --table-cell-y: 11px;
+  --table-min-width: 1280px;
+  overflow-x: scroll;
+  overflow-y: visible;
+}
+
+.attendanceReviewTableScroller table {
+  min-width: var(--table-min-width);
+}
+
 .biofingerTableSelect .foundationSelectButton {
   height: 42px;
   min-height: 42px;
@@ -4289,6 +4312,419 @@ button {
   gap: 16px;
 }
 
+.dashboardFilterPanel {
+  display: grid;
+  grid-template-columns: minmax(190px, 250px) minmax(320px, 1fr) minmax(190px, 250px) auto;
+  align-items: end;
+  gap: 12px;
+}
+
+.dashboardSearchField {
+  min-width: 0;
+}
+
+.dashboardInsights {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(330px, 0.72fr);
+  gap: 16px;
+  align-items: stretch;
+}
+
+.dashboardHealthPanel,
+.dashboardSignalPanel {
+  overflow: hidden;
+}
+
+.dashboardPanelHeader {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.dashboardPanelHeader > span:first-child {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 14px;
+  color: var(--blue-ink);
+  background: rgba(34, 174, 202, 0.11);
+}
+
+.dashboardPanelHeader h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 1rem;
+  font-weight: 780;
+  letter-spacing: 0;
+}
+
+.dashboardPanelHeader p {
+  max-width: 780px;
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 400;
+  line-height: 1.45;
+}
+
+.dashboardPanelHeader > strong {
+  color: var(--blue-ink);
+  font-size: 0.86rem;
+  font-weight: 780;
+}
+
+.dashboardHealthGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.86fr);
+  gap: 18px;
+  padding: 18px 20px 16px;
+}
+
+.dashboardStatusStack,
+.dashboardSourceCluster,
+.dashboardSignalStack {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.dashboardProgressRow {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.dashboardProgressMeta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 680;
+}
+
+.dashboardProgressMeta span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboardProgressMeta strong {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--ink);
+  font-size: 0.9rem;
+  font-weight: 780;
+}
+
+.dashboardProgressMeta small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 620;
+}
+
+.dashboardProgressTrack {
+  display: block;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #edf3f8;
+}
+
+.dashboardProgressTrack i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  transform-origin: left center;
+  animation: dashboardBarIn 460ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.dashboardProgressRow.green .dashboardProgressTrack i {
+  background: linear-gradient(90deg, #34d399, #10b981);
+}
+
+.dashboardProgressRow.amber .dashboardProgressTrack i {
+  background: linear-gradient(90deg, #fbbf24, #f59e0b);
+}
+
+.dashboardProgressRow.rose .dashboardProgressTrack i {
+  background: linear-gradient(90deg, #fb7185, #e11d48);
+}
+
+.dashboardProgressRow.slate .dashboardProgressTrack i {
+  background: linear-gradient(90deg, #cbd5e1, #94a3b8);
+}
+
+.dashboardMiniHeader {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 680;
+}
+
+.dashboardMiniHeader strong {
+  color: var(--ink);
+  font-size: 0.76rem;
+  font-weight: 720;
+  text-align: right;
+}
+
+.dashboardSourceList {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.dashboardSourceBadge {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-height: 42px;
+  padding: 10px 11px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 14px;
+  color: var(--muted);
+  background: rgba(248, 250, 252, 0.72);
+}
+
+.dashboardSourceBadge svg {
+  color: var(--blue-ink);
+}
+
+.dashboardSourceBadge span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboardSourceBadge strong {
+  color: var(--blue-ink);
+  font-size: 0.82rem;
+  font-weight: 820;
+}
+
+.dashboardDivisionStrip {
+  display: flex;
+  gap: 10px;
+  padding: 0 20px 18px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.dashboardDivisionStrip > span {
+  flex: 0 0 auto;
+  min-width: 170px;
+}
+
+.dashboardDivisionItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 52px;
+  padding: 10px 12px;
+  border: 1px solid rgba(34, 174, 202, 0.16);
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(34, 174, 202, 0.08), rgba(255, 255, 255, 0.78));
+}
+
+.dashboardDivisionItem span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.dashboardDivisionItem strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 0.8rem;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboardDivisionItem small,
+.dashboardDivisionStrip > span:not(.dashboardDivisionItem) {
+  color: var(--muted);
+  font-size: 0.73rem;
+  font-weight: 600;
+}
+
+.dashboardDivisionItem em {
+  color: var(--blue-ink);
+  font-size: 0.78rem;
+  font-style: normal;
+  font-weight: 820;
+}
+
+.dashboardSignalStack {
+  padding: 16px 18px 18px;
+}
+
+.dashboardSignalItem {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 74px;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.dashboardSignalIcon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 13px;
+}
+
+.dashboardSignalItem.amber .dashboardSignalIcon {
+  color: #b97608;
+  background: rgba(245, 158, 11, 0.14);
+}
+
+.dashboardSignalItem.rose .dashboardSignalIcon {
+  color: #be123c;
+  background: rgba(244, 63, 94, 0.12);
+}
+
+.dashboardSignalItem.green .dashboardSignalIcon {
+  color: #047857;
+  background: rgba(16, 185, 129, 0.13);
+}
+
+.dashboardSignalItem.violet .dashboardSignalIcon {
+  color: #5b55cf;
+  background: rgba(99, 102, 241, 0.12);
+}
+
+.dashboardSignalItem span:not(.dashboardSignalIcon) {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.dashboardSignalItem strong {
+  color: var(--ink);
+  font-size: 0.84rem;
+  font-weight: 770;
+  line-height: 1.25;
+}
+
+.dashboardSignalItem small {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 400;
+  line-height: 1.35;
+}
+
+.dashboardSignalItem em {
+  min-width: 32px;
+  color: var(--ink);
+  font-size: 1.02rem;
+  font-style: normal;
+  font-weight: 840;
+  text-align: right;
+}
+
+.dashboardCleanState {
+  display: grid;
+  min-height: 178px;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.dashboardCleanState svg {
+  color: #10b981;
+}
+
+.dashboardCleanState strong {
+  color: var(--ink);
+  font-size: 0.95rem;
+  font-weight: 780;
+}
+
+.dashboardCleanState span {
+  max-width: 220px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+.dashboardAttendanceTable {
+  min-width: 0;
+}
+
+.dashboardAttendanceTableScroller {
+  --table-min-width: 1580px;
+  max-height: 590px;
+  border-top: 1px solid var(--line);
+}
+
+.dashboardAttendanceTableScroller td {
+  vertical-align: top;
+}
+
+.dashboardPayrollCell {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+
+.foundationSkeleton.dashboardProgressSkeleton {
+  width: 100%;
+  height: 38px;
+  border-radius: 14px;
+}
+
+.foundationSkeleton.dashboardSourceSkeleton {
+  width: 100%;
+  height: 44px;
+  border-radius: 14px;
+}
+
+.foundationSkeleton.dashboardSignalSkeleton {
+  width: 100%;
+  height: 74px;
+  border-radius: 16px;
+}
+
+@keyframes dashboardBarIn {
+  from {
+    opacity: 0.55;
+    transform: scaleX(0.36);
+  }
+  to {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+}
+
 .moduleGrid {
   display: grid;
   gap: 16px;
@@ -4701,6 +5137,14 @@ button {
   font-weight: var(--fw-label);
 }
 
+.formFieldHint {
+  display: block;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
 .requiredMark {
   color: var(--danger);
   font-size: 0.9em;
@@ -4954,6 +5398,14 @@ button {
 .dateInputButton.active svg,
 .dateInputButton:hover svg {
   color: var(--blue-ink);
+}
+
+.dateInputButton:disabled {
+  cursor: not-allowed;
+  color: #64748b;
+  border-color: rgba(15, 23, 42, 0.08);
+  background: rgba(248, 251, 255, 0.9);
+  box-shadow: none;
 }
 
 .datePickerPopover {
@@ -5378,7 +5830,9 @@ button {
 .masterDetailDialog {
   display: flex;
   width: min(780px, 100%);
+  max-height: min(820px, calc(100dvh - 56px));
   flex-direction: column;
+  min-height: 0;
 }
 
 .userDetailDialog {
@@ -5965,6 +6419,7 @@ button {
 }
 
 .masterDetailHeader {
+  flex: 0 0 auto;
   padding-bottom: 16px;
   border-bottom: 1px solid var(--ops-line);
 }
@@ -6014,8 +6469,12 @@ button {
 
 .masterDetailBody {
   display: grid;
+  flex: 1 1 auto;
+  min-height: 0;
   gap: 16px;
+  overflow-y: auto;
   padding: 18px 24px 8px;
+  -webkit-overflow-scrolling: touch;
 }
 
 .masterDetailGrid {
@@ -6098,9 +6557,12 @@ button {
 
 .masterDetailActions {
   display: flex;
+  flex: 0 0 auto;
   justify-content: flex-end;
   gap: 10px;
   padding: 12px 24px 24px;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+  background: rgba(255, 255, 255, 0.98);
 }
 
 .masterDetailActions .primaryButton,
@@ -6216,6 +6678,77 @@ button {
     linear-gradient(135deg, rgba(236, 253, 255, 0.9), rgba(255, 255, 255, 0.96) 42%),
     #ffffff;
   box-shadow: 0 20px 46px -42px rgba(7, 24, 74, 0.58);
+}
+
+.employeeCycleOpeningPanel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(34, 174, 202, 0.16);
+  border-radius: 22px;
+  background:
+    linear-gradient(135deg, rgba(236, 253, 255, 0.86), rgba(255, 255, 255, 0.96) 46%),
+    #ffffff;
+}
+
+.employeeCycleOpeningHeader {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) minmax(220px, 0.86fr);
+  align-items: center;
+  gap: 12px;
+}
+
+.employeeCycleOpeningHeader > span {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 15px;
+  color: var(--cyan);
+  background: rgba(236, 253, 255, 0.92);
+}
+
+.employeeCycleOpeningHeader div {
+  min-width: 0;
+}
+
+.employeeCycleOpeningHeader strong,
+.employeeCycleOpeningHeader small {
+  display: block;
+}
+
+.employeeCycleOpeningHeader strong {
+  color: var(--ink);
+  font-size: 0.92rem;
+  font-weight: 820;
+}
+
+.employeeCycleOpeningHeader small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.employeeCycleOpeningHeader em {
+  justify-self: end;
+  width: min(100%, 330px);
+  padding: 9px 11px;
+  border-radius: 14px;
+  color: #007f9d;
+  background: rgba(236, 253, 255, 0.72);
+  font-size: 0.72rem;
+  font-style: normal;
+  font-weight: 760;
+  line-height: 1.35;
+}
+
+.employeeCycleOpeningGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.82fr) minmax(0, 1.18fr);
+  gap: 12px;
+  align-items: start;
 }
 
 .employeeKioskAccessHeader,
@@ -7299,6 +7832,73 @@ button {
   line-height: 1.45;
 }
 
+.attendanceReviewStoryCopy {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.attendanceReviewSourceRow {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+}
+
+.attendanceReviewSourceRow small {
+  min-width: 0;
+  color: var(--ops-muted);
+  font-size: 0.72rem;
+  font-weight: 520;
+  line-height: 1.35;
+}
+
+.attendanceReviewSourceNote {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 28px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  border-radius: 999px;
+  color: #526179;
+  background: rgba(241, 245, 249, 0.86);
+  font-size: 0.7rem;
+  font-weight: 720;
+  line-height: 1;
+}
+
+.attendanceReviewSourceNote span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attendanceReviewSourceNote.biofinger {
+  color: #087f98;
+  background: rgba(224, 247, 251, 0.9);
+}
+
+.attendanceReviewSourceNote.field {
+  color: #07835c;
+  background: rgba(232, 252, 240, 0.9);
+}
+
+.attendanceReviewSourceNote.kiosk {
+  color: #1d4ed8;
+  background: rgba(239, 246, 255, 0.92);
+}
+
+.attendanceReviewSourceNote.manual,
+.attendanceReviewSourceNote.seed,
+.attendanceReviewSourceNote.legacy {
+  color: #526179;
+  background: rgba(241, 245, 249, 0.88);
+}
+
 .attendanceReviewContent {
   display: grid;
   flex: 1 1 auto;
@@ -7329,33 +7929,76 @@ button {
   width: min(820px, calc(100vw - 48px));
 }
 
+.dialogBackdrop.attendanceCorrectionBackdrop {
+  background: rgba(71, 85, 105, 0.66);
+  backdrop-filter: blur(16px) saturate(115%);
+}
+
 .checkoutCorrectionDialog {
   display: flex;
-  width: min(720px, calc(100vw - 36px));
-  max-height: calc(100dvh - 40px);
+  width: min(780px, calc(100vw - 56px));
+  max-height: min(660px, calc(100dvh - 48px));
   flex-direction: column;
   overflow: hidden;
   padding: 0;
-  border-radius: 28px;
+  border: 1px solid rgba(226, 232, 240, 0.95);
+  border-radius: 26px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 34px 92px -54px rgba(7, 24, 74, 0.72);
+}
+
+.checkoutCorrectionDialog .foundationDialogClose {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  z-index: 2;
+}
+
+.attendanceCorrectionHeader {
+  flex: 0 0 auto;
+  padding: 26px 72px 18px 30px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(247, 253, 255, 0.98)),
+    #ffffff;
+}
+
+.attendanceCorrectionHeader .dialogHeaderCopy > span {
+  display: inline-flex;
+  align-items: center;
+  color: var(--blue-ink);
+  font-size: 0.72rem;
+  font-weight: 820;
+  letter-spacing: 0;
+  text-transform: uppercase;
 }
 
 .checkoutCorrectionBody {
   display: grid;
+  flex: 1 1 auto;
+  min-height: 0;
   gap: 14px;
-  padding: 18px 26px 24px;
+  overflow-y: auto;
+  padding: 20px 30px 0;
+  -webkit-overflow-scrolling: touch;
 }
 
 .checkoutCorrectionSummary {
   display: grid;
-  grid-template-columns: 54px minmax(0, 1fr);
-  gap: 14px;
+  grid-template-columns: 46px minmax(0, 1fr);
+  gap: 13px;
   align-items: center;
-  padding: 14px;
-  border: 1px solid rgba(15, 23, 42, 0.08);
+  min-height: 72px;
+  padding: 13px 15px;
+  border: 1px solid rgba(226, 232, 240, 0.95);
   border-radius: 18px;
-  background:
-    radial-gradient(circle at 5% 15%, rgba(245, 158, 11, 0.12), transparent 34%),
-    linear-gradient(145deg, rgba(255, 251, 235, 0.48), rgba(255, 255, 255, 0.96));
+  background: linear-gradient(135deg, rgba(255, 251, 235, 0.54), rgba(255, 255, 255, 0.98));
+}
+
+.checkoutCorrectionSummary .attendanceMonitorIcon {
+  width: 46px;
+  height: 46px;
+  border-radius: 16px;
 }
 
 .checkoutCorrectionSummary small,
@@ -7363,7 +8006,7 @@ button {
   margin: 0;
   color: var(--ops-muted);
   font-size: 0.75rem;
-  font-weight: 760;
+  font-weight: var(--fw-body);
   line-height: 1.35;
 }
 
@@ -7371,33 +8014,55 @@ button {
   display: block;
   margin: 2px 0;
   color: var(--ops-ink);
-  font-size: 1.02rem;
-  font-weight: 850;
+  font-size: 0.98rem;
+  font-weight: var(--fw-heading);
   line-height: 1.25;
 }
 
 .checkoutCorrectionFields {
   display: grid;
-  grid-template-columns: minmax(150px, 0.8fr) minmax(132px, 0.6fr) minmax(220px, 1.2fr);
+  grid-template-columns: minmax(150px, 0.82fr) minmax(132px, 0.64fr) minmax(240px, 1.35fr);
   gap: 12px;
+  align-items: start;
 }
 
 .checkoutCorrectionNotice {
   display: flex;
   gap: 10px;
-  align-items: center;
+  align-items: flex-start;
   padding: 12px 14px;
-  border: 1px solid rgba(34, 174, 202, 0.18);
+  border: 1px solid rgba(34, 174, 202, 0.2);
   border-radius: 16px;
   color: var(--blue-ink);
   background: rgba(236, 253, 255, 0.72);
-  font-size: 0.82rem;
-  font-weight: 760;
-  line-height: 1.4;
+  font-size: 0.8rem;
+  font-weight: 720;
+  line-height: 1.42;
 }
 
 .checkoutCorrectionNotice svg {
   flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.checkoutCorrectionActions {
+  position: sticky;
+  bottom: 0;
+  display: grid;
+  grid-template-columns: minmax(150px, 0.42fr) minmax(0, 1fr);
+  gap: 12px;
+  margin: 2px -30px 0;
+  padding: 16px 30px 22px;
+  border-top: 1px solid rgba(148, 163, 184, 0.14);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.86), #ffffff 36%),
+    #ffffff;
+  box-shadow: 0 -18px 38px -34px rgba(7, 24, 74, 0.56);
+}
+
+.checkoutCorrectionActions .primaryButton,
+.checkoutCorrectionActions .secondaryButton {
+  min-height: 50px;
 }
 
 .formErrorMessage {
@@ -7409,21 +8074,45 @@ button {
 
 @media (max-width: 720px) {
   .checkoutCorrectionDialog {
-    width: min(100vw - 24px, 720px);
+    width: min(100%, calc(100vw - 24px));
     max-height: calc(100dvh - 24px);
     border-radius: 24px;
   }
 
+  .checkoutCorrectionDialog .foundationDialogClose {
+    top: 14px;
+    right: 14px;
+  }
+
+  .attendanceCorrectionHeader {
+    padding: 24px 58px 14px 18px;
+  }
+
   .checkoutCorrectionBody {
-    padding: 16px;
+    padding: 14px 16px 0;
+  }
+
+  .checkoutCorrectionSummary {
+    grid-template-columns: 42px minmax(0, 1fr);
+    min-height: 0;
+    padding: 12px;
+  }
+
+  .checkoutCorrectionSummary .attendanceMonitorIcon {
+    width: 42px;
+    height: 42px;
+    border-radius: 15px;
   }
 
   .checkoutCorrectionFields {
     grid-template-columns: 1fr;
   }
 
-  .checkoutCorrectionDialog .attendanceReviewActions {
+  .checkoutCorrectionActions {
     grid-template-columns: 1fr;
+    margin-right: -16px;
+    margin-left: -16px;
+    padding: 12px 16px max(14px, env(safe-area-inset-bottom));
   }
 }
 
@@ -8094,6 +8783,36 @@ button {
   color: var(--blue-ink);
 }
 
+.overtimeRequestInlineNotice {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 10px 12px;
+  border-left: 3px solid rgba(34, 174, 202, 0.42);
+  border-radius: 14px;
+  color: #416179;
+  background: rgba(240, 253, 255, 0.76);
+  font-size: 0.76rem;
+  font-weight: 560;
+  line-height: 1.38;
+}
+
+.overtimeRequestInlineNotice svg {
+  margin-top: 1px;
+  color: var(--blue-ink);
+}
+
+.overtimeRequestInlineNotice.blocked {
+  border-left-color: rgba(244, 63, 94, 0.48);
+  color: #9f1239;
+  background: rgba(255, 241, 242, 0.78);
+}
+
+.overtimeRequestInlineNotice.blocked svg {
+  color: #e11d48;
+}
+
 .overtimeRequestActions {
   display: grid;
   grid-template-columns: minmax(120px, 0.3fr) minmax(0, 1fr);
@@ -8169,6 +8888,14 @@ button {
   border-color: rgba(244, 63, 94, 0.36);
   color: #be123c;
   background: #ffe4e6;
+}
+
+.foundationFieldError {
+  margin: -4px 0 0;
+  color: #e11d48;
+  font-size: 0.74rem;
+  font-weight: 650;
+  line-height: 1.35;
 }
 
 .attendanceReviewEmployeeCell {
@@ -8265,21 +8992,29 @@ button {
 
 .rowExpandButton {
   display: inline-grid;
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
   place-items: center;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: 13px;
+  border: 0;
+  border-radius: 999px;
   color: #526179;
-  background: rgba(255, 255, 255, 0.88);
+  background: transparent;
+  box-shadow: none;
   cursor: pointer;
-  transition: transform 160ms ease, border-color 160ms ease, color 160ms ease, background 160ms ease;
+  transition: transform 160ms ease, color 160ms ease, background 160ms ease;
 }
 
 .attendanceReviewGroupRow.active .rowExpandButton {
   color: var(--blue-ink);
-  border-color: rgba(34, 174, 202, 0.22);
-  background: rgba(230, 248, 252, 0.9);
+  background: transparent;
+}
+
+.rowExpandButton:hover,
+.rowExpandButton:focus-visible {
+  color: var(--blue-ink);
+  background: transparent;
+  outline: 0;
+  transform: translateY(-1px);
 }
 
 .attendanceReviewGroupRow.active .rowExpandButton svg {
@@ -8291,17 +9026,16 @@ button {
 }
 
 .attendanceReviewExpandRow td {
-  padding-top: 0 !important;
-  padding-bottom: 0 !important;
+  padding: 0 !important;
   background: #fff;
 }
 
 .attendanceReviewExpandPanel {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0;
-  align-items: stretch;
-  padding: 0 20px 18px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: end;
+  padding: 14px 20px 18px;
   border: 0;
   border-top: 1px solid rgba(15, 23, 42, 0.06);
   border-radius: 0;
@@ -8309,24 +9043,31 @@ button {
   box-shadow: none;
 }
 
+.attendanceReviewExpandEvents {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
+  min-width: 0;
+}
+
 .attendanceReviewEventPanel {
   display: grid;
   grid-template-columns: 38px minmax(0, 1fr);
   gap: 10px 12px;
-  align-items: center;
+  align-items: start;
   min-width: 0;
-  padding: 18px 20px 0 0;
+  padding: 4px 22px 0 0;
   border: 0;
   border-radius: 0;
-  background: #fff;
+  background: transparent;
   box-shadow: none;
 }
 
 .attendanceReviewEventPanel.checkout {
   padding-right: 0;
-  padding-left: 20px;
+  padding-left: 22px;
   border-left: 1px solid rgba(15, 23, 42, 0.06);
-  background: #fff;
+  background: transparent;
 }
 
 .attendanceReviewEventPanel.tone-empty {
@@ -8350,10 +9091,10 @@ button {
 
 .attendanceReviewEventPanelIcon {
   display: inline-grid;
-  width: 38px;
-  height: 38px;
+  width: 36px;
+  height: 36px;
   place-items: center;
-  border-radius: 14px;
+  border-radius: 12px;
   color: var(--blue-ink);
   background: rgba(230, 248, 252, 0.96);
 }
@@ -8378,32 +9119,191 @@ button {
   display: block;
   color: var(--ops-ink);
   font-size: 0.86rem;
-  font-weight: 760;
+  font-weight: 680;
 }
 
 .attendanceReviewEventPanel p {
   margin: 2px 0 0;
   color: #738197;
   font-size: 0.72rem;
-  font-weight: 650;
+  font-weight: 520;
 }
 
-.attendanceReviewEventPanel .attendanceEvidenceCell {
+.attendanceReviewEventPanelMeta {
   grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+  padding-left: 50px;
 }
 
-.attendanceReviewEventPanel .compactButton {
-  grid-column: 1 / -1;
-  justify-self: start;
+.attendanceReviewEventPanelMeta .attendanceEvidenceCell {
+  flex: 1 1 auto;
+  min-width: 160px;
+}
+
+.attendanceReviewEventPanelMeta .compactButton {
+  flex: 0 0 auto;
   min-height: 36px;
   padding: 0 13px;
 }
 
-.attendanceReviewApproveAll {
-  grid-column: 1 / -1;
-  justify-self: end;
-  margin-top: 18px;
+.attendanceReviewExpandActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
   min-width: 220px;
+}
+
+.attendanceReviewApproveAll {
+  min-width: 220px;
+}
+
+.overtimeReviewRow.active {
+  background: linear-gradient(90deg, rgba(230, 248, 252, 0.58), rgba(255, 255, 255, 0));
+}
+
+.overtimeReviewRow.active .rowExpandButton {
+  color: var(--blue-ink);
+}
+
+.overtimeReviewRow.active .rowExpandButton svg {
+  transform: rotate(180deg);
+}
+
+.overtimeReviewExpandRow td {
+  padding: 0 !important;
+  background: #fff;
+}
+
+.overtimeReviewExpandPanel {
+  display: grid;
+  gap: 16px;
+  padding: 16px 20px 18px;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+  background: #fff;
+  animation: liveAttendanceInlineIn 180ms ease both;
+}
+
+.overtimeReviewExpandSummary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: start;
+}
+
+.overtimeReviewExpandSummary > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.overtimeReviewExpandSummary span,
+.overtimeReviewExpandGrid h3,
+.overtimeReviewFactGrid span {
+  color: #74839a;
+  font-size: 0.64rem;
+  font-weight: 760;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.overtimeReviewExpandSummary strong {
+  color: var(--ops-ink);
+  font-size: 1rem;
+  font-weight: 720;
+  line-height: 1.2;
+}
+
+.overtimeReviewExpandSummary small {
+  color: #64748b;
+  font-size: 0.76rem;
+  font-weight: 520;
+}
+
+.overtimeReviewExpandGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.overtimeReviewExpandGrid section {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  gap: 13px;
+  padding: 16px 18px;
+  border-right: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.overtimeReviewExpandGrid section:first-child {
+  padding-left: 0;
+}
+
+.overtimeReviewExpandGrid section:last-child {
+  padding-right: 0;
+  border-right: 0;
+}
+
+.overtimeReviewExpandGrid h3 {
+  margin: 0;
+}
+
+.overtimeReviewFactGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 16px;
+}
+
+.overtimeReviewFactGrid div {
+  min-width: 0;
+  padding-left: 12px;
+  border-left: 2px solid rgba(34, 174, 202, 0.18);
+}
+
+.overtimeReviewFactGrid strong {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--ops-ink);
+  font-size: 0.82rem;
+  font-weight: 640;
+  line-height: 1.28;
+  text-overflow: ellipsis;
+}
+
+.overtimeReviewFactGrid small {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1.32;
+  text-overflow: ellipsis;
+}
+
+.overtimeReviewExpandFooter {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+}
+
+.overtimeReviewExpandFooter p {
+  min-width: 0;
+  margin: 0;
+  color: #64748b;
+  font-size: 0.76rem;
+  font-weight: 520;
+  line-height: 1.4;
+}
+
+.overtimeReviewExpandFooter .compactButton {
+  min-width: 190px;
 }
 
 .attendanceReviewAvatar {
@@ -8453,31 +9353,31 @@ button {
 
 .attendanceEvidenceBoard {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(230px, 0.8fr);
-  gap: 12px;
+  grid-template-columns: 1fr;
+  gap: 10px;
 }
 
 .attendanceEvidenceMapCard,
 .attendanceEvidenceFaceCard {
   display: grid;
   min-width: 0;
-  align-content: start;
+  min-height: 86px;
+  align-items: center;
   gap: 12px;
-  padding: 12px;
+  padding: 12px 14px;
   border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: 22px;
+  border-radius: 18px;
   background: rgba(248, 251, 255, 0.9);
-  box-shadow: 0 22px 54px -44px rgba(7, 24, 74, 0.7);
+  box-shadow: none;
 }
 
 .attendanceEvidenceMapCard {
-  grid-template-columns: 150px minmax(0, 1fr);
-  align-items: center;
+  grid-template-columns: 76px minmax(0, 1fr) auto;
 }
 
 .attendanceEvidenceMapCard .compactButton {
-  grid-column: 2;
-  justify-self: start;
+  grid-column: 3;
+  justify-self: end;
   min-height: 38px;
   padding: 0 14px;
   border-radius: 14px;
@@ -8487,10 +9387,10 @@ button {
 .attendanceEvidenceMap {
   position: relative;
   overflow: hidden;
-  width: 150px;
-  height: 138px;
+  width: 76px;
+  height: 76px;
   border: 1px solid rgba(34, 174, 202, 0.18);
-  border-radius: 20px;
+  border-radius: 18px;
   background:
     radial-gradient(circle at 50% 50%, rgba(34, 174, 202, 0.16), transparent 18%),
     linear-gradient(135deg, rgba(241, 245, 249, 0.98), rgba(236, 253, 255, 0.92));
@@ -8514,8 +9414,8 @@ button {
   top: 50%;
   left: 50%;
   z-index: 1;
-  width: 76px;
-  height: 76px;
+  width: 46px;
+  height: 46px;
   border: 2px solid rgba(34, 174, 202, 0.72);
   border-radius: 999px;
   background: rgba(34, 174, 202, 0.1);
@@ -8542,10 +9442,10 @@ button {
 .attendanceMapOfficePin {
   top: 50%;
   left: 50%;
-  width: 42px;
-  height: 42px;
-  border: 6px solid rgba(255, 255, 255, 0.92);
-  border-radius: 16px;
+  width: 32px;
+  height: 32px;
+  border: 5px solid rgba(255, 255, 255, 0.92);
+  border-radius: 13px;
   background: linear-gradient(135deg, #0d2a68, #0799b7);
   transform: translate(-50%, -50%);
 }
@@ -8553,9 +9453,9 @@ button {
 .attendanceMapUserPin {
   top: var(--attendance-user-top, 50%);
   left: var(--attendance-user-left, 50%);
-  width: 34px;
-  height: 34px;
-  border: 5px solid rgba(255, 255, 255, 0.94);
+  width: 26px;
+  height: 26px;
+  border: 4px solid rgba(255, 255, 255, 0.94);
   border-radius: 999px;
   background: linear-gradient(135deg, #22c55e, #14b8a6);
   transform: translate(-50%, -50%);
@@ -8568,35 +9468,34 @@ button {
 
 .attendanceMapDistance {
   position: absolute;
-  right: 10px;
-  bottom: 10px;
+  right: 6px;
+  bottom: 6px;
   z-index: 3;
   display: inline-flex;
-  min-height: 26px;
+  min-height: 22px;
   align-items: center;
-  padding: 0 10px;
+  padding: 0 7px;
   border-radius: 999px;
   color: #0789a0;
   background: rgba(255, 255, 255, 0.92);
-  font-size: 0.72rem;
-  font-weight: 850;
+  font-size: 0.64rem;
+  font-weight: 760;
   box-shadow: 0 14px 30px -24px rgba(7, 24, 74, 0.7);
 }
 
 .attendanceEvidenceFaceCard {
-  grid-template-columns: 82px minmax(0, 1fr);
-  align-items: center;
+  grid-template-columns: 76px minmax(0, 1fr);
 }
 
 .attendanceFacePreview {
   position: relative;
   display: grid;
   overflow: hidden;
-  width: 78px;
-  height: 78px;
+  width: 76px;
+  height: 76px;
   place-items: center;
   border: 1px solid rgba(34, 174, 202, 0.2);
-  border-radius: 999px;
+  border-radius: 20px;
   color: var(--blue-ink);
   background: linear-gradient(145deg, rgba(236, 253, 255, 0.96), rgba(255, 255, 255, 0.98));
   box-shadow: 0 20px 44px -32px rgba(7, 24, 74, 0.78);
@@ -8604,10 +9503,10 @@ button {
 
 .attendanceFacePreview::after {
   position: absolute;
-  right: 5px;
-  bottom: 5px;
-  width: 24px;
-  height: 24px;
+  right: 6px;
+  bottom: 6px;
+  width: 18px;
+  height: 18px;
   border: 4px solid #ffffff;
   border-radius: 999px;
   background: #22c55e;
@@ -8634,7 +9533,7 @@ button {
 .attendanceEvidenceCardCopy span {
   color: var(--blue-ink);
   font-size: 0.7rem;
-  font-weight: 850;
+  font-weight: 720;
   text-transform: uppercase;
 }
 
@@ -8642,7 +9541,7 @@ button {
   overflow: hidden;
   color: var(--ops-ink);
   font-size: 0.9rem;
-  font-weight: 820;
+  font-weight: 680;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -8650,7 +9549,7 @@ button {
 .attendanceEvidenceCardCopy small {
   color: var(--ops-muted);
   font-size: 0.72rem;
-  font-weight: 640;
+  font-weight: 520;
   line-height: 1.35;
 }
 
@@ -8944,7 +9843,7 @@ button {
   width: 24px;
   height: 24px;
   place-items: center;
-  border-radius: 999px;
+  border-radius: 20px;
   color: #07859d;
   background: rgba(224, 247, 251, 0.76);
 }
@@ -9904,7 +10803,7 @@ button {
   padding: 8px 10px;
   overflow-x: auto;
   border: 1px solid rgba(15, 23, 42, 0.055);
-  border-radius: 20px;
+  border-radius: 18px;
   background: rgba(255, 255, 255, 0.92);
   box-shadow: 0 4px 14px -12px rgba(15, 23, 42, 0.18);
   scrollbar-width: thin;
@@ -11931,9 +12830,8 @@ button {
   display: grid;
   min-height: 100vh;
   min-height: 100dvh;
-  align-items: start;
-  justify-items: start;
-  padding: 22px;
+  place-items: center;
+  padding: 24px;
   color: var(--ink);
   background:
     radial-gradient(circle at 50% -12%, rgba(34, 174, 202, 0.055), transparent 34%),
@@ -11963,73 +12861,100 @@ button {
 }
 
 .authSoftPanel {
-  display: inline-grid;
-  grid-template-columns: 40px minmax(0, 1fr);
-  gap: 10px;
+  display: grid;
+  width: min(280px, 100%);
+  gap: 13px;
   align-items: center;
-  padding: 8px 12px 8px 8px;
-  border: 1px solid rgba(226, 232, 240, 0.9);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.74);
-  box-shadow: 0 18px 42px -34px rgba(7, 24, 74, 0.38);
-  animation: fadeIn 180ms ease both;
+  justify-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  text-align: center;
+  animation: authBrandIntro 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .authSoftLogo {
+  position: relative;
   display: grid;
-  width: 40px;
-  height: 40px;
+  width: 78px;
+  height: 78px;
   place-items: center;
-  overflow: hidden;
-  border: 1px solid rgba(226, 232, 240, 0.92);
+  overflow: visible;
+  border: 0;
   border-radius: 999px;
-  background: #ffffff;
+  background: transparent;
+  animation: authLogoBreath 2.4s ease-in-out infinite;
+}
+
+.authSoftLogo::before,
+.authSoftLogo::after {
+  position: absolute;
+  inset: -9px;
+  border-radius: inherit;
+  border: 1px solid rgba(34, 174, 202, 0.24);
+  content: "";
+  opacity: 0;
+  animation: authLogoPulse 2.2s ease-out infinite;
+}
+
+.authSoftLogo::after {
+  animation-delay: 0.75s;
 }
 
 .authSoftLogo img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+  position: relative;
+  z-index: 1;
+  width: 64px;
+  max-width: 64px;
+  height: 64px;
+  max-height: 64px;
+  border-radius: 999px;
+  object-fit: contain;
+  filter: drop-shadow(0 16px 22px rgba(7, 24, 74, 0.18));
 }
 
 .authSoftPanel div {
   display: grid;
-  gap: 2px;
+  justify-items: center;
+  gap: 4px;
   min-width: 0;
 }
 
 .authSoftPanel strong {
   color: var(--ink);
-  font-size: 0.78rem;
-  font-weight: 800;
-  line-height: 1.2;
+  font-size: 0.98rem;
+  font-weight: var(--fw-body-strong);
+  line-height: 1.18;
 }
 
 .authSoftPanel small {
   color: var(--muted);
-  font-size: 0.7rem;
-  font-weight: 650;
-  line-height: 1.2;
+  font-size: 0.76rem;
+  font-weight: 430;
+  line-height: 1.35;
 }
 
 .authLoadingBar {
   position: relative;
   display: block;
-  width: min(320px, 100%);
-  height: 7px;
+  width: 92px;
+  height: 4px;
+  margin-top: 4px;
   overflow: hidden;
   border-radius: 999px;
-  background: rgba(224, 231, 255, 0.9);
+  background: rgba(203, 213, 225, 0.62);
 }
 
 .authLoadingBar::after {
   content: "";
   position: absolute;
   inset: 0 auto 0 0;
-  width: 42%;
+  width: 40%;
   border-radius: inherit;
   background: linear-gradient(135deg, var(--grad-c), var(--grad-a), var(--grad-b));
-  animation: authLoadingBar 1.15s ease-in-out infinite;
+  animation: authLoadingBar 1.05s ease-in-out infinite;
 }
 
 .accessProfilePreview {
@@ -12063,6 +12988,40 @@ button {
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes authBrandIntro {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes authLogoBreath {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-4px) scale(1.025);
+  }
+}
+
+@keyframes authLogoPulse {
+  0% {
+    opacity: 0;
+    transform: scale(0.72);
+  }
+  28% {
+    opacity: 0.72;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.22);
   }
 }
 
@@ -12678,6 +13637,19 @@ button {
   .profileInfoGrid {
     grid-template-columns: 1fr;
   }
+
+  .dashboardInsights {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboardFilterPanel {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  }
+
+  .dashboardFilterPanel > .secondaryButton {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
 }
 
 @media (max-width: 1023px) {
@@ -12751,6 +13723,24 @@ button {
 
   .filterPanel {
     grid-template-columns: 1fr;
+  }
+
+  .dashboardFilterPanel {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboardHealthGrid,
+  .dashboardSourceList {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboardPanelHeader {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .dashboardPanelHeader > strong {
+    grid-column: 2;
+    justify-self: start;
   }
 
   .biofingerFilterPanel,
@@ -13560,13 +14550,26 @@ button {
   }
 
   .attendanceEvidenceMapCard .compactButton {
-    grid-column: 1;
+    grid-column: 1 / -1;
     width: 100%;
   }
 
   .attendanceEvidenceMap {
-    width: 100%;
-    height: 180px;
+    width: 62px;
+    height: 62px;
+  }
+
+  .attendanceEvidenceMapCard,
+  .attendanceEvidenceFaceCard {
+    grid-template-columns: 62px minmax(0, 1fr);
+    min-height: 76px;
+    padding: 10px 12px;
+  }
+
+  .attendanceFacePreview {
+    width: 62px;
+    height: 62px;
+    border-radius: 18px;
   }
 
   .attendanceEvidenceCell {
@@ -13581,9 +14584,13 @@ button {
 
   .attendanceReviewExpandPanel {
     grid-template-columns: 1fr;
-    gap: 0;
-    padding: 0 14px 14px;
+    gap: 14px;
+    padding: 14px;
     border-radius: 0;
+  }
+
+  .attendanceReviewExpandEvents {
+    grid-template-columns: 1fr;
   }
 
   .attendanceReviewEventPanel {
@@ -13604,10 +14611,50 @@ button {
     border-radius: 13px;
   }
 
+  .attendanceReviewEventPanelMeta {
+    padding-left: 0;
+  }
+
   .attendanceReviewApproveAll {
     width: 100%;
     min-width: 0;
-    justify-self: stretch;
+  }
+
+  .attendanceReviewExpandActions {
+    min-width: 0;
+  }
+
+  .overtimeReviewExpandPanel {
+    gap: 14px;
+    padding: 14px;
+  }
+
+  .overtimeReviewExpandSummary,
+  .overtimeReviewExpandFooter,
+  .overtimeReviewExpandGrid,
+  .overtimeReviewFactGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .overtimeReviewExpandGrid {
+    border-bottom: 0;
+  }
+
+  .overtimeReviewExpandGrid section,
+  .overtimeReviewExpandGrid section:first-child,
+  .overtimeReviewExpandGrid section:last-child {
+    padding: 14px 0;
+    border-right: 0;
+    border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+  }
+
+  .overtimeReviewExpandGrid section:last-child {
+    border-bottom: 0;
+  }
+
+  .overtimeReviewExpandFooter .compactButton {
+    width: 100%;
+    min-width: 0;
   }
 
   .attendanceTimelineCell {
@@ -15396,6 +16443,29 @@ button {
 }
 
 @media (max-width: 760px) {
+  .dashboardPanelHeader,
+  .dashboardHealthGrid,
+  .dashboardSignalStack {
+    padding-inline: 14px;
+  }
+
+  .dashboardDivisionStrip {
+    padding-inline: 14px;
+  }
+
+  .dashboardPanelHeader h2 {
+    font-size: 0.95rem;
+  }
+
+  .dashboardPanelHeader p {
+    font-size: 0.78rem;
+  }
+
+  .dashboardSourceBadge,
+  .dashboardSignalItem {
+    border-radius: 14px;
+  }
+
   .fieldReadinessSummary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px;
@@ -15469,6 +16539,37 @@ button {
   background: linear-gradient(135deg, rgba(248, 250, 252, 0.96), rgba(255, 255, 255, 0.96));
 }
 
+.attendanceSettlementCell.compact {
+  max-width: 100%;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.attendanceSettlementCell.compact .attendanceSettlementHeader {
+  gap: 7px;
+}
+
+.attendanceSettlementCell.compact .attendanceSettlementPulse {
+  width: 7px;
+  height: 7px;
+  box-shadow: 0 0 0 4px rgba(148, 163, 184, 0.1);
+}
+
+.attendanceSettlementCell.compact .attendanceSettlementHeader strong {
+  font-size: 0.82rem;
+  font-weight: 620;
+}
+
+.attendanceSettlementCell.compact > small {
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 520;
+}
+
 .attendanceSettlementHeader {
   display: flex;
   min-width: 0;
@@ -15520,6 +16621,52 @@ button {
   color: #64748b;
   font-size: 0.68rem;
   font-weight: 650;
+}
+
+.attendanceOvertimeInline {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  color: #64748b;
+  font-size: 0.69rem;
+  font-weight: var(--fw-body-strong);
+  line-height: 1.2;
+}
+
+.attendanceOvertimeInline > span {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 0 4px rgba(148, 163, 184, 0.1);
+}
+
+.attendanceOvertimeInline.tone-valid {
+  color: #047857;
+}
+
+.attendanceOvertimeInline.tone-valid > span {
+  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.12);
+}
+
+.attendanceOvertimeInline.tone-pending,
+.attendanceOvertimeInline.tone-planned {
+  color: #a05b00;
+}
+
+.attendanceOvertimeInline.tone-pending > span,
+.attendanceOvertimeInline.tone-planned > span {
+  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.12);
+}
+
+.attendanceOvertimeInline.tone-failed {
+  color: #be123c;
+}
+
+.attendanceOvertimeInline.tone-failed > span {
+  box-shadow: 0 0 0 4px rgba(244, 63, 94, 0.11);
 }
 
 .attendanceSettlementMetrics {
@@ -15721,4 +16868,481 @@ button {
 .appShell .liveAttendanceTableScroller .tableTextSecondary,
 .appShell .tableTextSecondary {
   font-weight: var(--fw-body);
+}
+
+/* Payroll foundation refinements */
+.payrollTableActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.payrollFinanceSummary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0;
+  margin: 0 22px 16px;
+  padding: 8px 0;
+  overflow: hidden;
+  border-top: 1px solid rgba(148, 163, 184, 0.16);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+  background: linear-gradient(90deg, rgba(248, 250, 252, 0.7), rgba(255, 255, 255, 0.92));
+}
+
+.payrollFinanceMetric {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-height: 54px;
+  padding: 8px 16px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.payrollFinanceMetric + .payrollFinanceMetric {
+  border-left: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.payrollFinanceMetric > span {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  color: var(--blue-ink);
+  border-radius: 0;
+  background: transparent;
+}
+
+.payrollFinanceMetric.success > span {
+  color: #047857;
+  background: transparent;
+}
+
+.payrollFinanceMetric.warning > span {
+  color: #b45309;
+  background: transparent;
+}
+
+.payrollFinanceMetric.neutral > span {
+  color: #536579;
+  background: transparent;
+}
+
+.payrollFinanceMetric div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.payrollFinanceMetric small {
+  color: #718098;
+  font-size: 0.7rem;
+  font-weight: var(--fw-label);
+}
+
+.payrollFinanceMetric strong {
+  overflow: hidden;
+  color: var(--ops-ink);
+  font-size: 0.96rem;
+  font-weight: var(--fw-number);
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.payrollFinanceMetric em {
+  overflow: hidden;
+  color: #748299;
+  font-size: 0.72rem;
+  font-style: normal;
+  font-weight: var(--fw-body);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.payrollTableToolbar {
+  padding: 0 22px 16px;
+}
+
+.payrollCycleTableScroller,
+.payrollHistoryTableScroller {
+  cursor: grab;
+}
+
+.payrollCycleTableScroller.dragging,
+.payrollHistoryTableScroller.dragging {
+  cursor: grabbing;
+}
+
+.payrollProcessDialog {
+  width: min(900px, calc(100vw - 40px));
+  max-height: calc(100dvh - 36px);
+  overflow: hidden;
+  padding: 0;
+  border-radius: 28px;
+}
+
+.payrollProcessShell {
+  display: flex;
+  width: 100%;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.payrollProcessHeader {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) 42px;
+  gap: 14px;
+  align-items: center;
+  justify-items: start;
+  padding: 22px 28px 18px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  text-align: left;
+}
+
+.payrollProcessHeader .foundationDialogClose {
+  position: static;
+  justify-self: end;
+}
+
+.payrollProcessIcon {
+  width: 52px;
+  height: 52px;
+  border-radius: 18px;
+  box-shadow: none;
+}
+
+.payrollProcessHeader > div {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.payrollProcessHeader > div > span,
+.payrollPaymentFormHeader strong {
+  color: var(--blue-ink);
+  font-size: 0.72rem;
+  font-weight: var(--fw-label);
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.payrollProcessHeader h2 {
+  margin: 0;
+  color: var(--ops-ink);
+  font-size: clamp(1.3rem, 1.7vw, 1.9rem);
+  font-weight: var(--fw-heading);
+  line-height: 1.08;
+}
+
+.payrollProcessHeader p {
+  max-width: 620px;
+  margin: 0;
+  color: var(--ops-muted);
+  font-size: 0.9rem;
+  font-weight: var(--fw-body);
+  line-height: 1.42;
+}
+
+.payrollProcessBody {
+  display: grid;
+  gap: 14px;
+  min-height: 0;
+  overflow: auto;
+  padding: 18px 28px;
+}
+
+.payrollProcessSummary {
+  display: grid;
+  gap: 12px;
+  padding: 0;
+}
+
+.payrollProcessEmployee {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 18px;
+  background: rgba(248, 251, 255, 0.86);
+}
+
+.payrollProcessGrid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.payrollProcessGrid > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  min-height: 70px;
+  padding: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.payrollProcessGrid small,
+.payrollProcessNotes span {
+  color: #748299;
+  font-size: 0.68rem;
+  font-weight: var(--fw-label);
+  text-transform: uppercase;
+}
+
+.payrollProcessGrid strong {
+  overflow: hidden;
+  color: var(--ops-ink);
+  font-size: 0.88rem;
+  font-weight: var(--fw-body-strong);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.payrollProcessGrid .payrollProcessTotal {
+  border-color: rgba(34, 174, 202, 0.22);
+  background: linear-gradient(135deg, rgba(237, 252, 255, 0.95), rgba(255, 255, 255, 0.92));
+}
+
+.payrollProcessGrid .payrollProcessTotal strong {
+  font-size: 1.05rem;
+  font-weight: var(--fw-number);
+}
+
+.payrollPaymentForm {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid rgba(34, 174, 202, 0.18);
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(236, 253, 255, 0.82), rgba(255, 255, 255, 0.92));
+}
+
+.payrollPaymentFormHeader {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.payrollPaymentFormHeader > svg {
+  box-sizing: content-box;
+  padding: 10px;
+  border-radius: 14px;
+  color: var(--blue-ink);
+  background: rgba(224, 242, 254, 0.9);
+}
+
+.payrollPaymentFormHeader div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.payrollPaymentFormHeader small {
+  color: var(--ops-muted);
+  font-size: 0.78rem;
+  font-weight: var(--fw-body);
+}
+
+.payrollPaymentFields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.payrollPaymentDelta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  color: #047857;
+  background: rgba(209, 250, 229, 0.66);
+}
+
+.payrollPaymentDelta.hasDelta {
+  color: #b45309;
+  background: rgba(254, 243, 199, 0.75);
+}
+
+.payrollPaymentDelta span {
+  font-size: 0.74rem;
+  font-weight: var(--fw-label);
+}
+
+.payrollPaymentDelta strong {
+  font-size: 0.9rem;
+  font-weight: var(--fw-body-strong);
+}
+
+.payrollProcessNotes {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+}
+
+.payrollProcessNotes textarea {
+  min-height: 84px;
+  resize: vertical;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 17px;
+  padding: 13px 14px;
+  color: var(--ops-ink);
+  background: #ffffff;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: var(--fw-body);
+  outline: none;
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.payrollProcessNotes textarea:focus {
+  border-color: rgba(34, 174, 202, 0.55);
+  box-shadow: 0 0 0 4px rgba(34, 174, 202, 0.12);
+}
+
+.payrollProcessDialog .attendanceReviewActions {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.8fr) minmax(220px, 1.2fr);
+  gap: 12px;
+  padding: 16px 28px 22px;
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.96);
+}
+
+@media (max-width: 980px) {
+  .payrollFinanceSummary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .payrollFinanceMetric:nth-child(odd) {
+    border-left: 0;
+  }
+
+  .payrollFinanceMetric:nth-child(n + 3) {
+    border-top: 1px solid rgba(148, 163, 184, 0.16);
+  }
+
+  .payrollProcessGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .payrollProcessGrid .payrollProcessTotal {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 620px) {
+  .payrollFinanceSummary {
+    grid-template-columns: 1fr;
+    margin-inline: 14px;
+  }
+
+  .payrollFinanceMetric + .payrollFinanceMetric {
+    border-left: 0;
+    border-top: 1px solid rgba(148, 163, 184, 0.16);
+  }
+
+  .payrollTableToolbar {
+    padding-inline: 14px;
+  }
+
+  .payrollTableActions {
+    justify-content: stretch;
+  }
+
+  .payrollTableActions .secondaryButton {
+    flex: 1 1 160px;
+  }
+
+  .payrollProcessDialog {
+    width: min(100%, calc(100vw - 20px));
+    max-height: calc(100dvh - 20px);
+    border-radius: 24px;
+  }
+
+  .payrollProcessHeader {
+    grid-template-columns: 42px minmax(0, 1fr) 40px;
+    gap: 10px;
+    padding: 18px 16px 14px;
+  }
+
+  .payrollProcessIcon {
+    width: 42px;
+    height: 42px;
+    border-radius: 15px;
+  }
+
+  .payrollProcessHeader h2 {
+    font-size: 1.18rem;
+  }
+
+  .payrollProcessHeader p {
+    font-size: 0.78rem;
+  }
+
+  .payrollProcessBody {
+    padding: 14px 16px;
+  }
+
+  .payrollProcessEmployee {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .payrollProcessGrid,
+  .payrollPaymentFields {
+    grid-template-columns: 1fr;
+  }
+
+  .payrollProcessGrid .payrollProcessTotal {
+    grid-column: auto;
+  }
+
+  .payrollProcessDialog .attendanceReviewActions {
+    grid-template-columns: 1fr;
+    padding: 12px 16px max(14px, env(safe-area-inset-bottom));
+  }
+}
+
+@media (max-width: 720px) {
+  .employeeCycleOpeningPanel {
+    gap: 11px;
+    padding: 12px;
+    border-radius: 20px;
+  }
+
+  .employeeCycleOpeningHeader {
+    grid-template-columns: 38px minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .employeeCycleOpeningHeader > span {
+    width: 38px;
+    height: 38px;
+    border-radius: 14px;
+  }
+
+  .employeeCycleOpeningHeader em {
+    grid-column: 1 / -1;
+    justify-self: stretch;
+    width: 100%;
+    max-width: none;
+    padding: 9px 10px;
+  }
+
+  .employeeCycleOpeningGrid {
+    grid-template-columns: 1fr;
+  }
 }

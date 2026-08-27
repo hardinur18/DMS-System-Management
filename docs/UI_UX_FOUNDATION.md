@@ -144,9 +144,10 @@ Komponen yang perlu dibuat sejak awal:
 Form DMS memakai foundation reusable di `src/components/form-field.tsx`:
 
 - `FormField` untuk wrapper label dan control.
+- `FormField` boleh memakai helper text pendek untuk menjelaskan dampak field; helper text harus ringan, tidak bold, dan tidak menggantikan validasi.
 - `TextFormField` untuk input text, email, number, dan field umum.
 - `SelectFormField` untuk dropdown native yang sudah distyling ulang.
-- `DateFormField` untuk field tanggal dengan kalender custom.
+- `DateFormField` untuk field tanggal dengan kalender custom, termasuk disabled state saat schema/fitur backend belum tersedia.
 - `DatePickerField` berada di `src/components/date-picker-field.tsx` dan menggantikan native browser date picker.
 - `SwitchFormField` untuk status aktif/nonaktif dengan animasi switch.
 
@@ -198,6 +199,14 @@ Komponen operasional reusable:
 - Pagination table memakai `DataTablePagination` di `src/components/data-table.tsx`.
 - Loading dan cache data memakai `FoundationSkeleton`, `FoundationTableSkeletonRows`, dan `useFoundationCachedData` di `src/components/foundation-loading.tsx`.
 
+Standar filter operasional:
+
+- Page berbasis karyawan wajib menyediakan filter divisi bila data row punya `divisionName`.
+- Urutan filter yang disarankan: tanggal/periode bila ada, divisi, search, status, lalu reset.
+- Filter divisi memakai `FoundationSelect`, bukan dropdown native browser.
+- Reset filter harus mengembalikan search, divisi, status, dan tanggal/periode ke default page tersebut.
+- Angka tab, meta header, tabel, dan riwayat terkait harus membaca dataset yang sudah terfilter agar tidak membingungkan.
+
 Standar tab kategori:
 
 - Desktop memakai compact pill tabs.
@@ -229,6 +238,17 @@ Aturan penggunaan:
 - Jangan memakai text `...` sebagai loading data. Gunakan skeleton shimmer.
 - Jangan memakai progress bar besar untuk table/dashboard data biasa. Progress bar hanya untuk proses panjang yang punya tahapan nyata.
 - Empty state hanya muncul setelah request selesai dan hasil data memang kosong.
+
+## Dashboard Pattern
+
+Dashboard adalah ringkasan operasional, bukan tempat CRUD utama.
+
+- Data dashboard wajib memakai cache foundation agar user tidak melihat blank loading saat kembali dari page lain.
+- Filter dashboard harus benar-benar memfilter data yang tampil: pencarian, divisi, dan status tidak boleh hanya visual.
+- KPI atas membaca scope filter aktif agar angka yang tampil sesuai tabel dan insight.
+- Gunakan visual ringan seperti progress bar kecil, signal list, dan source badge untuk scanning cepat. Hindari card berulang terlalu banyak.
+- Tabel dashboard wajib bisa horizontal scroll/drag, punya pagination, dan export yang membaca data hasil filter.
+- Tombol `Refresh Data` melakukan refresh backend/silent revalidate tanpa menghapus UI lama.
 
 ## Attendance Source Pattern
 
@@ -270,7 +290,7 @@ Live Absensi dan Rekap Absensi tidak boleh hanya membaca durasi mentah dari `att
 - Shift malam boleh melewati tanggal kalender. Backend harus menyimpan `scheduled_end_at` di tanggal berikutnya bila `end_time <= start_time`.
 - Koreksi checkout harus menyediakan tanggal dan jam pulang. Untuk shift reguler tanggal pulang sama dengan tanggal absensi; untuk shift malam boleh tanggal berikutnya.
 - Tombol `Refresh Data` di Live/Rekap menjalankan refresh summary backend untuk tanggal operasional terbaru. Bila range terlalu besar, backend refresh dibatasi ke maksimal 31 hari terakhir agar tidak timeout, sementara UI tetap membaca range yang dipilih.
-- Refresh payroll/overtime yang berat hanya dijalankan dari view payroll, bukan setiap kali HR membuka Live Absensi.
+- Refresh payroll/overtime yang berat hanya dijalankan dari view Payroll atau Approval saat tab Lembur aktif, bukan setiap kali HR membuka Live Absensi.
 - Load awal halaman cukup membaca data summary yang sudah ada agar UI tidak terasa berat.
 
 ## Overtime Payroll Pattern
@@ -287,12 +307,20 @@ Lembur payroll tidak boleh sekadar membaca `pulang lewat jam shift`.
 - HR/Finance tetap wajib approve/reject menit yang dibayar sebelum masuk payroll amount.
 - Form manual lembur hanya untuk exception atau koreksi khusus; flow utama berasal dari absensi final.
 - Approved overtime memperbarui `payroll_cycles.overtime_amount`; locked/paid payroll tidak boleh berubah tanpa audit.
-- Lembur terencana dibuat dari Payroll > Request Lembur. Status awalnya `Terencana/draft`, tidak payable.
+- Lembur terencana dibuat dari Approval > Lembur > Request Lembur. Status awalnya `Terencana/draft`, tidak payable.
 - Request lembur menyimpan karyawan, tanggal, jam rencana mulai-selesai, alasan, pembuat request, dan waktu request.
 - Setelah checkout real masuk dan settlement menghitung menit payable, request berubah menjadi kandidat `Pending` untuk approval pembayaran.
 - Tabel Approval Lembur wajib memperlihatkan basis hitung dan status realisasi: `Sesuai request`, `Kurang dari request`, `Lebih dari request`, `Tanpa request`, atau `Menunggu checkout`.
 - Approval payroll tidak boleh aktif untuk request yang belum punya checkout real dan `overtime_minutes > 0`.
 - Tabel Approval Lembur boleh menampilkan request terencana, tapi harus jelas membedakan `Terencana`, `Pending`, `Approved`, dan `Rejected`.
+- Default filter Approval Lembur menampilkan queue aktif dan approved saja. `Rejected` dipertahankan sebagai riwayat audit, tetapi dibuka lewat filter eksplisit agar tabel utama tidak penuh.
+- Detail Approval Lembur memakai inline collapse datar seperti tab Absensi Review. Row utama hanya ringkasan; rencana, realisasi checkout, rate, basis hitung, catatan request, dan nominal payroll masuk ke collapse.
+- Menu Approval menjadi pusat queue operasional. Tab Absensi Review menampung GPS/face/manual review, sedangkan tab Lembur menampung request terencana, kandidat pending, approved, dan rejected.
+- Halaman Approval boleh dibuka oleh `attendance.review` atau `overtime.review`; tab yang tampil wajib mengikuti permission user agar Finance bisa review lembur tanpa harus diberi akses approve absensi.
+- Aksi massal di Approval wajib memakai dialog konfirmasi. Reject wajib punya catatan agar audit trail bisa ditelusuri.
+- Detail Approval Absensi memakai inline collapse datar seperti Live/Rekap. Isi collapse dibagi section Masuk/Pulang dengan evidence dan aksi review, tanpa card bertumpuk; tombol expand row icon-only tanpa border/background.
+- Dialog Review Absensi wajib menampilkan sumber event (`Biofinger / Fingerprint`, `App Lapangan`, `Kiosk`, atau `Manual HR`) dan raw `biofinger_event_id` bila tersedia, supaya HR bisa audit asal data tanpa membuka database.
+- Semua aksi Approval yang mengubah absensi atau lembur wajib menolak perubahan jika payroll cycle tanggal tersebut sudah `locked` atau `paid`.
 
 ## Master Data Form Mapping
 
@@ -451,6 +479,7 @@ Dropdown untuk filter dan form wajib memakai komponen foundation, bukan native s
 - Scroll container luar harus menjaga posisi menu, bukan membuat menu terasa loncat.
 - Option aktif memakai highlight ringan dan ikon check, bukan warna blok berat.
 - Dropdown di mobile tetap nyaman disentuh dan tidak membuat dialog melebar.
+- Trigger dropdown harus menampilkan value paling penting saja. Detail pendukung seperti kode karyawan boleh tampil sebagai teks kecil di option menu, bukan ikut memenuhi trigger.
 
 ## Mobile Standard
 
@@ -491,10 +520,16 @@ Attendance monitor harus punya:
 Payroll cycle harus sangat jelas:
 
 - Progress `x/26 hari kerja`.
-- Status cycle: active, ready, processing, paid, closed.
+- Transisi payroll yang sudah berjalan sebelum DMS memakai `Saldo Awal Cycle` dan `Tanggal Awal Cycle` di form karyawan hanya untuk metode `Cycle 26 Hari`. Contoh: sudah jalan 15 hari, isi saldo awal 15 agar absensi real berikutnya menjadi 16/26. Metode kalender/custom tidak menampilkan dan tidak menyimpan saldo awal cycle.
+- Bahasa status payroll di UI: `Berjalan`, `Siap Dicek`, `Menunggu Bayar`, `Terbayar`, dan `Dibatalkan`. Hindari label teknis seperti locked/paid/void di tampilan operasional.
 - Detail hari yang dihitung dan tidak dihitung.
 - Bonus, potongan, dan kasbon terpisah sebagai ledger.
 - Payroll final harus lock dan punya audit trail.
+- Proses payroll dan Riwayat Bayar harus dipisah dengan tab. Tab utama: `Berjalan`, `Siap Dicek`, `Final`, `Riwayat Bayar`, `Dibatalkan`, dan `Semua Cycle`. `Final` berarti nominal sudah dikunci dan sedang menunggu pembayaran. `Semua Cycle` adalah rekap cycle payroll per karyawan, bukan transaksi pembayaran.
+- Action `Catat Pembayaran` wajib membuat baris di `payroll_payments` berisi nomor bayar, tanggal bayar, metode, referensi, nominal, actor, dan catatan finance.
+- Data yang sudah `Terbayar` tidak boleh berubah otomatis saat refresh absensi/lembur. Kalau perlu koreksi setelah terbayar, lakukan via reversal/pembatalan terkontrol, bukan edit diam-diam.
+- Sebelum payroll dibayar, sistem wajib menolak jika masih ada absensi review atau lembur draft/pending di periode cycle tersebut.
+- Summary finance harus langsung menjawab total siap proses, cycle menunggu dibayar, total sudah terbayar, dan cycle yang masih berjalan.
 
 ## Performance Rules
 

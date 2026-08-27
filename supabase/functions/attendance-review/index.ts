@@ -57,6 +57,35 @@ function buildJakartaDateTime(attendanceDate: string, time: string, label: strin
   return `${attendanceDate}T${normalizedTime}:00+07:00`
 }
 
+async function getFinalPayrollCycleBlock(
+  adminClient: ReturnType<typeof createClient>,
+  employeeId: string,
+  attendanceDate: string,
+) {
+  const { data: payrollCycle, error } = await adminClient
+    .from("payroll_cycles")
+    .select("id, cycle_number, status, period_started_at, period_closed_at")
+    .eq("employee_id", employeeId)
+    .in("status", ["locked", "paid"])
+    .lte("period_started_at", attendanceDate)
+    .or(`period_closed_at.is.null,period_closed_at.gte.${attendanceDate}`)
+    .order("period_started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) throw error
+  if (!payrollCycle) return null
+
+  return jsonResponse({
+    error: payrollCycle.status === "paid"
+      ? "Payroll cycle sudah terbayar. Absensi tidak bisa diubah dari Approval."
+      : "Payroll cycle sudah locked. Absensi tidak bisa diubah dari Approval.",
+    payroll_cycle_id: payrollCycle.id,
+    payroll_cycle_number: payrollCycle.cycle_number,
+    payroll_status: payrollCycle.status,
+  }, 409)
+}
+
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders })
   if (request.method !== "POST") return jsonResponse({ error: "Method not allowed" }, 405)
@@ -86,6 +115,9 @@ Deno.serve(async (request) => {
     const payload = body.payload || {}
 
     assertPayload(action === "approve" || action === "reject" || action === "reset_day" || action === "correct_checkin" || action === "correct_checkout", "Action review tidak valid.")
+    if (action === "reject" && !payload.notes?.trim()) {
+      return jsonResponse({ error: "Catatan wajib diisi untuk reject absensi." }, 400)
+    }
 
     const token = authorization.replace(/^Bearer\s+/i, "")
     const { data: authData, error: authError } = await userClient.auth.getUser(token)
@@ -116,6 +148,8 @@ Deno.serve(async (request) => {
       assertPayload(payload.attendanceDate && /^\d{4}-\d{2}-\d{2}$/.test(payload.attendanceDate), "Tanggal absensi wajib format YYYY-MM-DD.")
       const employeeId = payload.employeeId as string
       const attendanceDate = payload.attendanceDate as string
+      const payrollBlock = await getFinalPayrollCycleBlock(adminClient, employeeId, attendanceDate)
+      if (payrollBlock) return payrollBlock
 
       const { data: logs, error: logsError } = await adminClient
         .from("attendance_logs")
@@ -221,6 +255,8 @@ Deno.serve(async (request) => {
 
       const employeeId = payload.employeeId as string
       const attendanceDate = payload.attendanceDate as string
+      const payrollBlock = await getFinalPayrollCycleBlock(adminClient, employeeId, attendanceDate)
+      if (payrollBlock) return payrollBlock
       const checkInDate = payload.checkInDate && /^\d{4}-\d{2}-\d{2}$/.test(payload.checkInDate)
         ? payload.checkInDate
         : attendanceDate
@@ -348,6 +384,8 @@ Deno.serve(async (request) => {
 
       const employeeId = payload.employeeId as string
       const attendanceDate = payload.attendanceDate as string
+      const payrollBlock = await getFinalPayrollCycleBlock(adminClient, employeeId, attendanceDate)
+      if (payrollBlock) return payrollBlock
       const checkOutDate = payload.checkOutDate && /^\d{4}-\d{2}-\d{2}$/.test(payload.checkOutDate)
         ? payload.checkOutDate
         : attendanceDate
@@ -487,6 +525,9 @@ Deno.serve(async (request) => {
 
     if (attendanceError) throw attendanceError
     if (!attendance) return jsonResponse({ error: "Data absensi tidak ditemukan." }, 404)
+
+    const payrollBlock = await getFinalPayrollCycleBlock(adminClient, attendance.employee_id, attendance.attendance_date)
+    if (payrollBlock) return payrollBlock
 
     const { data: dayLogs, error: dayLogsError } = await adminClient
       .from("attendance_logs")

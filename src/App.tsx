@@ -68,7 +68,7 @@ import { FoundationDialog, FoundationDialogCloseButton } from "./components/foun
 import { FoundationRefreshButton } from "./components/foundation-refresh-button"
 import { FoundationSkeleton, FoundationTableSkeletonRows, useFoundationCachedData } from "./components/foundation-loading"
 import { FoundationSelect } from "./components/foundation-select"
-import { DateFormField, SegmentedFormField, SelectFormField, SwitchFormField, TextFormField } from "./components/form-field"
+import { DateFormField, FormField, SegmentedFormField, SelectFormField, SwitchFormField, TextFormField } from "./components/form-field"
 import { AutoStatusBadge, StatusBadge as UiStatusBadge } from "./components/status-badge"
 import {
   OperationalFilterPanel,
@@ -103,6 +103,9 @@ type AttendanceSettlementStatus = "ready" | "running" | "short" | "missing_check
 type AttendanceSettlementTone = "valid" | "pending" | "failed" | "missing"
 type PayrollStatus = "active" | "ready" | "locked" | "paid" | "void"
 type PayrollProcessAction = "lock" | "mark_paid" | "unlock" | "void" | "restore"
+type PayrollPaymentMethod = "cash" | "bank_transfer" | "ewallet" | "other"
+type PayrollPaymentStatus = "paid" | "void" | "reversed"
+type PayrollLedgerTab = "active" | "ready" | "locked" | "paid" | "void" | "all"
 type AttendanceLogStatus = "valid" | "review" | "rejected"
 type AttendanceGpsStatus = "valid" | "out_of_radius" | "missing"
 type AttendanceFaceStatus = "verified" | "review" | "failed" | "not_required"
@@ -187,6 +190,16 @@ interface AttendanceMonitorRow {
   earlyLeaveMinutes: number
   shortageMinutes: number
   overtimeMinutes: number
+  overtimeRequestId: string
+  overtimeRequestStatus: OvertimeStatus | ""
+  overtimeRequestSource: OvertimeRequestSource | ""
+  overtimeRequestReason: string
+  overtimePlannedMinutes: number
+  overtimeApprovedMinutes: number
+  overtimePayableMinutes: number
+  overtimeRateAmount: number
+  overtimeTotalAmount: number
+  overtimeBasis: OvertimeCalculationBasis | ""
   lastActivityAt: string
   settlementStatus: AttendanceSettlementStatus
   settlementLabel: string
@@ -218,6 +231,10 @@ interface AttendanceReviewRow {
   radiusM: number | null
   workLocationLatitude: string
   workLocationLongitude: string
+  source: string
+  media: string
+  attendanceDeviceId: string
+  biofingerEventId: string
   workdayCounted: boolean
   workDurationLabel: string
   pairedCheckInAt: string
@@ -317,6 +334,9 @@ interface OvertimeReviewRow {
   requestReason: string
   requestedAt: string
   matchedAttendance: boolean
+  payrollCycleId: string
+  payrollCycleNumber: number
+  payrollStatus: PayrollStatus
   componentName: string
   notes: string
 }
@@ -329,6 +349,36 @@ interface OvertimeRequestSubmitPayload {
   reason: string
 }
 
+interface PayrollPaymentRow {
+  id: string
+  paymentNo: string
+  payrollCycleId: string
+  employeeId: string
+  employeeCode: string
+  employeeName: string
+  cycleNumber: number
+  periodStartedAt: string
+  periodClosedAt: string
+  grossAmount: number
+  overtimeAmount: number
+  netAmount: number
+  paidAmount: number
+  paymentMethod: PayrollPaymentMethod
+  paymentReference: string
+  paidAt: string
+  paidByName: string
+  status: PayrollPaymentStatus
+  notes: string
+}
+
+interface PayrollProcessSubmitPayload {
+  notes: string
+  paymentMethod?: PayrollPaymentMethod
+  paymentReference?: string
+  paidAt?: string
+  paidAmount?: number
+}
+
 interface OperationsFoundationData {
   rows: AttendanceMonitorRow[]
   allRows: AttendanceMonitorRow[]
@@ -336,14 +386,16 @@ interface OperationsFoundationData {
   fieldReadiness: FieldReadinessRow[]
   reviews: AttendanceReviewRow[]
   overtime: OvertimeReviewRow[]
+  payrollPayments: PayrollPaymentRow[]
 }
 
 function createEmptyOperationsFoundationData(): OperationsFoundationData {
-  return { rows: [], allRows: [], locations: [], fieldReadiness: [], reviews: [], overtime: [] }
+  return { rows: [], allRows: [], locations: [], fieldReadiness: [], reviews: [], overtime: [], payrollPayments: [] }
 }
 
 type AttendanceDateMode = DateModePickerMode
 type AttendanceLoadScope = "full" | "attendance-recap"
+type ApprovalQueueTab = "attendance" | "overtime"
 
 interface AttendanceLoadOptions {
   startDate?: string
@@ -351,14 +403,17 @@ interface AttendanceLoadOptions {
   refreshBackend?: boolean
   refreshPayroll?: boolean
   scope?: AttendanceLoadScope
+  overtimeDateScoped?: boolean
+  includePayrollPayments?: boolean
 }
 
 function getOperationsFoundationCacheKey(
   selectedDate: string,
   range: Pick<AttendanceLoadOptions, "startDate" | "endDate">,
   scope: AttendanceLoadScope,
+  variant = "core",
 ) {
-  return `${scope}:${selectedDate}:${range.startDate || selectedDate}:${range.endDate || selectedDate}`
+  return `${variant}:${scope}:${selectedDate}:${range.startDate || selectedDate}:${range.endDate || selectedDate}`
 }
 
 interface FieldAttendanceSubmitPayload {
@@ -519,6 +574,7 @@ interface EmployeeDirectoryRow {
   lastCardIssuedAt: string
   joinDate: string
   payrollCycleDays: number
+  payrollCycleOpeningDate: string
   status: EmployeeStatus
   faceProfileId: string
   faceProfileStatus: EmployeeFaceProfileStatus
@@ -558,8 +614,10 @@ interface EmployeeFormValues {
   attendancePolicyId: string
   kioskAccessEnabled: boolean
   kioskSchemaReady: boolean
+  payrollOpeningSchemaReady: boolean
   joinDate: string
   payrollCycleDays: string
+  payrollCycleOpeningDate: string
   status: EmployeeStatus
   notes: string
 }
@@ -590,10 +648,11 @@ interface EmployeeDirectoryData {
   shifts: EmployeeOption[]
   policies: AttendancePolicyOption[]
   kioskSchemaReady: boolean
+  payrollOpeningSchemaReady: boolean
 }
 
 function createEmptyEmployeeDirectoryData(): EmployeeDirectoryData {
-  return { rows: [], divisions: [], positions: [], locations: [], shifts: [], policies: [], kioskSchemaReady: true }
+  return { rows: [], divisions: [], positions: [], locations: [], shifts: [], policies: [], kioskSchemaReady: true, payrollOpeningSchemaReady: true }
 }
 
 interface AttendanceKioskOption {
@@ -1210,6 +1269,7 @@ const guideArticles: GuideArticle[] = [
     steps: [
       "Tambah karyawan dari modul Karyawan dengan data identitas utama.",
       "Hubungkan divisi, jabatan, lokasi kerja, shift, dan tipe gaji.",
+      "Jika karyawan memakai metode Cycle 26 Hari dan masuk DMS di tengah periode payroll, isi Saldo Awal Cycle dan Tanggal Awal Cycle agar progress tidak mulai dari nol.",
       "Lengkapi profil wajah jika karyawan memakai absensi mobile face verification.",
       "Pastikan status aktif sebelum karyawan dipakai di absensi, Biofinger, atau payroll.",
     ],
@@ -1217,11 +1277,13 @@ const guideArticles: GuideArticle[] = [
       "Kode karyawan unik dan konsisten.",
       "Lokasi kerja serta shift sudah dipilih.",
       "Tipe gaji harian/bulanan sudah sesuai kebijakan.",
+      "Saldo awal cycle hanya diisi untuk metode Cycle 26 Hari saat transisi payroll berjalan; karyawan baru tetap 0/26.",
       "Karyawan nonaktif tidak ikut payroll aktif.",
     ],
     pitfalls: [
       "Jangan mapping Biofinger ke karyawan yang belum final datanya.",
       "Perubahan lokasi kerja perlu dicek ulang terhadap radius absensi.",
+      "Jangan isi Saldo Awal Cycle dari jumlah hari kalender atau metode Bulanan Kalender; pakai hari kerja valid yang sudah berjalan.",
     ],
     related: ["master-data", "biofinger-device", "payroll"],
   },
@@ -1255,22 +1317,24 @@ const guideArticles: GuideArticle[] = [
   {
     id: "attendance-review",
     viewId: "attendance-review",
-    title: "Approval Absensi",
+    title: "Approval",
     group: "Absensi",
-    summary: "Menyelesaikan absensi bermasalah seperti out-of-radius, wajah gagal, jam tidak lengkap, dan koreksi manual.",
+    summary: "Menyelesaikan absensi bermasalah dan approval lembur sebelum data masuk payroll.",
     icon: ClipboardList,
     audience: "HR, Supervisor",
     frequency: "Setiap ada antrian review",
     tags: ["approval", "review", "correction"],
     steps: [
-      "Buka antrian Approval dan pilih item yang perlu keputusan.",
-      "Baca detail bukti GPS, waktu, catatan, dan sumber event.",
+      "Buka Approval, lalu pilih tab Absensi Review atau Lembur.",
+      "Untuk absensi, baca detail bukti GPS, waktu, catatan, dan sumber event.",
+      "Untuk lembur, cek rencana, realisasi checkout, basis hitung, menit payable, dan estimasi bayar.",
       "Approve hanya jika bukti cukup; reject atau pending jika perlu klarifikasi.",
       "Tambahkan catatan audit agar keputusan bisa ditelusuri.",
     ],
     checks: [
-      "Setiap approval punya alasan yang jelas.",
+      "Setiap reject punya alasan yang jelas.",
       "Keputusan supervisor sesuai kebijakan HR.",
+      "Request lembur final tidak diproses ulang tanpa koreksi payroll terpisah.",
       "Item critical selesai sebelum payroll lock.",
     ],
     pitfalls: [
@@ -1320,11 +1384,11 @@ const guideArticles: GuideArticle[] = [
       "Pastikan rekap absensi dan approval periode sudah bersih.",
       "Pastikan komponen Lembur Weekday/Minggu aktif, unit Per Jam, dan Auto Detect Lembur menyala di Master Data > Komponen Gaji.",
       "Set basis hitung lembur: Weekday memakai Setelah Shift, sedangkan Minggu/Hari Libur memakai Full Durasi Kerja.",
-      "Untuk lembur terencana, buka Payroll > Request Lembur, pilih karyawan, tanggal, jam rencana, dan alasan.",
+      "Untuk lembur terencana, buka Approval > Lembur > Request Lembur, pilih karyawan, tanggal, jam rencana, dan alasan.",
       "Request lembur hanya menandai rencana; pembayaran tetap menunggu checkout real dan settlement absensi.",
       "Untuk Minggu/libur, karyawan tetap scan masuk dan pulang. Payable dihitung dari durasi kerja aktual.",
-      "Klik Refresh Data di Payroll untuk mencocokkan request dengan attendance settlement terbaru.",
-      "Review Approval Lembur: sistem menampilkan rencana, realisasi, basis hitung, dan estimasi bayar.",
+      "Klik Refresh Data di Approval saat tab Lembur aktif untuk mencocokkan request dengan attendance settlement terbaru.",
+      "Review di Approval > Lembur: sistem menampilkan rencana, realisasi, basis hitung, dan estimasi bayar.",
       "Approve/reject menit lembur yang dibayar beserta catatan HR/Finance.",
       "Cek komponen gaji, bonus, potongan, dan kasbon.",
       "Review draft payroll per karyawan sebelum lock.",
@@ -1540,14 +1604,16 @@ const guideArticles: GuideArticle[] = [
   },
 ]
 
-const viewPermissionMap: Partial<Record<ViewId, string>> = {
+type ViewPermissionRequirement = string | string[]
+
+const viewPermissionMap: Partial<Record<ViewId, ViewPermissionRequirement>> = {
   dashboard: "dashboard.view",
   "attendance-live": "attendance.view",
   "kiosk-mode": "attendance.view",
   biofinger: "biofinger.view",
   employees: "employees.view",
   "attendance-requests": "attendance.review",
-  "attendance-review": "attendance.review",
+  "attendance-review": ["attendance.review", "overtime.review"],
   "field-monitoring": "attendance.view",
   payroll: "payroll.view",
   "cash-advance": "cash_advance.manage",
@@ -1561,8 +1627,11 @@ const viewPermissionMap: Partial<Record<ViewId, string>> = {
 function canAccessView(profile: AppAccessProfile, view: ViewId) {
   if (view === "profile") return true
   if (view === "biofinger") return profile.permissions.includes("biofinger.view") || profile.permissions.includes("attendance.view")
-  const permission = viewPermissionMap[view]
-  return !permission || profile.permissions.includes(permission)
+  const requirement = viewPermissionMap[view]
+  if (!requirement) return true
+
+  const permissions = Array.isArray(requirement) ? requirement : [requirement]
+  return permissions.some((permission) => profile.permissions.includes(permission))
 }
 
 const masterCategories: MasterCategory[] = [
@@ -1635,11 +1704,24 @@ const statusLabel: Record<AttendanceStatus, string> = {
 }
 
 const payrollLabel: Record<PayrollStatus, string> = {
-  active: "Cycle Aktif",
-  ready: "Siap Gajian",
-  locked: "Locked",
+  active: "Berjalan",
+  ready: "Siap Dicek",
+  locked: "Menunggu Bayar",
   paid: "Terbayar",
-  void: "Void",
+  void: "Dibatalkan",
+}
+
+const payrollPaymentMethodLabel: Record<PayrollPaymentMethod, string> = {
+  cash: "Cash",
+  bank_transfer: "Transfer Bank",
+  ewallet: "E-Wallet",
+  other: "Lainnya",
+}
+
+const payrollPaymentStatusLabel: Record<PayrollPaymentStatus, string> = {
+  paid: "Terbayar",
+  void: "Dibatalkan",
+  reversed: "Dikoreksi",
 }
 
 const appScopeLabel: Record<AppScope, string> = {
@@ -3215,7 +3297,7 @@ function AttendanceTimelineCell({ row }: { row: AttendanceMonitorRow }) {
   )
 }
 
-function AttendanceSettlementCell({ row }: { row: AttendanceMonitorRow }) {
+function AttendanceSettlementCell({ row, compact = false }: { row: AttendanceMonitorRow; compact?: boolean }) {
   const scheduleLabel = getAttendanceShiftScheduleLabel(row)
   const metrics = [
     { label: "Wajib", value: row.expectedWorkMinutes === null ? "-" : formatMinutesDuration(row.expectedWorkMinutes), tone: "neutral" },
@@ -3227,21 +3309,35 @@ function AttendanceSettlementCell({ row }: { row: AttendanceMonitorRow }) {
   ].filter(Boolean) as Array<{ label: string; value: string; tone: string }>
 
   return (
-    <div className={clsx("attendanceSettlementCell", `tone-${row.settlementTone}`)}>
+    <div className={clsx("attendanceSettlementCell", compact && "compact", `tone-${row.settlementTone}`)}>
       <div className="attendanceSettlementHeader">
         <span className="attendanceSettlementPulse" aria-hidden="true" />
         <strong>{row.settlementLabel}</strong>
       </div>
       <small>{row.shiftName} / {scheduleLabel}</small>
-      <div className="attendanceSettlementMetrics">
-        {metrics.map((metric) => (
-          <span className={clsx("attendanceSettlementMetric", `tone-${metric.tone}`)} key={metric.label}>
-            <span>{metric.label}</span>
-            <strong>{metric.value}</strong>
-          </span>
-        ))}
-      </div>
+      <AttendanceOvertimeInline row={row} />
+      {!compact && (
+        <div className="attendanceSettlementMetrics">
+          {metrics.map((metric) => (
+            <span className={clsx("attendanceSettlementMetric", `tone-${metric.tone}`)} key={metric.label}>
+              <span>{metric.label}</span>
+              <strong>{metric.value}</strong>
+            </span>
+          ))}
+        </div>
+      )}
     </div>
+  )
+}
+
+function AttendanceOvertimeInline({ row }: { row: AttendanceMonitorRow }) {
+  if (!row.overtimeRequestId || !row.overtimeRequestStatus) return null
+
+  return (
+    <span className={clsx("attendanceOvertimeInline", `tone-${getAttendanceOvertimeTone(row.overtimeRequestStatus)}`)} title={getAttendanceOvertimeDetailMeta(row)}>
+      <span aria-hidden="true" />
+      {getAttendanceOvertimeInlineLabel(row)}
+    </span>
   )
 }
 
@@ -4126,8 +4222,10 @@ function createEmptyEmployeeForm(rows: EmployeeDirectoryRow[] = []): EmployeeFor
     attendancePolicyId: "",
     kioskAccessEnabled: true,
     kioskSchemaReady: true,
+    payrollOpeningSchemaReady: true,
     joinDate: new Date().toISOString().slice(0, 10),
     payrollCycleDays: "0",
+    payrollCycleOpeningDate: "",
     status: "active",
     notes: "",
   }
@@ -4410,6 +4508,28 @@ function isMissingBiofingerCommandSchema(error: unknown) {
   return message.includes("biofinger_device_commands")
     || message.includes("schema cache")
     || message.includes("relation")
+}
+
+function isMissingPayrollLedgerSchema(error: unknown) {
+  const errorObject = error && typeof error === "object" ? error as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown } : null
+  const message = `${String(errorObject?.code || "")} ${String(errorObject?.message || "")} ${String(errorObject?.details || "")} ${String(errorObject?.hint || "")}`.toLowerCase()
+  const schemaHints = [
+    "payroll_payments",
+    "payroll_cycle_items",
+    "rebuild_payroll_cycle_items",
+    "schema cache",
+    "relation",
+  ]
+
+  return schemaHints.some((hint) => message.includes(hint))
+}
+
+function isMissingPayrollOpeningSchema(error: unknown) {
+  const errorObject = error && typeof error === "object" ? error as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown } : null
+  const message = `${String(errorObject?.code || "")} ${String(errorObject?.message || "")} ${String(errorObject?.details || "")} ${String(errorObject?.hint || "")}`.toLowerCase()
+
+  return message.includes("payroll_cycle_opening_date")
+    || message.includes("schema cache")
 }
 
 function isMissingBiofingerMappingRpc(error: unknown) {
@@ -5219,6 +5339,7 @@ function mapEmployeeRow(
     lastCardIssuedAt: row.last_card_issued_at ? String(row.last_card_issued_at) : "",
     joinDate: row.join_date ? String(row.join_date) : "",
     payrollCycleDays: Number(row.payroll_cycle_days || 0),
+    payrollCycleOpeningDate: row.payroll_cycle_opening_date ? String(row.payroll_cycle_opening_date) : "",
     status: mapEmployeeStatus(row.status),
     faceProfileId: String(faceProfile?.id || ""),
     faceProfileStatus: mapEmployeeFaceProfileStatus(faceProfile?.status),
@@ -5236,7 +5357,9 @@ function mapEmployeeRow(
 }
 
 async function loadEmployeeData(): Promise<EmployeeDirectoryData> {
-  const baseEmployeeSelect = "id, employee_code, full_name, photo_path, nik, phone, email, division_id, position_id, work_location_id, shift_id, salary_type, daily_salary, monthly_salary, payroll_method, prorate_enabled, join_date, payroll_cycle_days, status, notes, deleted_at, created_at"
+  const legacyEmployeeSelect = "id, employee_code, full_name, photo_path, nik, phone, email, division_id, position_id, work_location_id, shift_id, salary_type, daily_salary, monthly_salary, payroll_method, prorate_enabled, join_date, payroll_cycle_days, status, notes, deleted_at, created_at"
+  const baseEmployeeSelect = `${legacyEmployeeSelect}, payroll_cycle_opening_date`
+  const legacyKioskEmployeeSelect = `${legacyEmployeeSelect}, qr_token, rfid_uid, attendance_policy_id, kiosk_access_enabled, last_card_issued_at`
   const kioskEmployeeSelect = `${baseEmployeeSelect}, qr_token, rfid_uid, attendance_policy_id, kiosk_access_enabled, last_card_issued_at`
   const employeeQuery = supabase.from("employees").select(kioskEmployeeSelect).order("employee_code", { ascending: true })
   const [initialEmployeesResult, divisions, positions, locations, shifts, faceProfiles, policies, biofingerLinksResult, biofingerDevicesResult] = await Promise.all([
@@ -5250,10 +5373,32 @@ async function loadEmployeeData(): Promise<EmployeeDirectoryData> {
     supabase.from("employee_attendance_device_links").select("id, employee_id, attendance_device_id, external_user_id, external_uid, external_name, status, matched_by, last_seen_at, last_synced_at"),
     supabase.from("attendance_devices").select("id, device_code, name, serial_number"),
   ])
-  const kioskSchemaReady = !initialEmployeesResult.error || !isMissingKioskEmployeeSchema(initialEmployeesResult.error)
-  const employeesResult = kioskSchemaReady
-    ? initialEmployeesResult
-    : await supabase.from("employees").select(baseEmployeeSelect).order("employee_code", { ascending: true })
+  let kioskSchemaReady = true
+  let payrollOpeningSchemaReady = true
+  let employeesResult = initialEmployeesResult as {
+    data: Array<Record<string, unknown>> | null
+    error: unknown | null
+  }
+
+  if (initialEmployeesResult.error) {
+    if (isMissingPayrollOpeningSchema(initialEmployeesResult.error)) {
+      payrollOpeningSchemaReady = false
+      employeesResult = await supabase.from("employees").select(legacyKioskEmployeeSelect).order("employee_code", { ascending: true })
+
+      if (employeesResult.error && isMissingKioskEmployeeSchema(employeesResult.error)) {
+        kioskSchemaReady = false
+        employeesResult = await supabase.from("employees").select(legacyEmployeeSelect).order("employee_code", { ascending: true })
+      }
+    } else if (isMissingKioskEmployeeSchema(initialEmployeesResult.error)) {
+      kioskSchemaReady = false
+      employeesResult = await supabase.from("employees").select(baseEmployeeSelect).order("employee_code", { ascending: true })
+
+      if (employeesResult.error && isMissingPayrollOpeningSchema(employeesResult.error)) {
+        payrollOpeningSchemaReady = false
+        employeesResult = await supabase.from("employees").select(legacyEmployeeSelect).order("employee_code", { ascending: true })
+      }
+    }
+  }
   const error = employeesResult.error || divisions.error || positions.error || locations.error || shifts.error || faceProfiles.error
 
   if (error) throw error
@@ -5335,10 +5480,12 @@ async function loadEmployeeData(): Promise<EmployeeDirectoryData> {
     shifts: shiftOptions,
     policies: policyOptions,
     kioskSchemaReady,
+    payrollOpeningSchemaReady,
   }
 }
 
 function createEmployeePayload(values: EmployeeFormValues, photoPath = values.photoPath) {
+  const usesAttendanceCycle = values.payrollMethod === "attendance_cycle"
   const payload: Record<string, unknown> = {
     employee_code: values.employeeCode.trim().toUpperCase(),
     full_name: values.fullName.trim(),
@@ -5356,9 +5503,13 @@ function createEmployeePayload(values: EmployeeFormValues, photoPath = values.ph
     payroll_method: values.payrollMethod,
     prorate_enabled: values.prorateEnabled,
     join_date: values.joinDate || null,
-    payroll_cycle_days: Number(values.payrollCycleDays || 0),
+    payroll_cycle_days: usesAttendanceCycle ? Number(values.payrollCycleDays || 0) : 0,
     status: values.status,
     notes: values.notes.trim() || null,
+  }
+
+  if (values.payrollOpeningSchemaReady) {
+    payload.payroll_cycle_opening_date = usesAttendanceCycle ? values.payrollCycleOpeningDate || null : null
   }
 
   if (values.kioskSchemaReady) {
@@ -5392,7 +5543,10 @@ function validateEmployeeForm(values: EmployeeFormValues) {
   if (values.salaryType === "daily" && Number.isFinite(dailySalary) && dailySalary > maxEmployeeDailySalary) errors.push(`Gaji harian maksimal ${formatCurrency(maxEmployeeDailySalary)}.`)
   if (values.salaryType === "monthly" && (!Number.isFinite(monthlySalary) || monthlySalary < 0)) errors.push("Gaji bulanan wajib angka 0 atau lebih.")
   if (values.salaryType === "monthly" && Number.isFinite(monthlySalary) && monthlySalary > maxEmployeeMonthlySalary) errors.push(`Gaji bulanan maksimal ${formatCurrency(maxEmployeeMonthlySalary)}.`)
-  if (!Number.isFinite(payrollCycleDays) || payrollCycleDays < 0 || payrollCycleDays > 26) errors.push("Cycle payroll harus 0 sampai 26 hari.")
+  if (values.payrollMethod === "attendance_cycle") {
+    if (!Number.isFinite(payrollCycleDays) || payrollCycleDays < 0 || payrollCycleDays > 26) errors.push("Saldo awal cycle harus 0 sampai 26 hari.")
+    if (values.payrollOpeningSchemaReady && payrollCycleDays > 0 && !values.payrollCycleOpeningDate) errors.push("Tanggal awal cycle wajib diisi saat saldo awal lebih dari 0.")
+  }
   if (!emailValid) errors.push("Email karyawan belum valid.")
   if (!photoFileValid) errors.push("Foto wajib JPG, PNG, atau WEBP.")
   if (!photoSizeValid) errors.push("Ukuran foto maksimal 2MB.")
@@ -5424,6 +5578,14 @@ async function uploadEmployeePhoto(values: EmployeeFormValues) {
   return path
 }
 
+async function refreshEmployeePayrollCyclesSilently(employeeId: string) {
+  try {
+    await supabase.rpc("refresh_employee_payroll_cycles", { target_employee_id: employeeId })
+  } catch {
+    // Payroll preview can be refreshed again from the payroll/attendance module.
+  }
+}
+
 async function saveEmployee(values: EmployeeFormValues, editingRow?: EmployeeDirectoryRow | null) {
   const originalPhotoPath = editingRow?.photoPath || values.photoPath
   const nextPhotoPath = values.photoFile
@@ -5441,9 +5603,10 @@ async function saveEmployee(values: EmployeeFormValues, editingRow?: EmployeeDir
         uploadedPath = await uploadEmployeePhoto(values)
       }
 
-      const { error } = await supabase.from("employees").insert(payload)
+      const { data, error } = await supabase.from("employees").insert(payload).select("id").single()
 
       if (error) throw error
+      if (data?.id) await refreshEmployeePayrollCyclesSilently(String(data.id))
     } catch (error) {
       if (uploadedPath) await removeEmployeePhoto(uploadedPath).catch(() => {})
       throw error
@@ -5464,6 +5627,8 @@ async function saveEmployee(values: EmployeeFormValues, editingRow?: EmployeeDir
     await supabase.from("employees").update({ photo_path: originalPhotoPath || null }).eq("id", editingRow.id)
     throw photoError
   }
+
+  await refreshEmployeePayrollCyclesSilently(editingRow.id)
 }
 
 async function updateEmployeeStatus(row: EmployeeDirectoryRow, status: EmployeeStatus) {
@@ -5500,7 +5665,7 @@ async function restoreEmployee(row: EmployeeDirectoryRow) {
 }
 
 function exportEmployeeCsv(rows: EmployeeDirectoryRow[]) {
-  const header = ["No", "Kode", "Nama", "Foto Path", "NIK", "Phone", "Email", "Divisi", "Jabatan", "Lokasi", "Shift", "Biofinger User ID", "Biofinger Device", "Biofinger Status", "Tipe Gaji", "Gaji Harian", "Gaji Bulanan", "Metode Payroll", "Hitung Proporsional", "Tanggal Masuk", "Cycle", "Status", "Catatan"]
+  const header = ["No", "Kode", "Nama", "Foto Path", "NIK", "Phone", "Email", "Divisi", "Jabatan", "Lokasi", "Shift", "Biofinger User ID", "Biofinger Device", "Biofinger Status", "Tipe Gaji", "Gaji Harian", "Gaji Bulanan", "Metode Payroll", "Hitung Proporsional", "Tanggal Masuk", "Saldo Awal Cycle", "Tanggal Awal Cycle", "Status", "Catatan"]
   const body = rows.map((row, index) => [
     index + 1,
     row.employeeCode,
@@ -5522,7 +5687,8 @@ function exportEmployeeCsv(rows: EmployeeDirectoryRow[]) {
     employeePayrollMethodLabel[row.payrollMethod],
     row.prorateEnabled ? "Ya" : "Tidak",
     row.joinDate,
-    row.payrollCycleDays,
+    row.payrollMethod === "attendance_cycle" ? row.payrollCycleDays : "",
+    row.payrollMethod === "attendance_cycle" ? row.payrollCycleOpeningDate : "",
     employeeStatusLabel[row.status],
     row.notes,
   ])
@@ -5539,7 +5705,7 @@ function exportEmployeeCsv(rows: EmployeeDirectoryRow[]) {
 }
 
 function exportPayrollCsv(rows: AttendanceMonitorRow[]) {
-  const header = ["No", "Kode", "Nama", "Divisi", "Lokasi", "Periode", "Cycle", "Tipe Gaji", "Gaji Pokok", "Lembur", "Total Payroll", "Status"]
+  const header = ["No", "Kode", "Nama", "Divisi", "Lokasi", "Periode", "Cycle", "Tipe Gaji", "Gaji Pokok", "Lembur", "Total Gaji", "Status"]
   const body = rows.map((row, index) => [
     index + 1,
     row.employeeCode,
@@ -5562,6 +5728,38 @@ function exportPayrollCsv(rows: AttendanceMonitorRow[]) {
   const link = document.createElement("a")
   link.href = url
   link.download = `dms-payroll-${new Date().toISOString().slice(0, 10)}.csv`
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
+function exportPayrollPaymentCsv(rows: PayrollPaymentRow[]) {
+  const header = ["No", "No Bayar", "Kode", "Nama", "Periode", "Cycle", "Gaji Pokok", "Lembur", "Total Gaji", "Nominal Bayar", "Metode", "Referensi", "Tanggal Bayar", "Dibayar Oleh", "Status", "Catatan"]
+  const body = rows.map((row, index) => [
+    index + 1,
+    row.paymentNo,
+    row.employeeCode,
+    row.employeeName,
+    formatPayrollPaymentPeriod(row),
+    row.cycleNumber,
+    row.grossAmount,
+    row.overtimeAmount,
+    row.netAmount,
+    row.paidAmount,
+    payrollPaymentMethodLabel[row.paymentMethod],
+    row.paymentReference,
+    formatUserDateTime(row.paidAt, "-"),
+    row.paidByName,
+    payrollPaymentStatusLabel[row.status],
+    row.notes,
+  ])
+  const csv = [header, ...body]
+    .map((columns) => columns.map((column) => `"${String(column).replace(/"/g, '""')}"`).join(","))
+    .join("\n")
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement("a")
+  link.href = url
+  link.download = `dms-payroll-paid-history-${new Date().toISOString().slice(0, 10)}.csv`
   link.click()
   URL.revokeObjectURL(url)
 }
@@ -5592,6 +5790,13 @@ function exportAttendanceRecapCsv(rows: AttendanceMonitorRow[], selectedDate: st
     "Kurang Jam (Menit)",
     "Lewat Shift",
     "Lewat Shift (Menit)",
+    "Request Lembur",
+    "Status Lembur",
+    "Sumber Lembur",
+    "Rencana Lembur (Menit)",
+    "Payable Lembur (Menit)",
+    "Approved Lembur (Menit)",
+    "Nominal Lembur",
     "Toleransi Telat",
     "Toleransi Telat (Menit)",
     "Toleransi Pulang Cepat",
@@ -5635,6 +5840,13 @@ function exportAttendanceRecapCsv(rows: AttendanceMonitorRow[], selectedDate: st
     row.shortageMinutes,
     formatMinutesDuration(row.overtimeMinutes),
     row.overtimeMinutes,
+    getAttendanceOvertimeInlineLabel(row),
+    row.overtimeRequestStatus ? getOvertimeStatusLabel(row.overtimeRequestStatus) : "",
+    row.overtimeRequestSource ? getOvertimeSourceLabel(row.overtimeRequestSource) : "",
+    row.overtimePlannedMinutes || "",
+    row.overtimePayableMinutes || "",
+    row.overtimeApprovedMinutes || "",
+    row.overtimeTotalAmount || "",
     formatMinutesDuration(row.shiftLateToleranceMinutes),
     row.shiftLateToleranceMinutes,
     formatMinutesDuration(row.shiftEarlyLeaveToleranceMinutes),
@@ -5749,6 +5961,20 @@ async function fetchSupabaseRangeRows<T>(
   }
 
   throw new Error("Data rekap terlalu besar untuk dimuat sekaligus. Persempit range tanggal lalu coba lagi.")
+}
+
+async function fetchPayrollPaymentRows() {
+  try {
+    const rows = await fetchSupabaseRangeRows<Record<string, unknown>>(() => supabase
+      .from("payroll_payments")
+      .select("id, payment_no, payroll_cycle_id, employee_id, employee_code, employee_name, cycle_number, period_started_at, period_closed_at, gross_amount, overtime_amount, net_amount, paid_amount, payment_method, payment_reference, paid_at, paid_by_name, status, notes")
+      .order("paid_at", { ascending: false })
+      .order("payment_no", { ascending: false }), 500, 20000)
+
+    return { data: rows, error: null }
+  } catch (error) {
+    return { data: [], error }
+  }
 }
 
 function formatAttendanceTime(value?: string | null) {
@@ -6080,6 +6306,11 @@ function getAttendanceSearchText(row: AttendanceMonitorRow) {
     row.checkInBiofingerEventId,
     row.checkOutBiofingerEventId,
     row.notes,
+    row.overtimeRequestStatus,
+    row.overtimeRequestSource,
+    row.overtimeRequestReason,
+    row.overtimeBasis,
+    getAttendanceOvertimeInlineLabel(row),
     ...operationalKeywords,
   ].join(" ").toLowerCase()
 }
@@ -6091,6 +6322,10 @@ function matchesAttendanceRecapStatus(row: AttendanceMonitorRow, statusFilter: s
   if (statusFilter === "late") return row.lateMinutes > 0
   if (statusFilter === "early_leave") return row.earlyLeaveMinutes > 0
   if (statusFilter === "overtime") return row.overtimeMinutes > 0
+  if (statusFilter === "overtime_request") return Boolean(row.overtimeRequestId)
+  if (statusFilter === "overtime_pending") return row.overtimeRequestStatus === "pending"
+  if (statusFilter === "overtime_planned") return row.overtimeRequestStatus === "draft" && row.overtimeRequestSource === "planned"
+  if (statusFilter === "overtime_approved") return row.overtimeRequestStatus === "approved"
   if (statusFilter === "running") return row.settlementStatus === "running"
   if (statusFilter === "missing_checkout") return row.settlementStatus === "missing_checkout"
   if (statusFilter === "missing_checkin" || statusFilter === "missing") return row.settlementStatus === "missing_checkin" || row.attendanceStatus === "missing"
@@ -6107,6 +6342,40 @@ function matchesAttendanceRecapStatus(row: AttendanceMonitorRow, statusFilter: s
 function mapPayrollCycleStatus(status: unknown): PayrollStatus {
   if (status === "ready" || status === "locked" || status === "paid" || status === "void") return status
   return "active"
+}
+
+function mapPayrollPaymentMethod(value: unknown): PayrollPaymentMethod {
+  if (value === "cash" || value === "ewallet" || value === "other") return value
+  return "bank_transfer"
+}
+
+function mapPayrollPaymentStatus(value: unknown): PayrollPaymentStatus {
+  if (value === "void" || value === "reversed") return value
+  return "paid"
+}
+
+function mapPayrollPaymentRecord(row: Record<string, unknown>): PayrollPaymentRow {
+  return {
+    id: String(row.id || ""),
+    paymentNo: String(row.payment_no || ""),
+    payrollCycleId: String(row.payroll_cycle_id || ""),
+    employeeId: String(row.employee_id || ""),
+    employeeCode: String(row.employee_code || ""),
+    employeeName: String(row.employee_name || "Karyawan"),
+    cycleNumber: Number(row.cycle_number || 0),
+    periodStartedAt: String(row.period_started_at || ""),
+    periodClosedAt: String(row.period_closed_at || ""),
+    grossAmount: Number(row.gross_amount || 0),
+    overtimeAmount: Number(row.overtime_amount || 0),
+    netAmount: Number(row.net_amount || 0),
+    paidAmount: Number(row.paid_amount || 0),
+    paymentMethod: mapPayrollPaymentMethod(row.payment_method),
+    paymentReference: String(row.payment_reference || ""),
+    paidAt: String(row.paid_at || ""),
+    paidByName: String(row.paid_by_name || ""),
+    status: mapPayrollPaymentStatus(row.status),
+    notes: String(row.notes || ""),
+  }
 }
 
 function getAttendanceMonitorStatus(row?: Record<string, unknown>): AttendanceStatus {
@@ -6149,6 +6418,20 @@ function getAttendanceReviewIssue(row: Record<string, unknown>) {
   return "Valid"
 }
 
+function mapOvertimeStatus(value: unknown): OvertimeStatus {
+  if (value === "approved" || value === "rejected" || value === "draft") return value
+  return "pending"
+}
+
+function mapOvertimeRequestSource(value: unknown): OvertimeRequestSource {
+  if (value === "planned" || value === "manual") return value
+  return "auto"
+}
+
+function mapOvertimeBasis(value: unknown): OvertimeCalculationBasis {
+  return value === "full_duration" ? "full_duration" : "extra_after_shift"
+}
+
 async function loadOperationsFoundationData(targetDate = getLocalDateKey(), options: AttendanceLoadOptions = {}): Promise<OperationsFoundationData> {
   const selectedDate = targetDate || getLocalDateKey()
   const { startDate, endDate } = normalizeAttendanceLoadRange(selectedDate, options)
@@ -6175,7 +6458,7 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
   }
 
   const attendanceLogColumns = "id, employee_id, work_location_id, attendance_date, event_type, event_at, latitude, longitude, distance_m, radius_m, gps_status, face_status, face_score, face_snapshot_path, status, workday_counted, source, attendance_media, attendance_device_id, biofinger_event_id, notes"
-  const [employeeResult, divisionResult, locationResult, shiftResult, attendanceRows, dailySummaryRows, reviewAttendanceResult, payrollRows, overtimeResult, payrollComponentResult, appUserResult, faceProfileResult] = await Promise.all([
+  const [employeeResult, divisionResult, locationResult, shiftResult, attendanceRows, dailySummaryRows, reviewAttendanceResult, payrollRows, overtimeResult, payrollComponentResult, appUserResult, faceProfileResult, payrollPaymentResult] = await Promise.all([
     supabase
       .from("employees")
       .select("id, employee_code, full_name, photo_path, division_id, work_location_id, shift_id, salary_type, daily_salary, monthly_salary, payroll_cycle_days, status, deleted_at")
@@ -6198,23 +6481,33 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
       .lte("attendance_date", endDate)
       .order("attendance_date", { ascending: false })
       .order("employee_id", { ascending: true })),
-    recapOnly ? emptyResult : supabase
+    recapOnly ? emptyResult : fetchSupabaseRangeRows<Record<string, unknown>>(() => supabase
       .from("attendance_logs")
       .select(attendanceLogColumns)
       .eq("status", "review")
+      .gte("attendance_date", startDate)
+      .lte("attendance_date", endDate)
       .order("event_at", { ascending: false })
-      .limit(200),
+      .order("id", { ascending: true }), 500, 10000).then((data) => ({ data, error: null })),
     fetchSupabaseRangeRows<Record<string, unknown>>(() => supabase
       .from("payroll_cycles")
       .select("id, employee_id, cycle_number, period_started_at, period_closed_at, work_days_count, target_work_days, gross_amount, overtime_amount, net_amount, salary_type, status, ready_at, locked_at, paid_at")
       .order("cycle_number", { ascending: false })
       .order("employee_id", { ascending: true }), 1000, 50000),
-    recapOnly ? emptyResult : supabase
-      .from("overtime_requests")
-      .select("id, employee_id, attendance_log_id, payroll_cycle_id, payroll_component_id, overtime_date, shift_start_time, shift_end_time, actual_check_out_at, overtime_minutes, approved_minutes, rate_amount, total_amount, day_type, overtime_basis, status, request_source, planned_start_at, planned_end_at, planned_minutes, request_reason, requested_at, matched_attendance, notes, created_at")
-      .order("overtime_date", { ascending: false })
-      .limit(200),
-    recapOnly ? emptyResult : supabase
+    fetchSupabaseRangeRows<Record<string, unknown>>(() => {
+      const query = supabase
+        .from("overtime_requests")
+        .select("id, employee_id, attendance_log_id, payroll_cycle_id, payroll_component_id, overtime_date, shift_start_time, shift_end_time, actual_check_out_at, overtime_minutes, approved_minutes, rate_amount, total_amount, day_type, overtime_basis, status, request_source, planned_start_at, planned_end_at, planned_minutes, request_reason, requested_at, matched_attendance, notes, created_at")
+
+      const scopedQuery = options.overtimeDateScoped === false
+        ? query
+        : query.gte("overtime_date", startDate).lte("overtime_date", endDate)
+
+      return scopedQuery
+        .order("overtime_date", { ascending: false })
+        .order("created_at", { ascending: false })
+    }, 500, 10000).then((data) => ({ data, error: null })),
+    supabase
       .from("payroll_components")
       .select("id, name, code, calculation_unit, rate_amount, day_type, overtime_basis, auto_detect_overtime"),
     recapOnly ? emptyResult : supabase
@@ -6225,8 +6518,10 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
     recapOnly ? emptyResult : supabase
       .from("employee_face_profiles")
       .select("employee_id, status, verification_required, face_score_threshold"),
+    options.includePayrollPayments ? fetchPayrollPaymentRows() : emptyResult,
   ])
-  const error = employeeResult.error || divisionResult.error || locationResult.error || shiftResult.error || reviewAttendanceResult.error || overtimeResult.error || payrollComponentResult.error || appUserResult.error || faceProfileResult.error
+  const payrollPaymentError = payrollPaymentResult.error && !isMissingPayrollLedgerSchema(payrollPaymentResult.error) ? payrollPaymentResult.error : null
+  const error = employeeResult.error || divisionResult.error || locationResult.error || shiftResult.error || reviewAttendanceResult.error || overtimeResult.error || payrollComponentResult.error || appUserResult.error || faceProfileResult.error || payrollPaymentError
 
   if (error) throw error
 
@@ -6242,10 +6537,11 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
     appUserByEmployee.set(employeeId, row)
   })
   const faceProfileMap = new Map(((faceProfileResult.data || []) as Array<Record<string, unknown>>).map((row) => [String(row.employee_id || ""), row]))
+  const reviewSourceLogs = (reviewAttendanceResult.data || []) as Array<Record<string, unknown>>
   const logsById = new Map<string, Record<string, unknown>>()
   const logs = [
     ...attendanceRows,
-    ...((reviewAttendanceResult.data || []) as Array<Record<string, unknown>>),
+    ...reviewSourceLogs,
   ].filter((row) => {
     const id = String(row.id || "")
     if (!id || logsById.has(id)) return false
@@ -6260,8 +6556,18 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
     if (employeeId && attendanceDate) summaryByEmployeeDate.set(`${employeeId}:${attendanceDate}`, row)
   })
   const overtimeRows = (overtimeResult.data || []) as Array<Record<string, unknown>>
+  const payrollPayments = (payrollPaymentResult.error && isMissingPayrollLedgerSchema(payrollPaymentResult.error))
+    ? []
+    : ((payrollPaymentResult.data || []) as Array<Record<string, unknown>>).map(mapPayrollPaymentRecord)
   const payrollComponentMap = new Map(((payrollComponentResult.data || []) as Array<Record<string, unknown>>).map((row) => [String(row.id), row]))
+  const overtimeByEmployeeDate = new Map<string, Record<string, unknown>>()
+  overtimeRows.forEach((row) => {
+    const employeeId = String(row.employee_id || "")
+    const overtimeDate = String(row.overtime_date || "")
+    if (employeeId && overtimeDate) overtimeByEmployeeDate.set(`${employeeId}:${overtimeDate}`, row)
+  })
   const payrollByEmployee = new Map<string, Record<string, unknown>>()
+  const payrollById = new Map((payrollRows || []).map((row) => [String(row.id || ""), row]))
 
   payrollRows.forEach((row) => {
     const employeeId = String(row.employee_id || "")
@@ -6298,6 +6604,8 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
     summary?: Record<string, unknown>,
   ): AttendanceMonitorRow => {
     const employeeId = String(employee.id)
+    const overtimeRequest = overtimeByEmployeeDate.get(`${employeeId}:${dateKey}`)
+    const overtimeComponent = payrollComponentMap.get(String(overtimeRequest?.payroll_component_id || ""))
     const attendance = (summary?.check_in_log_id ? logsById.get(String(summary.check_in_log_id)) : undefined) || selectedAttendance?.checkIn
     const checkOut = (summary?.check_out_log_id ? logsById.get(String(summary.check_out_log_id)) : undefined) || selectedAttendance?.checkOut
     const location = locationMap.get(String(summary?.work_location_id || employee.work_location_id || ""))
@@ -6344,6 +6652,9 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
     const earlyLeaveMinutes = Number(summary?.early_leave_minutes ?? fallbackSettlement.earlyLeaveMinutes)
     const shortageMinutes = Number(summary?.shortage_minutes ?? fallbackSettlement.shortageMinutes)
     const overtimeMinutes = Number(summary?.overtime_minutes ?? fallbackSettlement.overtimeMinutes)
+    const overtimeRequestStatus = overtimeRequest ? mapOvertimeStatus(overtimeRequest.status) : ""
+    const overtimeRequestSource = overtimeRequest ? mapOvertimeRequestSource(overtimeRequest.request_source) : ""
+    const overtimeBasis = overtimeRequest ? mapOvertimeBasis(overtimeRequest.overtime_basis || overtimeComponent?.overtime_basis) : ""
     const lastActivityAt = [checkOutAt, checkInAt, fallbackSettlement.lastActivityAt]
       .filter(Boolean)
       .sort((a, b) => new Date(String(b)).getTime() - new Date(String(a)).getTime())[0] || ""
@@ -6426,6 +6737,16 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
       earlyLeaveMinutes,
       shortageMinutes,
       overtimeMinutes,
+      overtimeRequestId: String(overtimeRequest?.id || ""),
+      overtimeRequestStatus,
+      overtimeRequestSource,
+      overtimeRequestReason: String(overtimeRequest?.request_reason || ""),
+      overtimePlannedMinutes: Number(overtimeRequest?.planned_minutes || 0),
+      overtimeApprovedMinutes: Number(overtimeRequest?.approved_minutes || 0),
+      overtimePayableMinutes: Number(overtimeRequest?.overtime_minutes || 0),
+      overtimeRateAmount: Number(overtimeRequest?.rate_amount || overtimeComponent?.rate_amount || 0),
+      overtimeTotalAmount: Number(overtimeRequest?.total_amount || 0),
+      overtimeBasis,
       lastActivityAt,
       settlementStatus,
       settlementLabel: getAttendanceSettlementLabel(settlementStatus, shortageMinutes),
@@ -6502,9 +6823,8 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
   allRows.sort(compareAttendanceRowsByLatestActivity)
 
   const employeesById = activeEmployeeMap
-  const reviewRows: AttendanceReviewRow[] = recapOnly ? [] : logs
+  const reviewRows: AttendanceReviewRow[] = recapOnly ? [] : reviewSourceLogs
     .filter((log) => log.status === "review")
-    .slice(0, 50)
     .map((log) => {
       const employee = employeesById.get(String(log.employee_id || ""))
       const location = locationMap.get(String(log.work_location_id || employee?.work_location_id || ""))
@@ -6536,6 +6856,10 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
         radiusM: Number(log.radius_m || location?.radius_m || 0) || null,
         workLocationLatitude: location?.latitude === null || location?.latitude === undefined ? "" : String(location?.latitude || ""),
         workLocationLongitude: location?.longitude === null || location?.longitude === undefined ? "" : String(location?.longitude || ""),
+        source: String(log.source || ""),
+        media: String(log.attendance_media || ""),
+        attendanceDeviceId: String(log.attendance_device_id || ""),
+        biofingerEventId: String(log.biofinger_event_id || ""),
         workdayCounted: log.workday_counted === true,
         workDurationLabel: checkInLog ? formatAttendanceWorkDuration(String(checkInLog.event_at || ""), checkOutLog ? String(checkOutLog.event_at || "") : null, String(log.attendance_date || "")) : "Belum mulai",
         pairedCheckInAt: String(checkInLog?.event_at || ""),
@@ -6550,6 +6874,7 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
   const overtimeReviewRows: OvertimeReviewRow[] = recapOnly ? [] : overtimeRows.map((overtime) => {
     const employee = employeesById.get(String(overtime.employee_id || ""))
     const component = payrollComponentMap.get(String(overtime.payroll_component_id || ""))
+    const payrollCycle = payrollById.get(String(overtime.payroll_cycle_id || "")) || payrollByEmployee.get(String(overtime.employee_id || ""))
     const overtimeStatus = String(overtime.status || "pending") as OvertimeStatus
     const dayType = String(overtime.day_type || "weekday")
     const requestSource = String(overtime.request_source || "auto")
@@ -6581,6 +6906,9 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
       requestReason: String(overtime.request_reason || ""),
       requestedAt: String(overtime.requested_at || overtime.created_at || ""),
       matchedAttendance: overtime.matched_attendance === true || Boolean(overtime.actual_check_out_at),
+      payrollCycleId: String(overtime.payroll_cycle_id || payrollCycle?.id || ""),
+      payrollCycleNumber: Number(payrollCycle?.cycle_number || 0),
+      payrollStatus: mapPayrollCycleStatus(payrollCycle?.status),
       componentName: String(component?.name || "Komponen lembur"),
       notes: String(overtime.notes || ""),
     }
@@ -6606,7 +6934,7 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
     }
   })
 
-  return { rows, allRows, locations, fieldReadiness, reviews: reviewRows, overtime: overtimeReviewRows }
+  return { rows, allRows, locations, fieldReadiness, reviews: reviewRows, overtime: overtimeReviewRows, payrollPayments }
 }
 
 function getBrowserPosition(): Promise<GeolocationPosition> {
@@ -7109,6 +7437,14 @@ async function resetAttendanceDay(employeeId: string, attendanceDate: string, no
   return data
 }
 
+function getAttendanceCorrectionError(message: unknown) {
+  const errorMessage = String(message || "")
+  if (errorMessage.toLowerCase().includes("action review tidak valid")) {
+    return "Backend attendance-review belum tersinkron untuk koreksi HR. Deploy function attendance-review dulu, lalu coba lagi."
+  }
+  return errorMessage
+}
+
 async function correctMissingCheckIn(employeeId: string, attendanceDate: string, checkInDate: string, checkInTime: string, notes: string) {
   const { data, error } = await supabase.functions.invoke("attendance-review", {
     body: {
@@ -7124,7 +7460,7 @@ async function correctMissingCheckIn(employeeId: string, attendanceDate: string,
   })
 
   if (error) throw new Error(await getFunctionInvokeError(error, "Koreksi check-in belum bisa diproses."))
-  if (data?.error) throw new Error(String(data.error))
+  if (data?.error) throw new Error(getAttendanceCorrectionError(data.error))
 
   return data
 }
@@ -7144,7 +7480,7 @@ async function correctMissingCheckout(employeeId: string, attendanceDate: string
   })
 
   if (error) throw new Error(await getFunctionInvokeError(error, "Koreksi checkout belum bisa diproses."))
-  if (data?.error) throw new Error(String(data.error))
+  if (data?.error) throw new Error(getAttendanceCorrectionError(data.error))
 
   return data
 }
@@ -7194,9 +7530,9 @@ async function createOvertimeRequest(payload: OvertimeRequestSubmitPayload) {
   return data
 }
 
-async function processPayrollCycle(cycleId: string, action: PayrollProcessAction, notes: string) {
+async function processPayrollCycle(cycleId: string, action: PayrollProcessAction, payload: PayrollProcessSubmitPayload) {
   const { data, error } = await supabase.functions.invoke("payroll-processing", {
-    body: { action, payload: { cycleId, notes } },
+    body: { action, payload: { cycleId, ...payload } },
   })
 
   if (error) {
@@ -7280,7 +7616,7 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
     revalidateOnCache: true,
   })
   const canManage = hasPermission(profile, "employees.manage")
-  const { rows, divisions, positions, locations, shifts, policies, kioskSchemaReady } = employeeData
+  const { rows, divisions, positions, locations, shifts, policies, kioskSchemaReady, payrollOpeningSchemaReady } = employeeData
 
   const fetchRows = async (options: { silent?: boolean } = {}) => {
     setErrorMessage("")
@@ -7366,6 +7702,7 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
     setEditingRow(null)
     const fallbackValues = createEmptyEmployeeForm(rows)
     fallbackValues.kioskSchemaReady = kioskSchemaReady
+    fallbackValues.payrollOpeningSchemaReady = payrollOpeningSchemaReady
     setDialogInitialValues(fallbackValues)
     setDialogOpen(true)
     void getNextEmployeeCode(rows).then((employeeCode) => {
@@ -7374,6 +7711,7 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
             employeeCode: current.employeeCode === fallbackValues.employeeCode ? employeeCode : current.employeeCode,
             qrToken: current.employeeCode === fallbackValues.employeeCode ? generateEmployeeQrToken(employeeCode) : current.qrToken,
             kioskSchemaReady,
+            payrollOpeningSchemaReady,
       }))
     }).catch(() => {})
   }
@@ -7405,8 +7743,10 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
       attendancePolicyId: row.attendancePolicyId,
       kioskAccessEnabled: row.kioskAccessEnabled,
       kioskSchemaReady,
+      payrollOpeningSchemaReady,
       joinDate: row.joinDate,
       payrollCycleDays: String(row.payrollCycleDays),
+      payrollCycleOpeningDate: row.payrollCycleOpeningDate,
       status: row.status,
       notes: row.notes,
     })
@@ -7676,7 +8016,7 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
                   <th>Jabatan</th>
                   <th>Lokasi / Shift</th>
                   <th>Gaji</th>
-                  <th>Cycle</th>
+                  <th>Saldo</th>
                   <th>Biofinger</th>
                   <th>Status</th>
                   <th className="tableActionHeader">Aksi</th>
@@ -7713,10 +8053,14 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
                     <td><TableText primary={row.workLocationName} secondary={row.shiftName} /></td>
                     <td><TableText primary={formatCurrency(getEmployeeSalaryAmount(row))} secondary={`${employeeSalaryTypeLabel[row.salaryType]} · Masuk ${formatEmployeeDate(row.joinDate)}`} /></td>
                     <td>
-                      <span className="cycleCell">
-                        <ProgressRing value={row.payrollCycleDays} />
-                        <span>{row.payrollCycleDays}/26</span>
-                      </span>
+                      {row.payrollMethod === "attendance_cycle" ? (
+                        <span className="cycleCell">
+                          <ProgressRing value={row.payrollCycleDays} />
+                          <span>{row.payrollCycleDays}/26 awal</span>
+                        </span>
+                      ) : (
+                        <TableText primary={employeePayrollMethodLabel[row.payrollMethod]} secondary="Tanpa saldo cycle" />
+                      )}
                     </td>
                     <td><EmployeeBiofingerCell row={row} /></td>
                     <td><EmployeeStatusBadge status={row.status} /></td>
@@ -10117,6 +10461,15 @@ function EmployeeDialog({
   const activePolicies = policies.filter((policy) => policy.isActive || policy.id === values.attendancePolicyId)
   const selectedPolicy = activePolicies.find((policy) => policy.id === values.attendancePolicyId)
   const photoPreview = values.removePhoto ? "" : localPhotoPreview || values.photoUrl
+  const usesAttendanceCycle = values.payrollMethod === "attendance_cycle"
+  const openingCycleDays = Number(values.payrollCycleDays || 0)
+  const openingCyclePreview = !values.payrollOpeningSchemaReady
+    ? "Migration payroll opening belum aktif di database. Field tanggal awal akan aktif setelah migration diterapkan."
+    : openingCycleDays <= 0
+      ? "Kosongkan untuk karyawan yang mulai cycle dari 0/26 di DMS."
+      : openingCycleDays >= 26
+        ? "Saldo 26 berarti cycle lama sudah penuh; absensi real berikutnya masuk cycle baru."
+        : `Absensi real berikutnya akan lanjut menjadi hari ke-${openingCycleDays + 1}/26.`
 
   return createPortal(
     <div className="dialogBackdrop employeeDialogBackdrop" role="presentation" onMouseDown={onClose}>
@@ -10330,7 +10683,6 @@ function EmployeeDialog({
                 onChange={(salaryType) => setValues((current) => ({
                   ...current,
                   salaryType,
-                  payrollMethod: salaryType === "monthly" && current.payrollMethod === "attendance_cycle" ? "calendar_month" : current.payrollMethod,
                 }))}
                 options={[
                   { value: "daily", label: "Harian", description: "Nominal per hari kerja." },
@@ -10355,21 +10707,64 @@ function EmployeeDialog({
               placeholder={values.salaryType === "monthly" ? "4.500.000" : "150.000"}
               required
             />
-            <SelectFormField label="Metode Payroll" value={values.payrollMethod} onChange={(event) => setValues((current) => ({ ...current, payrollMethod: event.target.value as EmployeePayrollMethod }))} required>
+            <SelectFormField
+              label="Metode Payroll"
+              value={values.payrollMethod}
+              onChange={(event) => {
+                const payrollMethod = event.target.value as EmployeePayrollMethod
+                setValues((current) => ({
+                  ...current,
+                  payrollMethod,
+                  payrollCycleDays: payrollMethod === "attendance_cycle" ? current.payrollCycleDays : "0",
+                  payrollCycleOpeningDate: payrollMethod === "attendance_cycle" ? current.payrollCycleOpeningDate : "",
+                }))
+              }}
+              required
+            >
               <option value="attendance_cycle">Cycle 26 Hari</option>
               <option value="calendar_month">Bulanan Kalender</option>
               <option value="custom">Custom</option>
             </SelectFormField>
-            <DateFormField label="Tanggal Masuk" value={values.joinDate} onChange={(joinDate) => setValues((current) => ({ ...current, joinDate }))} required />
-            <TextFormField
-              label="Cycle Payroll"
-              type="text"
-              inputMode="numeric"
-              value={values.payrollCycleDays}
-              onChange={(event) => setValues((current) => ({ ...current, payrollCycleDays: normalizeEmployeeCycle(event.target.value) }))}
-              placeholder="0 - 26"
+            <DateFormField
+              label="Tanggal Masuk"
+              value={values.joinDate}
+              onChange={(joinDate) => setValues((current) => ({ ...current, joinDate }))}
+              helperText="Tanggal mulai kerja karyawan di DMS."
               required
             />
+            {usesAttendanceCycle && (
+              <div className="employeeCycleOpeningPanel employeeFormFull">
+                <div className="employeeCycleOpeningHeader">
+                  <span>
+                    <CalendarCheck2 size={18} />
+                  </span>
+                  <div>
+                    <strong>Transisi Cycle Berjalan</strong>
+                    <small>Isi hanya kalau karyawan sudah punya hari kerja sebelum DMS dipakai.</small>
+                  </div>
+                  <em>{openingCyclePreview}</em>
+                </div>
+                <div className="employeeCycleOpeningGrid">
+                  <TextFormField
+                    label="Saldo Awal Cycle"
+                    type="text"
+                    inputMode="numeric"
+                    value={values.payrollCycleDays}
+                    onChange={(event) => setValues((current) => ({ ...current, payrollCycleDays: normalizeEmployeeCycle(event.target.value) }))}
+                    placeholder="0 - 26"
+                    helperText="Contoh: sudah jalan 15 hari, isi 15."
+                    required
+                  />
+                  <DateFormField
+                    label="Tanggal Awal Cycle"
+                    value={values.payrollCycleOpeningDate}
+                    onChange={(payrollCycleOpeningDate) => setValues((current) => ({ ...current, payrollCycleOpeningDate }))}
+                    disabled={!values.payrollOpeningSchemaReady}
+                    helperText="Tanggal hari pertama dari cycle berjalan."
+                  />
+                </div>
+              </div>
+            )}
             <SwitchFormField
               label="Hitung Proporsional"
               checked={values.prorateEnabled}
@@ -10452,7 +10847,12 @@ function EmployeeDetailDialog({
     { label: "Metode payroll", value: employeePayrollMethodLabel[row.payrollMethod] },
     { label: "Prorata", value: row.prorateEnabled ? "Aktif" : "Nonaktif" },
     { label: "Tanggal masuk", value: formatEmployeeDate(row.joinDate) },
-    { label: "Cycle payroll", value: `${row.payrollCycleDays}/26 hari` },
+    ...(row.payrollMethod === "attendance_cycle"
+      ? [
+          { label: "Saldo awal cycle", value: `${row.payrollCycleDays}/26 hari` },
+          { label: "Tanggal awal cycle", value: formatEmployeeDate(row.payrollCycleOpeningDate) },
+        ]
+      : []),
   ]
   const kioskRows = [
     { label: "Akses kiosk", value: row.kioskAccessEnabled ? "Aktif" : "Nonaktif" },
@@ -13247,138 +13647,562 @@ function MasterDataDialog({
   )
 }
 
+const dashboardStatusFilterOptions = [
+  { value: "all", label: "Semua Status" },
+  { value: "valid", label: "Valid" },
+  { value: "review", label: "Review HR" },
+  { value: "missing", label: "Belum Absen" },
+  { value: "missing_checkout", label: "Belum Checkout" },
+  { value: "short", label: "Kurang Jam" },
+  { value: "overtime_request", label: "Ada Lembur" },
+  { value: "payroll_ready", label: "Payroll Siap Dicek" },
+]
+
 function DashboardPage({ activeView }: { activeView: ViewId }) {
-  const [data, setData] = useState<OperationsFoundationData>({ rows: [], allRows: [], locations: [], fieldReadiness: [], reviews: [], overtime: [] })
-  const [loading, setLoading] = useState(true)
-  const [errorMessage, setErrorMessage] = useState("")
+  const todayDate = getLocalDateKey()
+  const dashboardRange = useMemo(() => ({ startDate: todayDate, endDate: todayDate }), [todayDate])
+  const dashboardCacheKey = useMemo(
+    () => getOperationsFoundationCacheKey(todayDate, dashboardRange, "full", "dashboard"),
+    [dashboardRange, todayDate],
+  )
+  const loadDashboardData = useCallback(
+    () => loadOperationsFoundationData(todayDate, {
+      ...dashboardRange,
+      scope: "full",
+      overtimeDateScoped: true,
+      includePayrollPayments: true,
+    }),
+    [dashboardRange, todayDate],
+  )
+  const { data, loading, refreshing, error, reload } = useFoundationCachedData<OperationsFoundationData>({
+    cacheKey: dashboardCacheKey,
+    createInitialData: createEmptyOperationsFoundationData,
+    load: loadDashboardData,
+    revalidateOnCache: true,
+  })
+  const [searchTerm, setSearchTerm] = useState("")
+  const [divisionFilter, setDivisionFilter] = useState("all")
+  const [statusFilter, setStatusFilter] = useState("all")
 
-  useEffect(() => {
-    let active = true
+  const errorMessage = error ? getFriendlySupabaseError(error, "Gagal mengambil data dashboard.") : ""
+  const normalizedSearch = searchTerm.trim().toLowerCase()
+  const divisionFilterOptions = useMemo(() => {
+    const divisionNames = new Set<string>()
+    data.rows.forEach((row) => {
+      const name = row.divisionName.trim()
+      if (name) divisionNames.add(name)
+    })
 
-    setLoading(true)
-    setErrorMessage("")
-    void loadOperationsFoundationData()
-      .then((nextData) => {
-        if (active) setData(nextData)
-      })
-      .catch((error) => {
-        if (active) setErrorMessage(getFriendlySupabaseError(error, "Gagal mengambil data absensi dan payroll."))
-      })
-      .finally(() => {
-        if (active) setLoading(false)
-      })
+    return [
+      { value: "all", label: "Semua Divisi" },
+      ...Array.from(divisionNames)
+        .sort((a, b) => a.localeCompare(b, "id-ID"))
+        .map((name) => ({ value: name, label: name })),
+    ]
+  }, [data.rows])
 
-    return () => {
-      active = false
-    }
-  }, [])
+  const sortedRows = useMemo(() => [...data.rows].sort(compareAttendanceRowsByLatestActivity), [data.rows])
+  const filteredRows = useMemo(() => sortedRows.filter((row) => {
+    const matchesDivision = divisionFilter === "all" || row.divisionName.trim() === divisionFilter
+    const matchesSearch = normalizedSearch ? getAttendanceSearchText(row).includes(normalizedSearch) : true
+    const matchesStatus = statusFilter === "all"
+      || (statusFilter === "payroll_ready" ? row.payrollStatus === "ready" : matchesAttendanceRecapStatus(row, statusFilter))
+
+    return matchesDivision && matchesSearch && matchesStatus
+  }), [divisionFilter, normalizedSearch, sortedRows, statusFilter])
+
+  const scopedOvertimeRows = useMemo(() => data.overtime.filter((row) => {
+    const matchesDivision = divisionFilter === "all" || row.divisionName.trim() === divisionFilter
+    const matchesSearch = normalizedSearch
+      ? [
+        row.employeeCode,
+        row.fullName,
+        row.divisionName,
+        row.status,
+        row.requestReason,
+        row.componentName,
+      ].join(" ").toLowerCase().includes(normalizedSearch)
+      : true
+
+    return matchesDivision && matchesSearch
+  }), [data.overtime, divisionFilter, normalizedSearch])
 
   const totals = useMemo(() => {
-    const rows = data.rows
+    const activeEmployees = filteredRows.length
+    const checkInToday = filteredRows.filter((employee) => employee.checkInId).length
+    const validToday = filteredRows.filter((employee) => employee.attendanceStatus === "valid").length
+    const pending = filteredRows.filter((employee) => (
+      employee.attendanceStatus === "pending"
+      || employee.attendanceStatus === "failed"
+      || employee.settlementStatus === "review"
+      || employee.settlementStatus === "failed"
+    )).length
+    const missing = filteredRows.filter((employee) => employee.attendanceStatus === "missing" || !employee.checkInId).length
+    const missingCheckout = filteredRows.filter((employee) => employee.settlementStatus === "missing_checkout").length
+    const shortage = filteredRows.filter((employee) => employee.shortageMinutes > 0).length
+    const payrollReady = filteredRows.filter((employee) => employee.payrollStatus === "ready").length
+    const payrollPreview = filteredRows.reduce((sum, employee) => sum + employee.payrollAmount, 0)
+    const approvedOvertime = scopedOvertimeRows.reduce((sum, row) => sum + (row.status === "approved" ? row.totalAmount : 0), 0)
 
-    return {
-      activeEmployees: rows.length,
-      validToday: rows.filter((employee) => employee.attendanceStatus === "valid").length,
-      pending: rows.filter((employee) => employee.attendanceStatus === "pending" || employee.attendanceStatus === "failed").length,
-      payrollReady: rows.filter((employee) => employee.payrollStatus === "ready").length,
-      payrollPreview: rows.reduce((sum, employee) => sum + employee.payrollAmount, 0),
-    }
-  }, [data.rows])
+    return { activeEmployees, checkInToday, validToday, pending, missing, missingCheckout, shortage, payrollReady, payrollPreview, approvedOvertime }
+  }, [filteredRows, scopedOvertimeRows])
+
+  const handleRefresh = useCallback(async () => {
+    await reload({
+      silent: !loading,
+      load: () => loadOperationsFoundationData(todayDate, {
+        ...dashboardRange,
+        refreshBackend: true,
+        refreshPayroll: true,
+        scope: "full",
+        overtimeDateScoped: true,
+        includePayrollPayments: true,
+      }),
+    }).catch(() => {})
+  }, [dashboardRange, loading, reload, todayDate])
+
+  const resetFilters = () => {
+    setSearchTerm("")
+    setDivisionFilter("all")
+    setStatusFilter("all")
+  }
+
+  const renderKpiValue = (value: ReactNode, wide = false) => (
+    loading ? <FoundationSkeleton className={clsx("metricValue", wide && "wide")} /> : value
+  )
 
   return (
     <OperationalPageShell>
-      <PageHeader activeView={activeView} />
+      <PageHeader
+        activeView={activeView}
+        subtitle="Ringkasan operasional hari ini: absensi, antrian HR, device source, dan payroll cycle."
+        meta={(
+          <InlinePageStats
+            items={[
+              formatWorkDate(todayDate),
+              `${formatNumber(filteredRows.length)} karyawan tampil`,
+              `${formatNumber(totals.pending + totals.missingCheckout + totals.shortage)} butuh tindakan`,
+              `${formatCurrency(totals.payrollPreview)} preview payroll`,
+            ]}
+          />
+        )}
+        actions={(
+          <>
+            <FoundationRefreshButton loading={loading || refreshing} onClick={handleRefresh} />
+            <button className="secondaryButton" type="button" disabled={loading || filteredRows.length === 0} onClick={() => exportAttendanceRecapCsv(filteredRows, todayDate, "today")}>
+              <Download size={17} />
+              Export Dashboard
+            </button>
+          </>
+        )}
+      />
 
       <OperationalKpiGrid>
-        <OperationalKpiCard label="Karyawan Aktif" value={totals.activeEmployees} detail="Terdaftar di sistem" icon={UsersRound} tone="blue" />
-        <OperationalKpiCard label="Absen Valid" value={totals.validToday} detail="Lolos lokasi + wajah" icon={UserRoundCheck} tone="green" />
-        <OperationalKpiCard label="Butuh Review" value={totals.pending} detail="Perlu keputusan HR" icon={AlertTriangle} tone="amber" />
-        <OperationalKpiCard label="Siap Gajian" value={totals.payrollReady} detail="Cycle 26 hari valid" icon={BadgeDollarSign} tone="violet" />
+        <OperationalKpiCard label="Karyawan Aktif" value={renderKpiValue(formatNumber(totals.activeEmployees))} detail="Sesuai filter dashboard" icon={UsersRound} tone="blue" />
+        <OperationalKpiCard label="Absen Hari Ini" value={renderKpiValue(`${formatNumber(totals.checkInToday)} / ${formatNumber(totals.activeEmployees)}`, true)} detail="Sudah ada check-in" icon={LogIn} tone="green" />
+        <OperationalKpiCard label="Butuh Tindakan" value={renderKpiValue(formatNumber(totals.pending + totals.missingCheckout + totals.shortage))} detail="Review, kurang jam, atau checkout" icon={AlertTriangle} tone="amber" />
+        <OperationalKpiCard label="Estimasi Payroll" value={renderKpiValue(formatCurrency(totals.payrollPreview), true)} detail={`Termasuk ${formatCurrency(totals.approvedOvertime)} lembur`} icon={BadgeDollarSign} tone="violet" />
       </OperationalKpiGrid>
 
-      <OperationalFilterPanel>
+      <OperationalFilterPanel className="dashboardFilterPanel">
         <div className="filterField">
-          <label>Search</label>
+          <label>Divisi</label>
+          <FoundationSelect
+            label="Filter divisi dashboard"
+            value={divisionFilter}
+            options={divisionFilterOptions}
+            searchable={divisionFilterOptions.length > 8}
+            onChange={setDivisionFilter}
+          />
+        </div>
+        <div className="filterField dashboardSearchField">
+          <label>Cari Data</label>
           <div className="uiInput inputWithIcon compact">
             <Search size={16} />
-            <input placeholder="Cari karyawan, divisi, lokasi..." />
+            <input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Cari karyawan, divisi, lokasi, status..." />
           </div>
         </div>
         <div className="filterField">
           <label>Status</label>
-          <select className="uiSelectTrigger" defaultValue="all">
-            <option value="all">Semua Status</option>
-            <option value="valid">Valid</option>
-            <option value="pending">Review</option>
-            <option value="missing">Belum Absen</option>
-          </select>
+          <FoundationSelect
+            label="Filter status dashboard"
+            value={statusFilter}
+            options={dashboardStatusFilterOptions}
+            searchable={false}
+            onChange={setStatusFilter}
+          />
         </div>
-        <button className="secondaryButton" type="button">Reset Filter</button>
+        <button className="secondaryButton" type="button" onClick={resetFilters}>Reset Filter</button>
       </OperationalFilterPanel>
 
       <section className="dashboardStack">
-        <aside className="surfacePanel signalPanel">
-          <div className="tableHeader flushHeader">
-            <div>
-              <h2>Payroll Signal</h2>
-              <p>Data yang butuh perhatian finance.</p>
-            </div>
-          </div>
-          <div className="signalList">
-            <div className="signalItem">
-              <BadgeDollarSign size={18} />
-              <div>
-                <strong>{totals.payrollReady} cycle siap diproses</strong>
-                <span>Pastikan bonus, potongan, dan kasbon sudah final.</span>
-              </div>
-            </div>
-            <div className="signalItem">
-              <CreditCard size={18} />
-              <div>
-                <strong>{formatCurrency(totals.payrollPreview)} preview payroll</strong>
-                <span>Dihitung dari cycle kerja valid yang sudah masuk.</span>
-              </div>
-            </div>
-            <div className="signalItem">
-              <ShieldCheck size={18} />
-              <div>
-                <strong>Face verification enabled</strong>
-                <span>Absensi valid wajib lolos radius dan wajah.</span>
-              </div>
-            </div>
-          </div>
-        </aside>
-        <EmployeeTable rows={data.rows} loading={loading} errorMessage={errorMessage} />
+        <DashboardOverviewBoard
+          rows={filteredRows}
+          allRows={data.rows}
+          locations={data.locations}
+          overtimeRows={scopedOvertimeRows}
+          loading={loading}
+        />
+        <EmployeeTable rows={filteredRows} loading={loading} errorMessage={errorMessage} selectedDate={todayDate} />
       </section>
     </OperationalPageShell>
   )
 }
 
-function EmployeeTable({ rows, loading, errorMessage }: { rows: AttendanceMonitorRow[]; loading: boolean; errorMessage: string }) {
+function DashboardOverviewBoard({
+  rows,
+  allRows,
+  locations,
+  overtimeRows,
+  loading,
+}: {
+  rows: AttendanceMonitorRow[]
+  allRows: AttendanceMonitorRow[]
+  locations: FieldLocationSummary[]
+  overtimeRows: OvertimeReviewRow[]
+  loading: boolean
+}) {
+  const totalRows = Math.max(rows.length, 1)
+  const statusRows = [
+    { key: "valid", label: "Valid", value: rows.filter((row) => row.attendanceStatus === "valid").length, tone: "green" },
+    { key: "review", label: "Review HR", value: rows.filter((row) => row.attendanceStatus === "pending" || row.attendanceStatus === "failed" || row.settlementStatus === "review").length, tone: "amber" },
+    { key: "missing", label: "Belum Absen", value: rows.filter((row) => row.attendanceStatus === "missing" || !row.checkInId).length, tone: "slate" },
+    { key: "short", label: "Kurang Jam", value: rows.filter((row) => row.shortageMinutes > 0).length, tone: "rose" },
+  ]
+
+  const divisionRows = useMemo(() => {
+    const groups = new Map<string, { name: string; total: number; active: number; review: number }>()
+    rows.forEach((row) => {
+      const name = row.divisionName || "Belum pilih divisi"
+      const current = groups.get(name) || { name, total: 0, active: 0, review: 0 }
+      current.total += 1
+      if (row.checkInId) current.active += 1
+      if (row.attendanceStatus === "pending" || row.attendanceStatus === "failed" || row.settlementStatus === "review" || row.shortageMinutes > 0) current.review += 1
+      groups.set(name, current)
+    })
+
+    return Array.from(groups.values())
+      .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name, "id-ID"))
+      .slice(0, 5)
+  }, [rows])
+
+  const sourceRows = useMemo(() => {
+    const sources = new Map<string, { label: string; count: number; icon: LucideIcon }>()
+    const addSource = (source: string, media: string) => {
+      if (!source && !media) return
+      const label = formatAttendanceSourceMeta(source, media)
+      const current = sources.get(label) || { label, count: 0, icon: getAttendanceSourceIcon(source, media) }
+      current.count += 1
+      sources.set(label, current)
+    }
+
+    rows.forEach((row) => {
+      if (row.checkInId) addSource(row.checkInSource, row.checkInMedia)
+      if (row.checkOutId) addSource(row.checkOutSource, row.checkOutMedia)
+    })
+
+    return Array.from(sources.values()).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "id-ID")).slice(0, 4)
+  }, [rows])
+
+  const locationReadyCount = locations.filter((location) => location.isReady).length
+  const signalRows = [
+    {
+      key: "review",
+      icon: AlertTriangle,
+      tone: "amber",
+      title: "Antrian HR",
+      value: rows.filter((row) => row.attendanceStatus === "pending" || row.attendanceStatus === "failed" || row.settlementStatus === "review").length,
+      detail: "Cek GPS, face, atau log manual sebelum payroll.",
+    },
+    {
+      key: "checkout",
+      icon: LogOut,
+      tone: "rose",
+      title: "Belum Checkout",
+      value: rows.filter((row) => row.settlementStatus === "missing_checkout").length,
+      detail: "Perlu tunggu pulang atau koreksi HR bila lupa scan.",
+    },
+    {
+      key: "payroll",
+      icon: BadgeDollarSign,
+      tone: "green",
+      title: "Siap Dicek Payroll",
+      value: rows.filter((row) => row.payrollStatus === "ready").length,
+      detail: "Cycle selesai dan bisa masuk finalisasi gaji.",
+    },
+    {
+      key: "overtime",
+      icon: WalletCards,
+      tone: "violet",
+      title: "Lembur Pending",
+      value: overtimeRows.filter((row) => row.status === "pending" || row.status === "draft").length,
+      detail: "Pastikan approve/reject sebelum payroll ditutup.",
+    },
+  ]
+  const activeSignals = signalRows.filter((signal) => signal.value > 0)
+
+  if (loading) {
+    return (
+      <section className="dashboardInsights">
+        <article className="surfacePanel dashboardHealthPanel">
+          <div className="dashboardPanelHeader">
+            <span><ActivityIcon icon={ShieldCheck} /></span>
+            <div>
+              <h2>Health Operasional</h2>
+              <p>Mengambil ringkasan absensi dan validasi hari ini.</p>
+            </div>
+          </div>
+          <div className="dashboardHealthGrid">
+            <div className="dashboardStatusStack">
+              {Array.from({ length: 4 }).map((_, index) => (
+                <FoundationSkeleton className="dashboardProgressSkeleton" key={index} />
+              ))}
+            </div>
+            <div className="dashboardSourceList">
+              {Array.from({ length: 4 }).map((_, index) => (
+                <FoundationSkeleton className="dashboardSourceSkeleton" key={index} />
+              ))}
+            </div>
+          </div>
+        </article>
+        <aside className="surfacePanel dashboardSignalPanel">
+          <div className="dashboardPanelHeader">
+            <span><ActivityIcon icon={Bell} /></span>
+            <div>
+              <h2>Prioritas Hari Ini</h2>
+              <p>Menunggu data dari Supabase.</p>
+            </div>
+          </div>
+          <div className="dashboardSignalStack">
+            {Array.from({ length: 4 }).map((_, index) => (
+              <FoundationSkeleton className="dashboardSignalSkeleton" key={index} />
+            ))}
+          </div>
+        </aside>
+      </section>
+    )
+  }
+
+  return (
+    <section className="dashboardInsights">
+      <article className="surfacePanel dashboardHealthPanel">
+        <div className="dashboardPanelHeader">
+          <span><ActivityIcon icon={ShieldCheck} /></span>
+          <div>
+            <h2>Health Operasional</h2>
+            <p>Komposisi absensi hari ini berdasarkan filter yang aktif.</p>
+          </div>
+          <strong>{formatNumber(rows.length)} / {formatNumber(allRows.length)}</strong>
+        </div>
+        <div className="dashboardHealthGrid">
+          <div className="dashboardStatusStack">
+            {statusRows.map((row) => (
+              <DashboardProgressRow
+                key={row.key}
+                label={row.label}
+                value={row.value}
+                total={totalRows}
+                tone={row.tone}
+              />
+            ))}
+          </div>
+          <div className="dashboardSourceCluster">
+            <div className="dashboardMiniHeader">
+              <span>Sumber Data</span>
+              <strong>{formatNumber(locationReadyCount)} / {formatNumber(locations.length)} lokasi GPS siap</strong>
+            </div>
+            <div className="dashboardSourceList">
+              {sourceRows.length === 0 ? (
+                <DashboardSourceBadge icon={Database} label="Belum ada scan" count={0} />
+              ) : sourceRows.map((source) => (
+                <DashboardSourceBadge key={source.label} icon={source.icon} label={source.label} count={source.count} />
+              ))}
+            </div>
+          </div>
+        </div>
+        <div className="dashboardDivisionStrip">
+          {divisionRows.length === 0 ? (
+            <span>Belum ada data divisi hari ini.</span>
+          ) : divisionRows.map((division) => (
+            <DashboardDivisionItem key={division.name} division={division} total={totalRows} />
+          ))}
+        </div>
+      </article>
+      <aside className="surfacePanel dashboardSignalPanel">
+        <div className="dashboardPanelHeader">
+          <span><ActivityIcon icon={Bell} /></span>
+          <div>
+            <h2>Prioritas Hari Ini</h2>
+            <p>Urutan kecil untuk HR/Finance sebelum tutup hari.</p>
+          </div>
+        </div>
+        <div className="dashboardSignalStack">
+          {activeSignals.length === 0 ? (
+            <div className="dashboardCleanState">
+              <ShieldCheck size={22} />
+              <strong>Antrian bersih</strong>
+              <span>Belum ada review besar dari filter saat ini.</span>
+            </div>
+          ) : activeSignals.map(({ key, ...signal }) => (
+            <DashboardSignalItem key={key} {...signal} />
+          ))}
+        </div>
+      </aside>
+    </section>
+  )
+}
+
+function ActivityIcon({ icon: Icon }: { icon: LucideIcon }) {
+  return <Icon size={18} />
+}
+
+function DashboardProgressRow({
+  label,
+  value,
+  total,
+  tone,
+}: {
+  label: string
+  value: number
+  total: number
+  tone: string
+}) {
+  const percent = total <= 0 ? 0 : Math.min(100, Math.round((value / total) * 100))
+
+  return (
+    <div className={clsx("dashboardProgressRow", tone)}>
+      <div className="dashboardProgressMeta">
+        <span>{label}</span>
+        <strong>{formatNumber(value)} <small>{percent}%</small></strong>
+      </div>
+      <span className="dashboardProgressTrack">
+        <i style={{ width: `${percent}%` }} />
+      </span>
+    </div>
+  )
+}
+
+function DashboardSourceBadge({
+  icon: Icon,
+  label,
+  count,
+}: {
+  icon: LucideIcon
+  label: string
+  count: number
+}) {
+  return (
+    <span className="dashboardSourceBadge">
+      <Icon size={16} />
+      <span>{label}</span>
+      <strong>{formatNumber(count)}</strong>
+    </span>
+  )
+}
+
+function DashboardDivisionItem({
+  division,
+  total,
+}: {
+  division: { name: string; total: number; active: number; review: number }
+  total: number
+}) {
+  const percent = total <= 0 ? 0 : Math.min(100, Math.round((division.total / total) * 100))
+
+  return (
+    <span className="dashboardDivisionItem">
+      <span>
+        <strong>{division.name}</strong>
+        <small>{formatNumber(division.active)} scan / {formatNumber(division.review)} review</small>
+      </span>
+      <em>{percent}%</em>
+    </span>
+  )
+}
+
+function DashboardSignalItem({
+  icon: Icon,
+  tone,
+  title,
+  value,
+  detail,
+}: {
+  icon: LucideIcon
+  tone: string
+  title: string
+  value: number
+  detail: string
+}) {
+  return (
+    <div className={clsx("dashboardSignalItem", tone)}>
+      <span className="dashboardSignalIcon">
+        <Icon size={17} />
+      </span>
+      <span>
+        <strong>{title}</strong>
+        <small>{detail}</small>
+      </span>
+      <em>{formatNumber(value)}</em>
+    </div>
+  )
+}
+
+function EmployeeTable({
+  rows,
+  loading,
+  errorMessage,
+  selectedDate,
+}: {
+  rows: AttendanceMonitorRow[]
+  loading: boolean
+  errorMessage: string
+  selectedDate: string
+}) {
   const [detailRow, setDetailRow] = useState<AttendanceMonitorRow | null>(null)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
+  const scroll = useHorizontalDragScroll<HTMLDivElement>()
+  const pageCount = Math.max(1, Math.ceil(rows.length / pageSize))
+  const safePage = Math.min(currentPage, pageCount)
+  const paginatedRows = rows.slice((safePage - 1) * pageSize, safePage * pageSize)
+
+  useEffect(() => {
+    if (currentPage > pageCount) setCurrentPage(pageCount)
+  }, [currentPage, pageCount])
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [rows.length, pageSize])
 
   return (
     <>
-      <OperationalTableCard>
+      <OperationalTableCard className="dashboardAttendanceTable">
         <div className="tableHeader">
           <div>
-            <h2>Live Attendance Monitor</h2>
-            <p>Status absensi hari ini dengan progress payroll cycle per karyawan.</p>
+            <h2>Attendance Monitor</h2>
+            <p>Update terbaru tampil paling atas. Klik baris untuk detail absensi, GPS, face, dan payroll.</p>
           </div>
-          <button className="secondaryButton" type="button">Export</button>
+          <button className="secondaryButton" type="button" disabled={loading || rows.length === 0} onClick={() => exportAttendanceRecapCsv(rows, selectedDate, "today")}>
+            <Download size={17} />
+            Export
+          </button>
         </div>
-        <div className="tableScroller uiDataTableScroller uiDataTableHasColumns">
+        <div
+          className={clsx("tableScroller uiDataTableScroller uiDataTableHasColumns dashboardAttendanceTableScroller", scroll.dragging && "isDragging")}
+          ref={scroll.ref}
+          {...scroll.handlers}
+        >
           <table>
             <colgroup>
               <col className="tableNumberColumn" />
               <col style={{ width: "230px" }} />
               <col style={{ width: "150px" }} />
               <col style={{ width: "180px" }} />
-              <col style={{ width: "128px" }} />
-              <col style={{ width: "104px" }} />
+              <col style={{ width: "320px" }} />
+              <col style={{ width: "210px" }} />
+              <col style={{ width: "210px" }} />
               <col style={{ width: "136px" }} />
-              <col style={{ width: "150px" }} />
-              <col style={{ width: "140px" }} />
+              <col style={{ width: "155px" }} />
               <col className="tableActionColumn" />
             </colgroup>
             <thead>
@@ -13387,58 +14211,53 @@ function EmployeeTable({ rows, loading, errorMessage }: { rows: AttendanceMonito
                 <th>Karyawan</th>
                 <th>Divisi</th>
                 <th>Lokasi</th>
-                <th>Absensi</th>
-                <th>Face</th>
+                <th>Aktivitas Hari Ini</th>
+                <th>Jadwal & Jam</th>
+                <th>Validasi</th>
                 <th>Cycle</th>
                 <th>Payroll</th>
-                <th>Preview</th>
                 <th className="tableActionHeader">Aksi</th>
               </tr>
             </thead>
             <tbody>
-              {loading && (
-                <tr>
-                  <td className="tableStateCell" colSpan={10}>
-                    <TableState title="Memuat absensi" description="Mengambil data absensi, GPS, face, dan payroll cycle dari Supabase." icon={Megaphone} />
-                  </td>
-                </tr>
-              )}
+              {loading && <FoundationTableSkeletonRows colSpan={10} columns={10} rows={6} />}
               {!loading && errorMessage && (
                 <tr>
                   <td className="tableStateCell" colSpan={10}>
-                    <TableState title="Gagal memuat absensi" description={errorMessage} icon={AlertTriangle} tone="danger" />
+                    <TableState title="Gagal memuat dashboard" description={errorMessage} icon={AlertTriangle} tone="danger" />
                   </td>
                 </tr>
               )}
               {!loading && !errorMessage && rows.length === 0 && (
                 <tr>
                   <td className="tableStateCell" colSpan={10}>
-                    <TableState title="Belum ada karyawan aktif" description="Tambahkan karyawan dan absensi untuk mulai memonitor payroll cycle." icon={UsersRound} />
+                    <TableState title="Belum ada data sesuai filter" description="Ubah filter atau refresh data untuk melihat monitoring absensi hari ini." icon={UsersRound} />
                   </td>
                 </tr>
               )}
-              {!loading && !errorMessage && rows.map((employee, index) => (
+              {!loading && !errorMessage && paginatedRows.map((employee, index) => (
                 <ClickableTableRow key={employee.id} label={`Lihat detail ${employee.fullName}`} onOpen={() => setDetailRow(employee)}>
-                  <td className="tableNumberCell"><TableNumberCell value={index + 1} /></td>
+                  <td className="tableNumberCell"><TableNumberCell value={(safePage - 1) * pageSize + index + 1} /></td>
                   <td>
                     <EmployeeIdentityCell fullName={employee.fullName} code={employee.employeeCode} photoUrl={employee.employeePhotoUrl} />
                   </td>
-                  <td><TableText primary={employee.divisionName} /></td>
-                  <td><TableText primary={employee.workLocationName} secondary={employee.distanceM === null ? "GPS belum masuk" : `${employee.distanceM}m / ${employee.radiusM || "-"}m`} /></td>
-                  <td><StatusBadge status={employee.attendanceStatus} /></td>
-                  <td>
-                    <span className={clsx("faceScore", employee.faceScore && employee.faceScore >= 90 ? "good" : employee.faceScore && employee.faceScore >= 70 ? "warn" : "bad")}>
-                      {employee.faceScore ? `${employee.faceScore}%` : "-"}
-                    </span>
-                  </td>
+                  <td><TableText primary={employee.divisionName || "-"} secondary={employee.shiftName} /></td>
+                  <td><TableText primary={employee.workLocationName || "-"} secondary={employee.radiusM ? `Radius ${employee.radiusM}m` : "GPS belum siap"} /></td>
+                  <td><AttendanceTimelineCell row={employee} /></td>
+                  <td><AttendanceSettlementCell row={employee} compact /></td>
+                  <td><AttendanceValidationCell row={employee} /></td>
                   <td>
                     <div className="cycleCell">
                       <ProgressRing value={employee.cycleDays} />
                       <span>{employee.cycleDays}/{employee.targetDays}</span>
                     </div>
                   </td>
-                  <td><TableText primary={payrollLabel[employee.payrollStatus]} /></td>
-                  <td><TableText primary={employee.payrollAmount ? formatCurrency(employee.payrollAmount) : "-"} secondary={employeeSalaryTypeLabel[employee.salaryType]} /></td>
+                  <td>
+                    <div className="dashboardPayrollCell">
+                      <PayrollStatusBadge status={employee.payrollStatus} />
+                      <TableText primary={employee.payrollAmount ? formatCurrency(employee.payrollAmount) : "-"} secondary={employeeSalaryTypeLabel[employee.salaryType]} />
+                    </div>
+                  </td>
                   <td className="tableActionCell">
                     <div className="rowActions">
                       <RowActionButton label={`Lihat detail ${employee.fullName}`} onClick={() => setDetailRow(employee)} />
@@ -13449,6 +14268,15 @@ function EmployeeTable({ rows, loading, errorMessage }: { rows: AttendanceMonito
             </tbody>
           </table>
         </div>
+        <DataTablePagination
+          page={safePage}
+          pageSize={pageSize}
+          totalRows={rows.length}
+          pageSizeOptions={[10, 25, 50]}
+          maxPageSize={50}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={setPageSize}
+        />
       </OperationalTableCard>
       <AttendanceMonitorDetailDialog row={detailRow} onClose={() => setDetailRow(null)} />
     </>
@@ -13632,24 +14460,31 @@ function AttendanceMonitorDetailDialog({
   )
 }
 
-function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "attendance-requests" | "attendance-review" | "field-monitoring" | "payroll" }) {
+function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-live" | "attendance-requests" | "attendance-review" | "field-monitoring" | "payroll"; profile: AppAccessProfile }) {
   const [searchTerm, setSearchTerm] = useState("")
+  const [divisionFilter, setDivisionFilter] = useState("all")
   const [statusFilter, setStatusFilter] = useState("all")
+  const [approvalTab, setApprovalTab] = useState<ApprovalQueueTab>("attendance")
   const [selectedDate, setSelectedDate] = useState(getLocalDateKey())
   const [attendanceDateMode, setAttendanceDateMode] = useState<AttendanceDateMode>("today")
   const dataLoadRange = useMemo(() => {
-    if (activeView === "attendance-live" || activeView === "attendance-requests") return getAttendanceModeLoadRange(selectedDate, attendanceDateMode)
+    if (activeView === "attendance-live" || activeView === "attendance-requests" || activeView === "attendance-review") return getAttendanceModeLoadRange(selectedDate, attendanceDateMode)
 
     return normalizeAttendanceLoadRange(selectedDate)
   }, [activeView, attendanceDateMode, selectedDate])
   const loadScope: AttendanceLoadScope = activeView === "attendance-requests" ? "attendance-recap" : "full"
   const operationsCacheKey = useMemo(
-    () => getOperationsFoundationCacheKey(selectedDate, dataLoadRange, loadScope),
-    [dataLoadRange, loadScope, selectedDate],
+    () => getOperationsFoundationCacheKey(selectedDate, dataLoadRange, loadScope, activeView),
+    [activeView, dataLoadRange, loadScope, selectedDate],
   )
   const loadAttendanceData = useCallback(
-    () => loadOperationsFoundationData(selectedDate, { ...dataLoadRange, scope: loadScope }),
-    [dataLoadRange, loadScope, selectedDate],
+    () => loadOperationsFoundationData(selectedDate, {
+      ...dataLoadRange,
+      scope: loadScope,
+      overtimeDateScoped: activeView !== "payroll",
+      includePayrollPayments: activeView === "payroll",
+    }),
+    [activeView, dataLoadRange, loadScope, selectedDate],
   )
   const {
     data,
@@ -13670,12 +14505,14 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
   const [faceEnrollmentSubmitting, setFaceEnrollmentSubmitting] = useState(false)
   const [reviewTarget, setReviewTarget] = useState<AttendanceReviewRow | null>(null)
   const [reviewSubmitting, setReviewSubmitting] = useState(false)
+  const [bulkReviewRows, setBulkReviewRows] = useState<AttendanceReviewRow[]>([])
   const [overtimeRequestOpen, setOvertimeRequestOpen] = useState(false)
   const [overtimeRequestSubmitting, setOvertimeRequestSubmitting] = useState(false)
   const [overtimeTarget, setOvertimeTarget] = useState<OvertimeReviewRow | null>(null)
   const [overtimeSubmitting, setOvertimeSubmitting] = useState(false)
   const [payrollTarget, setPayrollTarget] = useState<AttendanceMonitorRow | null>(null)
   const [payrollAction, setPayrollAction] = useState<PayrollProcessAction>("lock")
+  const [payrollFocusTab, setPayrollFocusTab] = useState<PayrollLedgerTab | null>(null)
   const [payrollSubmitting, setPayrollSubmitting] = useState(false)
   const [resetAttendanceRow, setResetAttendanceRow] = useState<AttendanceMonitorRow | null>(null)
   const [resetAttendanceSubmitting, setResetAttendanceSubmitting] = useState(false)
@@ -13684,6 +14521,13 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
   const [checkoutCorrectionRow, setCheckoutCorrectionRow] = useState<AttendanceMonitorRow | null>(null)
   const [checkoutCorrectionSubmitting, setCheckoutCorrectionSubmitting] = useState(false)
   const [toast, setToast] = useState<ToastMessage | null>(null)
+  const canReviewAttendance = hasPermission(profile, "attendance.review")
+  const canReviewOvertime = hasPermission(profile, "overtime.review")
+  const activeApprovalTab: ApprovalQueueTab = activeView === "attendance-review" && approvalTab === "attendance" && !canReviewAttendance && canReviewOvertime
+    ? "overtime"
+    : activeView === "attendance-review" && approvalTab === "overtime" && !canReviewOvertime && canReviewAttendance
+      ? "attendance"
+      : approvalTab
 
   const showToast = (message: Omit<ToastMessage, "id">) => {
     setToast({ ...message, id: Date.now() })
@@ -13698,22 +14542,33 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
         load: () => loadOperationsFoundationData(selectedDate, {
           ...dataLoadRange,
           refreshBackend: true,
-          refreshPayroll: activeView === "payroll",
+          refreshPayroll: activeView === "payroll" || (activeView === "attendance-review" && activeApprovalTab === "overtime"),
           scope: loadScope,
+          overtimeDateScoped: activeView !== "payroll",
+          includePayrollPayments: activeView === "payroll",
         }),
       })
     } catch (error) {
       setErrorMessage(getFriendlySupabaseError(error, "Gagal mengambil foundation absensi dan payroll."))
     }
-  }, [activeView, dataLoadRange, loadScope, loading, reloadAttendanceData, selectedDate])
+  }, [activeApprovalTab, activeView, dataLoadRange, loadScope, loading, reloadAttendanceData, selectedDate])
 
   useEffect(() => {
     if (attendanceLoadError) setErrorMessage(getFriendlySupabaseError(attendanceLoadError, "Gagal mengambil foundation absensi dan payroll."))
   }, [attendanceLoadError])
 
   useEffect(() => {
+    if (activeView !== "attendance-review") return
+    if (approvalTab === "attendance" && canReviewAttendance) return
+    if (approvalTab === "overtime" && canReviewOvertime) return
+
+    setApprovalTab(canReviewAttendance ? "attendance" : "overtime")
+  }, [activeView, approvalTab, canReviewAttendance, canReviewOvertime])
+
+  useEffect(() => {
     setStatusFilter("all")
-  }, [activeView])
+    setDivisionFilter("all")
+  }, [activeView, approvalTab])
 
   const handleFieldAttendanceSubmit = async (payload: FieldAttendanceSubmitPayload) => {
     setFieldSubmitting(true)
@@ -13794,12 +14649,14 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
     }
   }
 
-  const handleApproveReviewGroup = async (rows: AttendanceReviewRow[]) => {
+  const handleApproveReviewGroup = async () => {
+    const rows = bulkReviewRows
     if (!rows.length) return
 
     setReviewSubmitting(true)
     try {
       await Promise.all(rows.map((row) => reviewAttendanceLog(row.id, "approve", "Approved bersama dari antrian harian.")))
+      setBulkReviewRows([])
       showToast({
         tone: "success",
         title: rows.length > 1 ? "Review harian disetujui" : "Absensi disetujui",
@@ -13869,26 +14726,34 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
     setPayrollAction(action)
   }
 
-  const handlePayrollProcessSubmit = async (notes: string) => {
+  const handlePayrollProcessSubmit = async (payload: PayrollProcessSubmitPayload) => {
     if (!payrollTarget) return
 
     setPayrollSubmitting(true)
     try {
-      await processPayrollCycle(payrollTarget.payrollCycleId, payrollAction, notes)
+      await processPayrollCycle(payrollTarget.payrollCycleId, payrollAction, payload)
+      const payrollActionTitle: Record<PayrollProcessAction, string> = {
+        lock: "Nominal gaji difinalkan",
+        mark_paid: "Pembayaran dicatat",
+        unlock: "Payroll dibuka untuk koreksi",
+        void: "Cycle payroll dibatalkan",
+        restore: "Cycle payroll dipulihkan",
+      }
       showToast({
         tone: "success",
-        title: payrollAction === "lock"
-          ? "Payroll dikunci"
-          : payrollAction === "mark_paid"
-            ? "Payroll ditandai terbayar"
-            : payrollAction === "unlock"
-              ? "Payroll dibuka ulang"
-              : payrollAction === "void"
-                ? "Payroll dibatalkan"
-                : "Payroll direstore",
-        description: `${payrollTarget.fullName} • ${formatCurrency(payrollTarget.payrollAmount)} • ${payrollLabel[payrollTarget.payrollStatus]}.`,
+        title: payrollActionTitle[payrollAction],
+        description: `${payrollTarget.fullName} - ${formatCurrency(payrollTarget.payrollAmount)}.`,
       })
+      const payrollActionFocusTab: Record<PayrollProcessAction, PayrollLedgerTab> = {
+        lock: "locked",
+        mark_paid: "paid",
+        unlock: "ready",
+        void: "void",
+        restore: "all",
+      }
       setPayrollTarget(null)
+      setStatusFilter("all")
+      setPayrollFocusTab(payrollActionFocusTab[payrollAction])
       await refreshData()
     } catch (error) {
       showToast({
@@ -13996,10 +14861,49 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
     ? data.allRows
     : data.rows
   const normalizedSearch = searchTerm.trim().toLowerCase()
+  const employeeDivisionById = useMemo(() => {
+    const divisions = new Map<string, string>()
+    const addEmployeeDivision = (employeeId: string, divisionName: string) => {
+      const normalizedDivision = divisionName.trim()
+      if (!employeeId || !normalizedDivision) return
+      divisions.set(employeeId, normalizedDivision)
+    }
+
+    data.allRows.forEach((row) => addEmployeeDivision(row.employeeId, row.divisionName))
+    data.rows.forEach((row) => addEmployeeDivision(row.employeeId, row.divisionName))
+    data.reviews.forEach((row) => addEmployeeDivision(row.employeeId, row.divisionName))
+    data.overtime.forEach((row) => addEmployeeDivision(row.employeeId, row.divisionName))
+
+    return divisions
+  }, [data.allRows, data.overtime, data.reviews, data.rows])
+  const divisionFilterOptions = useMemo(() => {
+    const divisionNames = new Set<string>()
+    const addDivision = (divisionName: string) => {
+      const normalizedDivision = divisionName.trim()
+      if (normalizedDivision) divisionNames.add(normalizedDivision)
+    }
+
+    data.allRows.forEach((row) => addDivision(row.divisionName))
+    data.rows.forEach((row) => addDivision(row.divisionName))
+    data.reviews.forEach((row) => addDivision(row.divisionName))
+    data.overtime.forEach((row) => addDivision(row.divisionName))
+    employeeDivisionById.forEach(addDivision)
+
+    return [
+      { value: "all", label: "Semua Divisi" },
+      ...Array.from(divisionNames)
+        .sort((a, b) => a.localeCompare(b, "id-ID"))
+        .map((divisionName) => ({ value: divisionName, label: divisionName })),
+    ]
+  }, [data.allRows, data.overtime, data.reviews, data.rows, employeeDivisionById])
+  const matchesDivisionFilter = (divisionName: string) => {
+    return divisionFilter === "all" || divisionName.trim() === divisionFilter
+  }
   const filteredRows = liveAttendanceSourceRows.filter((row) => {
     const matchesDate = activeView !== "attendance-live"
       || attendanceDateMode === "all"
       || (row.attendanceDate >= attendanceDateRange.start && row.attendanceDate <= attendanceDateRange.end)
+    const matchesDivision = matchesDivisionFilter(row.divisionName)
     const matchesSearch = normalizedSearch
       ? [
           row.employeeCode,
@@ -14015,28 +14919,37 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
           row.checkInMedia,
           row.checkOutSource,
           row.checkOutMedia,
+          row.overtimeRequestStatus,
+          row.overtimeRequestSource,
+          row.overtimeRequestReason,
+          getAttendanceOvertimeInlineLabel(row),
         ].join(" ").toLowerCase().includes(normalizedSearch)
       : true
     const matchesStatus = statusFilter === "all"
       || row.attendanceStatus === statusFilter
       || row.payrollStatus === statusFilter
-      || (activeView === "payroll" && ["approved", "pending_overtime", "weekday", "sunday"].includes(statusFilter))
+      || (statusFilter === "overtime_request" && Boolean(row.overtimeRequestId))
+      || (statusFilter === "overtime_pending" && (row.overtimeRequestStatus === "pending" || row.overtimeRequestStatus === "draft"))
+      || (statusFilter === "overtime_approved" && row.overtimeRequestStatus === "approved")
 
-    return matchesDate && matchesSearch && matchesStatus
+    return matchesDate && matchesDivision && matchesSearch && matchesStatus
   })
   const latestFirstRows = activeView === "attendance-live"
     ? [...filteredRows].sort(compareAttendanceRowsByLatestActivity)
     : filteredRows
   const filteredReviewRows = data.reviews.filter((row) => {
+    const matchesDate = attendanceDateMode === "all"
+      || (row.attendanceDate >= attendanceDateRange.start && row.attendanceDate <= attendanceDateRange.end)
+    const matchesDivision = matchesDivisionFilter(row.divisionName)
     const matchesSearch = normalizedSearch
-      ? [row.employeeCode, row.fullName, row.divisionName, row.workLocationName, row.status, row.gpsStatus, row.faceStatus, row.issueLabel].join(" ").toLowerCase().includes(normalizedSearch)
+      ? [row.employeeCode, row.fullName, row.divisionName, row.workLocationName, row.status, row.gpsStatus, row.faceStatus, row.issueLabel, row.source, row.media, row.attendanceDeviceId, row.biofingerEventId].join(" ").toLowerCase().includes(normalizedSearch)
       : true
     const matchesStatus = statusFilter === "all"
       || row.status === statusFilter
       || row.gpsStatus === statusFilter
       || row.faceStatus === statusFilter
 
-    return matchesSearch && matchesStatus
+    return matchesDate && matchesDivision && matchesSearch && matchesStatus
   })
   const filteredFieldReadinessRows = data.fieldReadiness.filter((row) => {
     const matchesSearch = normalizedSearch
@@ -14062,6 +14975,26 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
 
     return matchesSearch && matchesStatus
   })
+  const filteredPayrollPayments = data.payrollPayments.filter((row) => {
+    const matchesDivision = matchesDivisionFilter(employeeDivisionById.get(row.employeeId) || "")
+    const matchesSearch = normalizedSearch
+      ? [
+        row.paymentNo,
+        row.employeeCode,
+        row.employeeName,
+        row.cycleNumber,
+        row.paymentMethod,
+        row.paymentReference,
+        row.paidByName,
+        row.notes,
+      ].join(" ").toLowerCase().includes(normalizedSearch)
+      : true
+    const matchesStatus = statusFilter === "all"
+      || row.status === statusFilter
+      || row.paymentMethod === statusFilter
+
+    return matchesDivision && matchesSearch && matchesStatus
+  })
   const readyPayrollRows = data.rows.filter((row) => row.payrollStatus === "ready")
   const lockedPayrollRows = data.rows.filter((row) => row.payrollStatus === "locked")
   const paidPayrollRows = data.rows.filter((row) => row.payrollStatus === "paid")
@@ -14077,18 +15010,23 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
   const filteredOvertimeRows = data.overtime.filter((row) => {
     if (row.status === "draft" && row.requestSource !== "planned") return false
 
+    const matchesDate = attendanceDateMode === "all"
+      || (row.overtimeDate >= attendanceDateRange.start && row.overtimeDate <= attendanceDateRange.end)
+    const matchesDivision = matchesDivisionFilter(row.divisionName)
     const matchesSearch = normalizedSearch
-      ? [row.employeeCode, row.fullName, row.divisionName, row.componentName, row.status, row.dayType, row.overtimeBasis, row.requestSource].join(" ").toLowerCase().includes(normalizedSearch)
+      ? [row.employeeCode, row.fullName, row.divisionName, row.componentName, row.status, row.dayType, row.overtimeBasis, row.requestSource, row.requestReason].join(" ").toLowerCase().includes(normalizedSearch)
       : true
-    const matchesStatus = statusFilter === "all"
+    const matchesStatus = (statusFilter === "all" && row.status !== "rejected")
       || row.status === statusFilter
       || row.dayType === statusFilter
+      || row.requestSource === statusFilter
       || (statusFilter === "pending_overtime" && row.status === "pending")
 
-    return matchesSearch && matchesStatus
+    return matchesDate && matchesDivision && matchesSearch && matchesStatus
   })
-  const pendingOvertimeRows = data.overtime.filter((row) => row.status === "pending")
-  const approvedOvertimeTotal = data.overtime.reduce((sum, row) => sum + (row.status === "approved" ? row.totalAmount : 0), 0)
+  const overtimeMetricRows = activeView === "attendance-review" ? filteredOvertimeRows : data.overtime
+  const pendingOvertimeRows = overtimeMetricRows.filter((row) => row.status === "pending")
+  const approvedOvertimeTotal = overtimeMetricRows.reduce((sum, row) => sum + (row.status === "approved" ? row.totalAmount : 0), 0)
   const overtimeRequestEmployees = useMemo(() => {
     const employeesById = new Map<string, AttendanceMonitorRow>()
     data.rows.forEach((row) => {
@@ -14098,7 +15036,7 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
 
     return Array.from(employeesById.values()).sort((a, b) => a.employeeCode.localeCompare(b.employeeCode))
   }, [data.rows])
-  const isDateDrivenView = activeView === "attendance-live" || activeView === "attendance-requests"
+  const isDateDrivenView = activeView === "attendance-live" || activeView === "attendance-requests" || activeView === "attendance-review"
   const singleDateMode = ["today", "yesterday", "day"].includes(attendanceDateMode)
   const recapSourceRows = singleDateMode ? data.rows : data.allRows
   const filteredRecapRows = [...recapSourceRows.filter((row) => {
@@ -14106,9 +15044,10 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
     if (!inRange) return false
 
     const matchesSearch = normalizedSearch ? getAttendanceSearchText(row).includes(normalizedSearch) : true
+    const matchesDivision = matchesDivisionFilter(row.divisionName)
     const matchesStatus = matchesAttendanceRecapStatus(row, statusFilter)
 
-    return matchesSearch && matchesStatus
+    return matchesDivision && matchesSearch && matchesStatus
   })].sort(compareAttendanceRowsByLatestActivity)
   const recapShortRows = filteredRecapRows.filter((row) => row.shortageMinutes > 0)
   const recapMissingCheckoutRows = filteredRecapRows.filter((row) => row.settlementStatus === "missing_checkout")
@@ -14116,22 +15055,34 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
   const attendanceStatusFilterOptions = activeView === "payroll"
     ? [
       { value: "all", label: "Semua Status" },
-      { value: "ready", label: "Siap Gajian" },
-      { value: "locked", label: "Locked" },
-      { value: "active", label: "Cycle Aktif" },
+      { value: "ready", label: "Siap Dicek" },
+      { value: "locked", label: "Final / Menunggu Bayar" },
+      { value: "active", label: "Berjalan" },
       { value: "paid", label: "Terbayar" },
-      { value: "void", label: "Void" },
-      { value: "approved", label: "Lembur Approved" },
-      { value: "pending_overtime", label: "Lembur Pending" },
+      { value: "void", label: "Dibatalkan" },
+      { value: "overtime_approved", label: "Lembur Disetujui" },
+      { value: "overtime_pending", label: "Lembur Menunggu" },
     ]
     : activeView === "attendance-review"
-      ? [
-        { value: "all", label: "Semua Status" },
-        { value: "review", label: "Perlu Review" },
-        { value: "out_of_radius", label: "Luar Radius" },
-        { value: "failed", label: "Face Failed" },
-        { value: "missing", label: "GPS/Face Kosong" },
-      ]
+      ? activeApprovalTab === "overtime"
+        ? [
+          { value: "all", label: "Aktif & Approved" },
+          { value: "pending", label: "Pending Approval" },
+          { value: "draft", label: "Menunggu Checkout" },
+          { value: "approved", label: "Approved" },
+          { value: "rejected", label: "Rejected" },
+          { value: "planned", label: "Request Terencana" },
+          { value: "auto", label: "Auto Detect" },
+          { value: "sunday", label: "Hari Minggu" },
+          { value: "weekday", label: "Hari Kerja" },
+        ]
+        : [
+          { value: "all", label: "Semua Status" },
+          { value: "review", label: "Perlu Review" },
+          { value: "out_of_radius", label: "Luar Radius" },
+          { value: "failed", label: "Face Failed" },
+          { value: "missing", label: "GPS/Face Kosong" },
+        ]
       : activeView === "field-monitoring"
         ? [
           { value: "all", label: "Semua Status" },
@@ -14148,6 +15099,9 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
             { value: "late", label: "Telat" },
             { value: "early_leave", label: "Pulang Cepat" },
             { value: "overtime", label: "Lewat Shift" },
+            { value: "overtime_request", label: "Request Lembur" },
+            { value: "overtime_pending", label: "Lembur Pending" },
+            { value: "overtime_approved", label: "Lembur Approved" },
             { value: "running", label: "Sedang Berjalan" },
             { value: "missing_checkout", label: "Belum Checkout" },
             { value: "missing_checkin", label: "Belum Masuk" },
@@ -14163,17 +15117,25 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
           { value: "missing", label: "Belum Absen" },
           { value: "out_of_radius", label: "Luar Radius" },
           { value: "verified", label: "Face Valid" },
-          { value: "ready", label: "Siap Gajian" },
+          { value: "overtime_request", label: "Request Lembur" },
+          { value: "overtime_pending", label: "Lembur Pending" },
+          { value: "overtime_approved", label: "Lembur Approved" },
+          { value: "ready", label: "Siap Dicek" },
         ]
   const pageSubtitle = activeView === "payroll"
-    ? "Preview payroll otomatis dari 26 hari kerja valid, lembur approved, tipe gaji, dan cycle berjalan."
+    ? "Preview gaji otomatis dari hari kerja valid, lembur disetujui, tipe gaji, dan cycle berjalan."
     : activeView === "attendance-review"
-      ? "Approve atau reject absensi bermasalah sebelum masuk hitungan payroll cycle."
+      ? "Pusat approval absensi bermasalah dan lembur sebelum masuk hitungan payroll cycle."
     : activeView === "attendance-requests"
       ? "Rekap check-in, check-out, jam kerja, validasi GPS/face, dan status hari kerja per tanggal."
     : activeView === "field-monitoring"
       ? "Monitoring titik lokasi kerja, radius GPS, kesiapan koordinat, dan aktivitas absensi per lokasi."
       : "Pantau absensi realtime dengan validasi GPS radius, face verification, dan progress payroll cycle."
+  const approvalQueueTabs = [
+    canReviewAttendance ? { id: "attendance" as const, label: "Absensi Review", icon: ClipboardList, count: filteredReviewRows.length } : null,
+    canReviewOvertime ? { id: "overtime" as const, label: "Lembur", icon: BadgeDollarSign, count: filteredOvertimeRows.length } : null,
+  ].filter(Boolean) as Array<{ id: ApprovalQueueTab; label: string; icon: LucideIcon; count: number }>
+
   const pageMetaItems = activeView === "attendance-requests"
     ? [
       `${filteredRecapRows.length} baris rekap`,
@@ -14181,11 +15143,18 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
       `${recapMissingCheckoutRows.length} belum checkout`,
       `${recapReviewRows.length} perlu review`,
     ]
+    : activeView === "attendance-review"
+      ? [
+        canReviewAttendance ? `${filteredReviewRows.length} review absensi` : null,
+        canReviewOvertime ? `${pendingOvertimeRows.length} lembur pending` : null,
+        canReviewOvertime ? `${filteredOvertimeRows.length} request lembur` : null,
+        canReviewOvertime ? `${formatCurrency(approvedOvertimeTotal)} disetujui` : null,
+      ].filter(Boolean) as string[]
     : [
       `${latestFirstRows.length} karyawan`,
-      activeView === "attendance-review" ? `${filteredReviewRows.length} antrian review` : `${gpsReadyLocations.length} lokasi GPS siap`,
+      `${gpsReadyLocations.length} lokasi GPS siap`,
       `${faceVerifiedRows.length} face valid`,
-      activeView === "payroll" ? `${readyPayrollRows.length} siap - ${lockedPayrollRows.length} locked - ${paidPayrollRows.length} terbayar - ${voidPayrollRows.length} void` : `${readyPayrollRows.length} cycle siap`,
+      activeView === "payroll" ? `${readyPayrollRows.length} siap dicek - ${lockedPayrollRows.length} final - ${paidPayrollRows.length} terbayar - ${voidPayrollRows.length} dibatalkan` : `${readyPayrollRows.length} cycle siap`,
     ]
 
   return (
@@ -14196,7 +15165,7 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
         actions={
           <>
             <FoundationRefreshButton loading={loading || refreshing} onClick={refreshData} />
-            {activeView === "payroll" && (
+            {(activeView === "payroll" || (activeView === "attendance-review" && activeApprovalTab === "overtime" && canReviewOvertime)) && (
               <button className="primaryButton" type="button" onClick={() => setOvertimeRequestOpen(true)}>
                 <ClipboardList size={17} />
                 Request Lembur
@@ -14221,7 +15190,7 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
         }
       />
 
-      {activeView !== "attendance-live" && activeView !== "attendance-review" && activeView !== "attendance-requests" && (
+      {activeView !== "attendance-live" && activeView !== "attendance-review" && activeView !== "attendance-requests" && activeView !== "payroll" && (
         <OperationalKpiGrid>
           {activeView === "field-monitoring" ? (
             <>
@@ -14235,7 +15204,7 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
               <OperationalKpiCard label="Absen Valid" value={data.rows.filter((row) => row.attendanceStatus === "valid").length} detail={isTodayView ? "Hari ini" : formatWorkDate(selectedDate)} icon={UserRoundCheck} tone="green" />
               <OperationalKpiCard label="Butuh Review" value={reviewRows.length} detail="GPS/face/perlu approval" icon={AlertTriangle} tone="amber" />
               <OperationalKpiCard label="Lokasi GPS" value={`${gpsReadyLocations.length}/${data.locations.length}`} detail="Koordinat + radius siap" icon={LocateFixed} tone="blue" />
-              <OperationalKpiCard label="Preview Payroll" value={formatCurrency(payrollPreviewTotal)} detail="Pokok + lembur approved" icon={BadgeDollarSign} tone="violet" />
+              <OperationalKpiCard label="Preview Gaji" value={formatCurrency(payrollPreviewTotal)} detail="Pokok + lembur disetujui" icon={BadgeDollarSign} tone="violet" />
             </>
           )}
         </OperationalKpiGrid>
@@ -14255,11 +15224,34 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
             />
           </div>
         )}
+        <div className="filterField divisionFilterField">
+          <label>Divisi</label>
+          <FoundationSelect
+            label="Filter divisi"
+            value={divisionFilter}
+            options={divisionFilterOptions}
+            placeholder="Semua Divisi"
+            searchable={divisionFilterOptions.length > 8}
+            onChange={setDivisionFilter}
+          />
+        </div>
         <div className="filterField">
           <label>Search</label>
           <div className="uiInput inputWithIcon compact">
             <Search size={16} />
-            <input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder={activeView === "attendance-requests" ? "Cari karyawan, shift, telat, kurang jam..." : "Cari karyawan, lokasi, GPS, face..."} />
+            <input
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+              placeholder={
+                activeView === "attendance-requests"
+                  ? "Cari karyawan, shift, telat, kurang jam..."
+                  : activeView === "attendance-review" && activeApprovalTab === "overtime"
+                    ? "Cari karyawan, komponen, request, lembur..."
+                    : activeView === "attendance-review"
+                      ? "Cari karyawan, lokasi, GPS, face..."
+                      : "Cari karyawan, lokasi, GPS, face..."
+              }
+            />
           </div>
         </div>
         <div className="filterField">
@@ -14274,6 +15266,7 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
         </div>
         <button className="secondaryButton" type="button" onClick={() => {
           setSearchTerm("")
+          setDivisionFilter("all")
           setStatusFilter("all")
           if (isDateDrivenView) {
             setSelectedDate(todayDate)
@@ -14286,20 +15279,39 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
         <AttendanceLiveRecap rows={activeView === "attendance-requests" ? filteredRecapRows : latestFirstRows} selectedDate={selectedDate} mode={attendanceDateMode} />
       )}
 
+      {activeView === "attendance-review" && (
+        <CategoryTabs
+          ariaLabel="Pilih antrian approval"
+          activeId={activeApprovalTab}
+          onChange={setApprovalTab}
+          items={approvalQueueTabs}
+        />
+      )}
+
       {activeView === "field-monitoring" ? (
         <>
           <FieldReadinessTable rows={filteredFieldReadinessRows} allRows={data.fieldReadiness} loading={loading} errorMessage={errorMessage} />
           <LocationRadiusTable locations={data.locations} loading={loading} errorMessage={errorMessage} />
         </>
       ) : activeView === "attendance-review" ? (
-        <AttendanceReviewTable rows={filteredReviewRows} loading={loading || reviewSubmitting} errorMessage={errorMessage} onReview={openReviewDialog} onApproveAll={handleApproveReviewGroup} />
+        activeApprovalTab === "overtime" ? (
+          <OvertimeReviewTable rows={filteredOvertimeRows} loading={loading || overtimeSubmitting} errorMessage={errorMessage} onReview={setOvertimeTarget} />
+        ) : (
+          <AttendanceReviewTable rows={filteredReviewRows} loading={loading || reviewSubmitting} errorMessage={errorMessage} onReview={openReviewDialog} onApproveAll={setBulkReviewRows} />
+        )
       ) : activeView === "attendance-requests" ? (
         <AttendanceRecapTable rows={filteredRecapRows} loading={loading} errorMessage={errorMessage} selectedDate={selectedDate} mode={attendanceDateMode} onResetDay={setResetAttendanceRow} onCorrectCheckIn={setCheckinCorrectionRow} onCorrectCheckout={setCheckoutCorrectionRow} />
       ) : activeView === "payroll" ? (
-        <>
-          <PayrollPreviewTable rows={filteredRows} loading={loading} errorMessage={errorMessage} overtimeTotal={approvedOvertimeTotal} onProcess={openPayrollProcessDialog} />
-          <OvertimeReviewTable rows={filteredOvertimeRows} loading={loading} errorMessage={errorMessage} onReview={setOvertimeTarget} />
-        </>
+        <PayrollPreviewTable
+          rows={filteredRows}
+          payments={filteredPayrollPayments}
+          loading={loading}
+          errorMessage={errorMessage}
+          overtimeTotal={approvedOvertimeTotal}
+          focusTab={payrollFocusTab}
+          onFocusTabConsumed={() => setPayrollFocusTab(null)}
+          onProcess={openPayrollProcessDialog}
+        />
       ) : (
         <LiveAttendanceTable rows={latestFirstRows} loading={loading} errorMessage={errorMessage} selectedDate={selectedDate} onResetDay={setResetAttendanceRow} onCorrectCheckIn={setCheckinCorrectionRow} onCorrectCheckout={setCheckoutCorrectionRow} />
       )}
@@ -14326,6 +15338,7 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
         open={overtimeRequestOpen}
         saving={overtimeRequestSubmitting}
         employees={overtimeRequestEmployees}
+        existingRequests={data.overtime}
         selectedDate={selectedDate}
         onClose={() => {
           if (!overtimeRequestSubmitting) setOvertimeRequestOpen(false)
@@ -14338,6 +15351,26 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
         onClose={() => setOvertimeTarget(null)}
         onSubmit={handleOvertimeReviewSubmit}
       />
+      <ConfirmDialog
+        open={bulkReviewRows.length > 0}
+        tone="warning"
+        icon={FileCheck2}
+        eyebrow="Approval Massal"
+        title={`Approve ${bulkReviewRows.length} event review?`}
+        description="Semua event terpilih akan berubah menjadi valid dan payroll cycle karyawan akan dihitung ulang."
+        confirmLabel="Approve Semua"
+        loading={reviewSubmitting}
+        onClose={() => {
+          if (!reviewSubmitting) setBulkReviewRows([])
+        }}
+        onConfirm={() => void handleApproveReviewGroup()}
+      >
+        <div className="confirmDialogPreview">
+          <span>Karyawan</span>
+          <strong>{bulkReviewRows[0]?.fullName || "-"}</strong>
+          <small>{bulkReviewRows[0] ? `${formatWorkDate(bulkReviewRows[0].attendanceDate)} / ${bulkReviewRows.length} event` : "Belum ada event"}</small>
+        </div>
+      </ConfirmDialog>
       <PayrollProcessDialog
         row={payrollTarget}
         action={payrollAction}
@@ -14435,24 +15468,23 @@ function CheckInCorrectionDialog({
     onSubmit(checkInDate, checkInTime, notes)
   }
 
-  return createPortal(
-    <div className="dialogBackdrop" role="presentation" onMouseDown={saving ? undefined : onClose}>
-      <section
-        className="dialogPanel checkoutCorrectionDialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="checkin-correction-title"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <div className="dialogCompactHeader">
+  return (
+    <FoundationDialog
+      open={Boolean(row)}
+      labelledBy="checkin-correction-title"
+      describedBy="checkin-correction-description"
+      className="checkoutCorrectionDialog attendanceCorrectionDialog"
+      backdropClassName="attendanceCorrectionBackdrop"
+      closeOnBackdrop={!saving}
+      onClose={onClose}
+    >
+        <div className="dialogCompactHeader attendanceCorrectionHeader">
           <div className="dialogHeaderCopy">
             <span>Koreksi HR</span>
             <h2 id="checkin-correction-title">Koreksi check-in {row.fullName}</h2>
-            <p>Dipakai saat karyawan lupa absen masuk atau jam masuk perlu diperbaiki.</p>
+            <p id="checkin-correction-description">Dipakai saat karyawan lupa absen masuk atau jam masuk perlu diperbaiki.</p>
           </div>
-          <button className="iconButton dialogClose" type="button" aria-label="Tutup koreksi check-in" onClick={onClose} disabled={saving}>
-            <X size={18} />
-          </button>
+          <FoundationDialogCloseButton label="Tutup koreksi check-in" onClose={onClose} disabled={saving} />
         </div>
 
         <form className="checkoutCorrectionBody" onSubmit={handleSubmit}>
@@ -14478,7 +15510,7 @@ function CheckInCorrectionDialog({
 
           {error && <p className="formErrorMessage">{error}</p>}
 
-          <div className="attendanceReviewActions">
+          <div className="checkoutCorrectionActions">
             <button className="secondaryButton" type="button" onClick={onClose} disabled={saving}>Batal</button>
             <button className="primaryButton" type="submit" disabled={saving}>
               <FileCheck2 size={17} />
@@ -14486,9 +15518,7 @@ function CheckInCorrectionDialog({
             </button>
           </div>
         </form>
-      </section>
-    </div>,
-    document.body,
+    </FoundationDialog>
   )
 }
 
@@ -14541,24 +15571,23 @@ function CheckoutCorrectionDialog({
     onSubmit(checkOutDate, checkOutTime, notes)
   }
 
-  return createPortal(
-    <div className="dialogBackdrop" role="presentation" onMouseDown={saving ? undefined : onClose}>
-      <section
-        className="dialogPanel checkoutCorrectionDialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="checkout-correction-title"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <div className="dialogCompactHeader">
+  return (
+    <FoundationDialog
+      open={Boolean(row)}
+      labelledBy="checkout-correction-title"
+      describedBy="checkout-correction-description"
+      className="checkoutCorrectionDialog attendanceCorrectionDialog"
+      backdropClassName="attendanceCorrectionBackdrop"
+      closeOnBackdrop={!saving}
+      onClose={onClose}
+    >
+        <div className="dialogCompactHeader attendanceCorrectionHeader">
           <div className="dialogHeaderCopy">
             <span>Koreksi HR</span>
             <h2 id="checkout-correction-title">Tutup checkout {row.fullName}</h2>
-            <p>Dipakai saat karyawan lupa absen pulang. Hari kerja baru dihitung setelah koreksi ini disimpan.</p>
+            <p id="checkout-correction-description">Dipakai saat karyawan lupa absen pulang. Hari kerja baru dihitung setelah koreksi ini disimpan.</p>
           </div>
-          <button className="iconButton dialogClose" type="button" aria-label="Tutup koreksi checkout" onClick={onClose} disabled={saving}>
-            <X size={18} />
-          </button>
+          <FoundationDialogCloseButton label="Tutup koreksi checkout" onClose={onClose} disabled={saving} />
         </div>
 
         <form className="checkoutCorrectionBody" onSubmit={handleSubmit}>
@@ -14584,7 +15613,7 @@ function CheckoutCorrectionDialog({
 
           {error && <p className="formErrorMessage">{error}</p>}
 
-          <div className="attendanceReviewActions">
+          <div className="checkoutCorrectionActions">
             <button className="secondaryButton" type="button" onClick={onClose} disabled={saving}>Batal</button>
             <button className="primaryButton" type="submit" disabled={saving}>
               <FileCheck2 size={17} />
@@ -14592,9 +15621,7 @@ function CheckoutCorrectionDialog({
             </button>
           </div>
         </form>
-      </section>
-    </div>,
-    document.body,
+    </FoundationDialog>
   )
 }
 
@@ -14683,7 +15710,7 @@ function LiveAttendanceTable({
                     <td><TableNumberCell value={(currentPage - 1) * safePageSize + index + 1} /></td>
                     <td><EmployeeIdentityCell fullName={row.fullName} code={row.employeeCode} photoUrl={row.employeePhotoUrl} /></td>
                     <td><AttendanceTimelineCell row={row} /></td>
-                    <td><AttendanceSettlementCell row={row} /></td>
+                    <td><AttendanceSettlementCell row={row} compact /></td>
                     <td><AttendanceValidationCell row={row} /></td>
                     <td><span className="cycleCell"><ProgressRing value={row.cycleDays} /><span>{row.cycleDays}/{row.targetDays}</span></span></td>
                     <td><StatusBadge status={row.attendanceStatus} /></td>
@@ -14780,8 +15807,9 @@ function LiveAttendanceInlineDetail({
     { label: "Shift", value: row.shiftName, meta: getAttendanceShiftScheduleLabel(row) },
     { label: "Toleransi", value: `Telat ${formatMinutesDuration(row.shiftLateToleranceMinutes)}`, meta: `Pulang cepat ${formatMinutesDuration(row.shiftEarlyLeaveToleranceMinutes)}` },
     { label: "Jam kerja", value: row.workDurationLabel, meta: getAttendanceSettlementDescription(row) },
+    row.overtimeRequestId ? { label: "Lembur", value: getAttendanceOvertimeInlineLabel(row), meta: getAttendanceOvertimeDetailMeta(row) } : null,
     { label: "Payroll", value: row.payrollCycleNumber ? `Cycle ${row.payrollCycleNumber}` : "Cycle aktif", meta: `${row.cycleDays}/${row.targetDays} hari / ${payrollLabel[row.payrollStatus]}` },
-  ]
+  ].filter(Boolean) as Array<{ label: string; value: string; meta: string }>
   const sourceItems = [
     { label: "Masuk", value: row.checkInAt ? formatAttendanceTime(row.checkInAt) : "Belum", meta: row.checkInId ? formatAttendanceSourceMeta(row.checkInSource, row.checkInMedia) : "Belum ada log" },
     { label: "Status masuk", value: formatAttendanceLogStatus(row.checkInStatus), meta: `${formatGpsDetail(row.checkInGpsStatus, row.checkInDistanceM)} / ${formatFaceDetail(row.checkInFaceStatus, row.checkInFaceScore)}` },
@@ -14801,7 +15829,8 @@ function LiveAttendanceInlineDetail({
     { label: "Pulang cepat", value: row.earlyLeaveMinutes ? formatMinutesDuration(row.earlyLeaveMinutes) : "0m", tone: row.earlyLeaveMinutes > 0 ? "failed" : "neutral" },
     { label: "Kurang jam", value: row.shortageMinutes ? formatMinutesDuration(row.shortageMinutes) : "0m", tone: row.shortageMinutes > 0 ? "failed" : "neutral" },
     { label: "Kelebihan", value: row.overtimeMinutes ? formatMinutesDuration(row.overtimeMinutes) : "0m", tone: row.overtimeMinutes > 0 ? "valid" : "neutral" },
-  ]
+    row.overtimeRequestId ? { label: "Request lembur", value: getOvertimeStatusLabel(row.overtimeRequestStatus || "pending"), tone: getAttendanceOvertimeTone(row.overtimeRequestStatus) } : null,
+  ].filter(Boolean) as Array<{ label: string; value: string; tone: string }>
 
   return (
     <div className="liveAttendanceInlineDetail">
@@ -14894,6 +15923,8 @@ function AttendanceLiveRecap({ rows, selectedDate, mode = "today" }: { rows: Att
   const missingCheckout = rows.filter((row) => row.checkInId && !row.checkOutId).length
   const workdayCounted = rows.filter((row) => row.attendanceStatus === "valid" && row.checkInId).length
   const shortageRows = rows.filter((row) => row.shortageMinutes > 0).length
+  const overtimeRequestRows = rows.filter((row) => row.overtimeRequestId).length
+  const overtimePendingRows = rows.filter((row) => row.overtimeRequestStatus === "pending" || row.overtimeRequestStatus === "draft").length
   const totalShortageMinutes = rows.reduce((sum, row) => sum + row.shortageMinutes, 0)
   const rangeLabel = getAttendanceRangeMetricLabel(mode)
   const items = [
@@ -14901,6 +15932,7 @@ function AttendanceLiveRecap({ rows, selectedDate, mode = "today" }: { rows: Att
     { label: "Masuk", value: checkedIn, tone: "valid" },
     { label: "Pulang", value: checkedOut, tone: "valid" },
     { label: "Kurang jam", value: shortageRows ? `${shortageRows} / ${formatMinutesDuration(totalShortageMinutes)}` : "0", tone: shortageRows ? "pending" : "neutral" },
+    { label: "Lembur", value: overtimeRequestRows ? `${overtimeRequestRows} req` : "0", tone: overtimePendingRows ? "pending" : overtimeRequestRows ? "valid" : "neutral" },
     { label: "Belum checkout", value: missingCheckout, tone: missingCheckout ? "pending" : "neutral" },
     { label: "Review", value: review, tone: review ? "pending" : "neutral" },
     { label: "Failed", value: failed, tone: failed ? "failed" : "neutral" },
@@ -14985,7 +16017,7 @@ function AttendanceRecapTable({
             <col style={{ width: "170px" }} />
             <col style={{ width: "260px" }} />
             <col style={{ width: "130px" }} />
-            <col className="tableActionColumn" />
+            <col className="tableActionColumn" style={{ width: "168px" }} />
           </colgroup>
           <thead>
             <tr>
@@ -15017,7 +16049,7 @@ function AttendanceRecapTable({
                     <td><TableText primary={formatWorkDate(row.attendanceDate)} secondary={row.divisionName} /></td>
                     <td><RecapEventText eventType="check_in" time={row.checkInAt} status={row.checkInStatus} /></td>
                     <td><RecapEventText eventType="check_out" time={row.checkOutAt} status={row.checkOutStatus} /></td>
-                    <td><AttendanceSettlementCell row={row} /></td>
+                    <td><AttendanceSettlementCell row={row} compact /></td>
                     <td><RecapValidationSummary row={row} /></td>
                     <td><StatusBadge status={row.attendanceStatus} /></td>
                     <td className="tableActionCell">
@@ -15121,17 +16153,33 @@ function AttendanceReviewTable({
   onApproveAll: (rows: AttendanceReviewRow[]) => void
 }) {
   const [openGroupId, setOpenGroupId] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
+  const reviewTableDrag = useHorizontalDragScroll<HTMLDivElement>()
   const groups = useMemo(() => groupAttendanceReviewRows(rows), [rows])
+  const safePageSize = Math.min(pageSize, 100)
+  const pageCount = Math.max(1, Math.ceil(groups.length / safePageSize))
+  const currentPage = Math.min(page, pageCount)
+  const paginatedGroups = groups.slice((currentPage - 1) * safePageSize, currentPage * safePageSize)
+
+  useEffect(() => {
+    setPage(1)
+  }, [groups.length, pageSize])
 
   return (
     <OperationalTableCard>
       <div className="tableHeader">
         <div>
-          <h2>Attendance Review Queue</h2>
+          <h2>Approval Absensi</h2>
           <p>Satu baris adalah satu karyawan per tanggal. Klik baris untuk melihat review check-in dan check-out.</p>
         </div>
+        <InlinePageStats items={[`${groups.length} hari review`, `${rows.length} event`, `${new Set(rows.map((row) => row.employeeId)).size} karyawan`]} />
       </div>
-      <div className="tableScroller uiDataTableScroller uiDataTableHasColumns">
+      <div
+        className={clsx("tableScroller uiDataTableScroller uiDataTableHasColumns attendanceReviewTableScroller", reviewTableDrag.dragging && "dragging")}
+        ref={reviewTableDrag.ref}
+        {...reviewTableDrag.handlers}
+      >
         <table>
           <colgroup>
             <col className="tableNumberColumn" />
@@ -15154,9 +16202,9 @@ function AttendanceReviewTable({
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td className="tableStateCell" colSpan={7}><TableState title="Memuat review" description="Mengambil antrian absensi bermasalah." icon={ClipboardList} /></td></tr>}
+            {loading && <FoundationTableSkeletonRows colSpan={7} columns={7} rows={5} />}
             {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={7}><TableState title="Gagal memuat" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
-            {!loading && !errorMessage && groups.map((group, index) => {
+            {!loading && !errorMessage && paginatedGroups.map((group, index) => {
               const isOpen = openGroupId === group.id
               const reviewEvents = [group.checkIn, group.checkOut].filter(Boolean) as AttendanceReviewRow[]
 
@@ -15168,7 +16216,7 @@ function AttendanceReviewTable({
                       setOpenGroupId(isOpen ? null : group.id)
                     }
                   }}>
-                    <td><TableNumberCell value={index + 1} /></td>
+                    <td><TableNumberCell value={(currentPage - 1) * safePageSize + index + 1} /></td>
                     <td><AttendanceReviewGroupEmployeeCell group={group} /></td>
                     <td><TableText primary={formatWorkDate(group.attendanceDate)} secondary={`${group.reviewCount} event review`} /></td>
                     <td><AttendanceReviewGroupActivity group={group} /></td>
@@ -15194,30 +16242,33 @@ function AttendanceReviewTable({
                   </tr>
                   {isOpen && (
                     <tr className="attendanceReviewExpandRow">
-                      <td />
-                      <td colSpan={6}>
+                      <td colSpan={7}>
                         <div className="attendanceReviewExpandPanel">
-                          <AttendanceReviewEventPanel
-                            label="Absen Masuk"
-                            eventType="check_in"
-                            row={group.checkIn}
-                            pairedAt={group.pairedCheckInAt}
-                            pairedStatus={group.pairedCheckInStatus}
-                            onReview={onReview}
-                          />
-                          <AttendanceReviewEventPanel
-                            label="Absen Pulang"
-                            eventType="check_out"
-                            row={group.checkOut}
-                            pairedAt={group.pairedCheckOutAt}
-                            pairedStatus={group.pairedCheckOutStatus}
-                            onReview={onReview}
-                          />
+                          <div className="attendanceReviewExpandEvents">
+                            <AttendanceReviewEventPanel
+                              label="Absen Masuk"
+                              eventType="check_in"
+                              row={group.checkIn}
+                              pairedAt={group.pairedCheckInAt}
+                              pairedStatus={group.pairedCheckInStatus}
+                              onReview={onReview}
+                            />
+                            <AttendanceReviewEventPanel
+                              label="Absen Pulang"
+                              eventType="check_out"
+                              row={group.checkOut}
+                              pairedAt={group.pairedCheckOutAt}
+                              pairedStatus={group.pairedCheckOutStatus}
+                              onReview={onReview}
+                            />
+                          </div>
                           {reviewEvents.length > 1 && (
-                            <button className="primaryButton compactButton attendanceReviewApproveAll" type="button" onClick={() => onApproveAll(reviewEvents)}>
-                              <FileCheck2 size={16} />
-                              Approve Masuk & Pulang
-                            </button>
+                            <div className="attendanceReviewExpandActions">
+                              <button className="primaryButton compactButton attendanceReviewApproveAll" type="button" onClick={() => onApproveAll(reviewEvents)}>
+                                <FileCheck2 size={16} />
+                                Approve Masuk & Pulang
+                              </button>
+                            </div>
                           )}
                         </div>
                       </td>
@@ -15230,6 +16281,16 @@ function AttendanceReviewTable({
           </tbody>
         </table>
       </div>
+      {!loading && !errorMessage && (
+        <DataTablePagination
+          page={currentPage}
+          pageSize={safePageSize}
+          totalRows={groups.length}
+          pageSizeOptions={[25, 50, 100]}
+          onPageChange={setPage}
+          onPageSizeChange={(value) => setPageSize(Math.min(value, 100))}
+        />
+      )}
     </OperationalTableCard>
   )
 }
@@ -15343,8 +16404,8 @@ function AttendanceReviewEventPanel({
         <span className="attendanceReviewEventPanelIcon">
           {hasPairedEvent && pairedStatus === "valid" ? <ShieldCheck size={17} /> : <AlertCircle size={17} />}
         </span>
-        <div>
-          <strong>{label}{hasPairedEvent ? ` · ${formatAttendanceTime(pairedAt)}` : ""}</strong>
+        <div className="attendanceReviewEventPanelMain">
+          <strong>{label}{hasPairedEvent ? ` - ${formatAttendanceTime(pairedAt)}` : ""}</strong>
           <p>{getAttendanceReviewEventCopy(pairedStatus, eventType)}</p>
         </div>
       </div>
@@ -15357,14 +16418,17 @@ function AttendanceReviewEventPanel({
         {row.eventType === "check_out" ? <LogOut size={17} /> : <LogIn size={17} />}
       </span>
       <div className="attendanceReviewEventPanelMain">
-        <strong>{label} · {formatAttendanceTime(row.eventAt)}</strong>
-        <p>{row.issueLabel} · {row.workLocationName} · {row.distanceM === null ? "GPS kosong" : `${row.distanceM}m dari radius ${row.radiusM || "-"}m`}</p>
+        <strong>{label} - {formatAttendanceTime(row.eventAt)}</strong>
+        <p>{row.issueLabel} - {row.workLocationName} - {row.distanceM === null ? "GPS kosong" : `${row.distanceM}m dari radius ${row.radiusM || "-"}m`}</p>
       </div>
-      <AttendanceEvidenceCell row={row} />
-      <button className="secondaryButton compactButton" type="button" onClick={() => onReview(row)}>
-        <Eye size={15} />
-        Review Event
-      </button>
+      <div className="attendanceReviewEventPanelMeta">
+        <AttendanceEvidenceCell row={row} />
+        <AttendanceSourceTag source={row.source} media={row.media} />
+        <button className="secondaryButton compactButton" type="button" onClick={() => onReview(row)}>
+          <Eye size={15} />
+          Review Event
+        </button>
+      </div>
     </div>
   )
 }
@@ -15391,6 +16455,27 @@ function getAttendancePairSummary(row: AttendanceReviewRow) {
   const checkIn = row.pairedCheckInAt ? `Masuk ${formatAttendanceTime(row.pairedCheckInAt)}` : "Masuk belum ada"
   const checkOut = row.pairedCheckOutAt ? `Pulang ${formatAttendanceTime(row.pairedCheckOutAt)}` : "Pulang belum ada"
   return `${checkIn} · ${checkOut}`
+}
+
+function getAttendanceReviewSourceNote(row: AttendanceReviewRow) {
+  if (!row.source && !row.media && !row.attendanceDeviceId && !row.biofingerEventId) {
+    return "Metadata sumber belum tersedia di log lama."
+  }
+
+  const sourceTone = getAttendanceSourceTone(row.source, row.media)
+  const sourceLabel = formatAttendanceSourceMeta(row.source, row.media)
+
+  if (sourceTone === "biofinger") {
+    const rawLabel = row.biofingerEventId ? formatShortId(row.biofingerEventId, "RAW") : "Raw event belum tersambung"
+    const deviceLabel = row.attendanceDeviceId ? formatShortId(row.attendanceDeviceId, "DEV") : "Device belum tersambung"
+    return `${sourceLabel} dari receiver ADMS. ${rawLabel} / ${deviceLabel}.`
+  }
+
+  if (sourceTone === "field") return `${sourceLabel}; event dari app lapangan.`
+  if (sourceTone === "kiosk") return `${sourceLabel}; event dari kiosk scan.`
+  if (sourceTone === "manual") return `${sourceLabel}; koreksi dibuat dari DMS, bukan scan mesin.`
+
+  return `${sourceLabel}; event belum membawa metadata Biofinger.`
 }
 
 function AttendanceEvidenceCell({ row }: { row: AttendanceReviewRow }) {
@@ -15425,9 +16510,13 @@ function AttendanceReviewDialog({
   onSubmit: (decision: "approve" | "reject", notes: string) => Promise<void>
 }) {
   const [notes, setNotes] = useState("")
+  const [noteError, setNoteError] = useState("")
 
   useEffect(() => {
-    if (row) setNotes("")
+    if (row) {
+      setNotes("")
+      setNoteError("")
+    }
   }, [row])
 
   if (!row) return null
@@ -15442,23 +16531,36 @@ function AttendanceReviewDialog({
     ? "Keputusan ini hanya memproses log pulang. Log masuk di hari yang sama tetap punya status sendiri."
     : "Keputusan ini hanya memproses log masuk. Log pulang di hari yang sama tetap punya status sendiri."
   const reviewStory = `${row.fullName} melakukan ${eventLabel.toLowerCase()} pukul ${formatAttendanceTime(row.eventAt)} pada ${formatWorkDate(row.attendanceDate)} di ${row.workLocationName}. ${hasGps ? `${insideRadius ? "Posisi masuk radius" : "Posisi di luar radius"} ${row.radiusM || "-"}m dengan jarak ${row.distanceM ?? "-"}m.` : "Koordinat GPS belum tersedia."} ${row.faceScore === null ? "Face score belum tersedia." : `Face score ${row.faceScore}%.`}`
+  const sourceTone = getAttendanceSourceTone(row.source, row.media)
+  const SourceIcon = getAttendanceSourceIcon(row.source, row.media)
+  const sourceLabel = formatAttendanceSourceMeta(row.source, row.media)
+  const sourceNote = getAttendanceReviewSourceNote(row)
   const distanceRatio = row.distanceM !== null && row.radiusM ? Math.min(1.45, row.distanceM / row.radiusM) : 0
   const userOffset = hasGps ? Math.min(32, Math.max(7, distanceRatio * 24)) : 0
   const mapStyle = {
     "--attendance-user-left": `${50 + userOffset}%`,
     "--attendance-user-top": `${50 - userOffset * 0.46}%`,
   } as CSSProperties
+  const submitDecision = (decision: "approve" | "reject") => {
+    const trimmedNotes = notes.trim()
+    if (decision === "reject" && trimmedNotes.length < 5) {
+      setNoteError("Catatan wajib diisi untuk reject absensi.")
+      return
+    }
+
+    setNoteError("")
+    void onSubmit(decision, trimmedNotes)
+  }
 
   return (
-    <div className="dialogBackdrop" role="presentation" onMouseDown={saving ? undefined : onClose}>
-      <section
-        className="dialogPanel attendanceReviewDialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="attendance-review-title"
-        aria-describedby="attendance-review-description"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
+    <FoundationDialog
+      open={Boolean(row)}
+      labelledBy="attendance-review-title"
+      describedBy="attendance-review-description"
+      className="attendanceReviewDialog"
+      closeOnBackdrop={!saving}
+      onClose={onClose}
+    >
         <div className="attendanceReviewHeader">
           <span className="attendanceReviewHeaderAvatar">
             {row.employeePhotoUrl ? <img src={row.employeePhotoUrl} alt="" /> : getProfileInitials(row.fullName || row.employeeCode)}
@@ -15472,9 +16574,7 @@ function AttendanceReviewDialog({
             {row.eventType === "check_out" ? <LogOut size={15} /> : <LogIn size={15} />}
             {eventLabel}
           </span>
-          <button className="iconButton dialogClose" type="button" aria-label="Tutup detail absensi" onClick={onClose} disabled={saving}>
-            <X size={18} />
-          </button>
+          <FoundationDialogCloseButton label="Tutup detail absensi" onClose={onClose} disabled={saving} />
         </div>
 
         <div className="attendanceReviewContent">
@@ -15482,7 +16582,16 @@ function AttendanceReviewDialog({
             <span className={clsx("attendanceReviewStoryIcon", eventTone)}>
               {row.eventType === "check_out" ? <LogOut size={18} /> : <LogIn size={18} />}
             </span>
-            <p>{reviewStory}</p>
+            <div className="attendanceReviewStoryCopy">
+              <p>{reviewStory}</p>
+              <div className="attendanceReviewSourceRow">
+                <span className={clsx("attendanceReviewSourceNote", sourceTone)}>
+                  <SourceIcon size={14} />
+                  <span>{sourceLabel}</span>
+                </span>
+                <small>{sourceNote}</small>
+              </div>
+            </div>
           </div>
 
           <div className="attendanceEvidenceBoard">
@@ -15548,6 +16657,11 @@ function AttendanceReviewDialog({
               <small>{row.workdayCounted ? "Sudah masuk hitungan payroll" : "Belum dihitung payroll"}</small>
             </div>
             <div>
+              <span>Sumber Event</span>
+              <strong>{sourceLabel}</strong>
+              <small title={sourceNote}>{sourceNote}</small>
+            </div>
+            <div>
               <span>Koordinat Absen</span>
               <strong>{hasGps ? `${row.latitude}, ${row.longitude}` : "Belum ada GPS"}</strong>
               <small>Koordinat lokasi: {row.workLocationLatitude && row.workLocationLongitude ? `${row.workLocationLatitude}, ${row.workLocationLongitude}` : "Belum lengkap"}</small>
@@ -15560,23 +16674,23 @@ function AttendanceReviewDialog({
             onChange={(event) => setNotes(event.target.value)}
             placeholder="Contoh: valid karena tugas luar terkonfirmasi / reject karena lokasi dan wajah tidak sesuai"
           />
+          {noteError && <p className="foundationFieldError">{noteError}</p>}
         </div>
 
         <div className="attendanceReviewActions">
           <button className="secondaryButton" type="button" onClick={onClose} disabled={saving}>
             Batal
           </button>
-          <button className="secondaryButton dangerSoftButton" type="button" onClick={() => void onSubmit("reject", notes)} disabled={saving}>
+          <button className="secondaryButton dangerSoftButton" type="button" onClick={() => submitDecision("reject")} disabled={saving}>
             <X size={16} />
             Reject
           </button>
-          <button className="primaryButton" type="button" onClick={() => void onSubmit("approve", notes)} disabled={saving}>
+          <button className="primaryButton" type="button" onClick={() => submitDecision("approve")} disabled={saving}>
             <FileCheck2 size={16} />
             {saving ? "Memproses..." : `Approve ${eventLabel}`}
           </button>
         </div>
-      </section>
-    </div>
+    </FoundationDialog>
   )
 }
 
@@ -15591,132 +16705,615 @@ function PayrollProcessDialog({
   action: PayrollProcessAction
   saving: boolean
   onClose: () => void
-  onSubmit: (notes: string) => Promise<void> | void
+  onSubmit: (payload: PayrollProcessSubmitPayload) => Promise<void> | void
 }) {
   const [notes, setNotes] = useState("")
+  const [paymentMethod, setPaymentMethod] = useState<PayrollPaymentMethod>("bank_transfer")
+  const [paymentReference, setPaymentReference] = useState("")
+  const [paidAt, setPaidAt] = useState(getLocalDateKey())
+  const [paidAmount, setPaidAmount] = useState("")
+  const [submitError, setSubmitError] = useState("")
 
   useEffect(() => {
-    if (row) setNotes("")
+    if (!row) return
+
+    setNotes("")
+    setPaymentMethod("bank_transfer")
+    setPaymentReference("")
+    setPaidAt(getLocalDateKey())
+    setPaidAmount(String(Math.round(row.payrollAmount || 0)))
+    setSubmitError("")
   }, [row, action])
 
   if (!row) return null
 
   const copy: Record<PayrollProcessAction, { eyebrow: string; title: string; description: string; button: string; icon: LucideIcon }> = {
     lock: {
-      eyebrow: "PAYROLL LOCK",
-      title: `Lock payroll ${row.fullName}?`,
-      description: "Nominal cycle akan difinalkan dan tidak berubah saat data absensi/lembur direfresh.",
-      button: "Lock Payroll",
+      eyebrow: "FINALISASI GAJI",
+      title: `Finalkan gaji ${row.fullName}?`,
+      description: "Nominal akan dikunci agar tidak berubah saat data absensi atau lembur direfresh.",
+      button: "Finalkan Nominal",
       icon: Lock,
     },
     mark_paid: {
-      eyebrow: "PAYROLL PAYMENT",
-      title: `Tandai payroll ${row.fullName} terbayar?`,
-      description: "Cycle akan masuk riwayat pembayaran dan tidak bisa berubah otomatis.",
-      button: "Tandai Terbayar",
+      eyebrow: "PEMBAYARAN GAJI",
+      title: `Catat pembayaran ${row.fullName}?`,
+      description: "Setelah disimpan, data masuk Riwayat Bayar dan cycle tidak berubah otomatis.",
+      button: "Simpan Pembayaran",
       icon: CreditCard,
     },
     unlock: {
-      eyebrow: "PAYROLL REOPEN",
-      title: `Buka ulang payroll ${row.fullName}?`,
-      description: "Cycle kembali ke status siap gajian supaya nominal bisa dihitung ulang dari data terbaru.",
-      button: "Buka Ulang",
+      eyebrow: "BUKA KOREKSI",
+      title: `Buka koreksi payroll ${row.fullName}?`,
+      description: "Cycle kembali ke Siap Dicek supaya nominal bisa dihitung ulang dari data terbaru.",
+      button: "Buka Koreksi",
       icon: FileCheck2,
     },
     void: {
-      eyebrow: "PAYROLL VOID",
+      eyebrow: "BATALKAN CYCLE",
       title: `Batalkan cycle payroll ${row.fullName}?`,
-      description: "Cycle akan ditandai Void tanpa menghapus data fisik, sehingga audit trail tetap aman.",
-      button: "Void Payroll",
+      description: "Cycle ditandai Dibatalkan tanpa menghapus data, supaya riwayat audit tetap ada.",
+      button: "Batalkan Cycle",
       icon: Trash2,
     },
     restore: {
-      eyebrow: "PAYROLL RESTORE",
-      title: `Restore cycle payroll ${row.fullName}?`,
-      description: "Cycle Void akan dikembalikan ke status aktif atau siap gajian sesuai jumlah hari kerja valid.",
-      button: "Restore Payroll",
+      eyebrow: "PULIHKAN CYCLE",
+      title: `Pulihkan cycle payroll ${row.fullName}?`,
+      description: "Cycle yang dibatalkan dikembalikan ke Berjalan atau Siap Dicek sesuai jumlah hari kerja valid.",
+      button: "Pulihkan Cycle",
       icon: FileCheck2,
     },
   }
   const current = copy[action]
   const Icon = current.icon
+  const isPayment = action === "mark_paid"
+  const numericPaidAmount = Number(paidAmount)
+  const paymentDelta = isPayment && Number.isFinite(numericPaidAmount) ? numericPaidAmount - row.payrollAmount : 0
+  const paymentMethodOptions = (Object.keys(payrollPaymentMethodLabel) as PayrollPaymentMethod[]).map((method) => ({
+    value: method,
+    label: payrollPaymentMethodLabel[method],
+  }))
 
-  return createPortal(
-    <div className="dialogBackdrop" role="presentation" onMouseDown={saving ? undefined : onClose}>
-      <section
-        className="dialogPanel payrollProcessDialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="payroll-process-title"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+
+    if (isPayment) {
+      if (!paidAt) {
+        setSubmitError("Tanggal bayar wajib diisi.")
+        return
+      }
+      if (!Number.isFinite(numericPaidAmount) || numericPaidAmount <= 0) {
+        setSubmitError("Nominal bayar wajib lebih dari 0.")
+        return
+      }
+    }
+
+    setSubmitError("")
+    void onSubmit({
+      notes: notes.trim(),
+      paymentMethod: isPayment ? paymentMethod : undefined,
+      paymentReference: isPayment ? paymentReference.trim() : undefined,
+      paidAt: isPayment ? paidAt : undefined,
+      paidAmount: isPayment ? numericPaidAmount : undefined,
+    })
+  }
+
+  return (
+    <FoundationDialog
+      open={Boolean(row)}
+      labelledBy="payroll-process-title"
+      describedBy="payroll-process-description"
+      className="payrollProcessDialog"
+      closeOnBackdrop={!saving}
+      onClose={onClose}
+    >
+      <form className="payrollProcessShell" onSubmit={submit}>
         <div className="payrollProcessHeader">
           <span className="payrollProcessIcon">
-            <Icon size={28} />
+            <Icon size={22} />
           </span>
-          <button className="iconButton dialogClose" type="button" aria-label="Tutup payroll" onClick={onClose} disabled={saving}>
-            <X size={18} />
-          </button>
-          <span>{current.eyebrow}</span>
-          <h2 id="payroll-process-title">{current.title}</h2>
-          <p>{current.description}</p>
+          <div>
+            <span>{current.eyebrow}</span>
+            <h2 id="payroll-process-title">{current.title}</h2>
+            <p id="payroll-process-description">{current.description}</p>
+          </div>
+          <FoundationDialogCloseButton label="Tutup payroll" onClose={onClose} disabled={saving} />
         </div>
 
-        <div className="payrollProcessSummary">
-          <div className="payrollProcessEmployee">
-            <EmployeeIdentityCell fullName={row.fullName} code={row.employeeCode} photoUrl={row.employeePhotoUrl} />
-            <PayrollStatusBadge status={row.payrollStatus} />
-          </div>
-          <div className="payrollProcessGrid">
-            <div>
-              <small>Periode</small>
-              <strong>{formatPayrollPeriod(row)}</strong>
+        <div className="payrollProcessBody">
+          <section className="payrollProcessSummary">
+            <div className="payrollProcessEmployee">
+              <EmployeeIdentityCell fullName={row.fullName} code={row.employeeCode} photoUrl={row.employeePhotoUrl} />
+              <PayrollStatusBadge status={row.payrollStatus} />
             </div>
-            <div>
-              <small>Cycle</small>
-              <strong>{row.cycleDays}/{row.targetDays} hari</strong>
+            <div className="payrollProcessGrid">
+              <div>
+                <small>Periode</small>
+                <strong>{formatPayrollPeriod(row)}</strong>
+              </div>
+              <div>
+                <small>Cycle</small>
+                <strong>{row.cycleDays}/{row.targetDays} hari</strong>
+              </div>
+              <div>
+                <small>Gaji Pokok</small>
+                <strong>{formatCurrency(row.basePayrollAmount)}</strong>
+              </div>
+              <div>
+                <small>Lembur Disetujui</small>
+                <strong>{formatCurrency(row.overtimeAmount)}</strong>
+              </div>
+              <div className="payrollProcessTotal">
+                <small>Total Gaji</small>
+                <strong>{formatCurrency(row.payrollAmount)}</strong>
+              </div>
             </div>
-            <div>
-              <small>Gaji Pokok</small>
-              <strong>{formatCurrency(row.basePayrollAmount)}</strong>
-            </div>
-            <div>
-              <small>Lembur Approved</small>
-              <strong>{formatCurrency(row.overtimeAmount)}</strong>
-            </div>
-            <div className="payrollProcessTotal">
-              <small>Total Payroll</small>
-              <strong>{formatCurrency(row.payrollAmount)}</strong>
-            </div>
-          </div>
-        </div>
+          </section>
 
-        <label className="payrollProcessNotes">
-          <span>Catatan Finance</span>
-          <textarea
-            value={notes}
-            onChange={(event) => setNotes(event.target.value)}
-            placeholder="Contoh: angka sudah dicek dengan HR dan lembur approved."
-            disabled={saving}
-          />
-        </label>
+          {isPayment && (
+            <section className="payrollPaymentForm">
+              <div className="payrollPaymentFormHeader">
+                <CreditCard size={18} />
+                <div>
+                  <strong>Transaksi Pembayaran</strong>
+                  <small>Data ini akan tersimpan sebagai Riwayat Bayar dan audit finance.</small>
+                </div>
+              </div>
+              <div className="payrollPaymentFields">
+                <DateFormField label="Tanggal Bayar" value={paidAt} onChange={setPaidAt} required />
+                <TextFormField label="Nominal Dibayar" type="number" min={1} value={paidAmount} onChange={(event) => setPaidAmount(event.target.value)} required />
+                <FormField label="Metode Bayar" required>
+                  <FoundationSelect
+                    label="Metode Bayar"
+                    value={paymentMethod}
+                    options={paymentMethodOptions}
+                    searchable={false}
+                    onChange={(value) => setPaymentMethod(mapPayrollPaymentMethod(value))}
+                  />
+                </FormField>
+                <TextFormField label="Referensi" value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} placeholder="Nomor transfer, kas, atau bukti pembayaran" />
+              </div>
+              <div className={clsx("payrollPaymentDelta", paymentDelta !== 0 && "hasDelta")}>
+                <span>Selisih bayar</span>
+                <strong>{paymentDelta === 0 ? "Sesuai total gaji" : formatCurrency(paymentDelta)}</strong>
+              </div>
+            </section>
+          )}
+
+          <div className="payrollProcessNotes">
+            <span>Catatan Finance</span>
+            <textarea
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              placeholder={isPayment ? "Contoh: transfer BCA sudah dicek dan slip disimpan." : "Contoh: angka sudah dicek dengan HR dan lembur sudah disetujui."}
+              disabled={saving}
+            />
+          </div>
+          {submitError && <p className="formErrorMessage">{submitError}</p>}
+        </div>
 
         <div className="attendanceReviewActions">
           <button className="secondaryButton" type="button" onClick={onClose} disabled={saving}>
             Batal
           </button>
-          <button className="primaryButton" type="button" onClick={() => void onSubmit(notes)} disabled={saving}>
+          <button className="primaryButton" type="submit" disabled={saving}>
             <Icon size={16} />
             {saving ? "Memproses..." : current.button}
           </button>
         </div>
-      </section>
-    </div>,
-    document.body,
+      </form>
+    </FoundationDialog>
   )
 }
 
 function PayrollPreviewTable({
+  rows,
+  payments,
+  loading,
+  errorMessage,
+  overtimeTotal,
+  focusTab,
+  onFocusTabConsumed,
+  onProcess,
+}: {
+  rows: AttendanceMonitorRow[]
+  payments: PayrollPaymentRow[]
+  loading: boolean
+  errorMessage: string
+  overtimeTotal: number
+  focusTab: PayrollLedgerTab | null
+  onFocusTabConsumed: () => void
+  onProcess: (row: AttendanceMonitorRow, action: PayrollProcessAction) => void
+}) {
+  const [activeTab, setActiveTab] = useState<PayrollLedgerTab>("ready")
+  const [detailRow, setDetailRow] = useState<AttendanceMonitorRow | null>(null)
+  const [cyclePage, setCyclePage] = useState(1)
+  const [cyclePageSize, setCyclePageSize] = useState(25)
+  const [historyPage, setHistoryPage] = useState(1)
+  const [historyPageSize, setHistoryPageSize] = useState(25)
+  const cycleScrollProps = useHorizontalDragScroll<HTMLDivElement>()
+  const historyScrollProps = useHorizontalDragScroll<HTMLDivElement>()
+  const sortedRows = useMemo(() => sortPayrollRows(rows), [rows])
+  const paidCycleRows = useMemo(() => sortedRows.filter((row) => row.payrollStatus === "paid"), [sortedRows])
+  const paymentRows = useMemo(() => {
+    const ledgerRows = buildPayrollPaymentHistoryRows(payments)
+    const ledgerCycleIds = new Set(ledgerRows.map((row) => row.payrollCycleId).filter(Boolean))
+    const fallbackRows = paidCycleRows
+      .filter((row) => !row.payrollCycleId || !ledgerCycleIds.has(row.payrollCycleId))
+      .map(mapPaidCycleToPaymentHistory)
+
+    return buildPayrollPaymentHistoryRows([...ledgerRows, ...fallbackRows])
+  }, [paidCycleRows, payments])
+  const readyRows = useMemo(() => sortedRows.filter((row) => row.payrollStatus === "ready"), [sortedRows])
+  const activeRows = useMemo(() => sortedRows.filter((row) => row.payrollStatus === "active"), [sortedRows])
+  const voidRows = useMemo(() => sortedRows.filter((row) => row.payrollStatus === "void"), [sortedRows])
+  const lockedRows = useMemo(() => sortedRows.filter((row) => row.payrollStatus === "locked"), [sortedRows])
+  const payableRows = useMemo(() => [...readyRows, ...lockedRows], [lockedRows, readyRows])
+  const visibleCycleRows = activeTab === "ready"
+    ? readyRows
+    : activeTab === "locked"
+      ? lockedRows
+    : activeTab === "active"
+      ? activeRows
+      : activeTab === "void"
+        ? voidRows
+        : sortedRows
+  const pagedCycleRows = visibleCycleRows.slice((cyclePage - 1) * cyclePageSize, cyclePage * cyclePageSize)
+  const pagedPaymentRows = paymentRows.slice((historyPage - 1) * historyPageSize, historyPage * historyPageSize)
+  const payableAmount = payableRows.reduce((total, row) => total + row.payrollAmount, 0)
+  const lockedAmount = lockedRows.reduce((total, row) => total + row.payrollAmount, 0)
+  const paidAmount = paymentRows.filter((row) => row.status === "paid").reduce((total, row) => total + row.paidAmount, 0)
+  const payrollTabs = useMemo(() => ([
+    { id: "active" as const, label: "Berjalan", icon: BadgeDollarSign, count: activeRows.length },
+    { id: "ready" as const, label: "Siap Dicek", icon: WalletCards, count: readyRows.length },
+    { id: "locked" as const, label: "Final", icon: Lock, count: lockedRows.length },
+    { id: "paid" as const, label: "Riwayat Bayar", icon: FileCheck2, count: paymentRows.length },
+    { id: "void" as const, label: "Dibatalkan", icon: Trash2, count: voidRows.length },
+    { id: "all" as const, label: "Semua Cycle", icon: Database, count: sortedRows.length },
+  ]), [activeRows.length, lockedRows.length, paymentRows.length, readyRows.length, sortedRows.length, voidRows.length])
+
+  useEffect(() => {
+    if (!focusTab) return
+    setActiveTab(focusTab)
+    onFocusTabConsumed()
+  }, [focusTab, onFocusTabConsumed])
+
+  useEffect(() => {
+    setCyclePage(1)
+    setHistoryPage(1)
+  }, [activeTab, rows.length, payments.length])
+
+  return (
+    <>
+      <OperationalTableCard>
+        <div className="tableHeader">
+          <div>
+            <h2>Proses Payroll</h2>
+            <p>Alur: cek nominal, finalkan gaji, catat pembayaran, lalu tersimpan di Riwayat Bayar.</p>
+            <InlinePageStats items={[`${formatCurrency(overtimeTotal)} lembur disetujui`, `${formatCurrency(payableAmount)} siap diproses`, `${formatNumber(paymentRows.length)} transaksi terbayar`]} />
+          </div>
+          <div className="payrollTableActions">
+            <button className="secondaryButton" type="button" onClick={() => exportPayrollCsv(visibleCycleRows)} disabled={loading || activeTab === "paid" || visibleCycleRows.length === 0}>
+              <FileBarChart size={17} />
+              Export Rekap
+            </button>
+            <button className="secondaryButton" type="button" onClick={() => exportPayrollPaymentCsv(paymentRows)} disabled={loading || paymentRows.length === 0}>
+              <Download size={17} />
+              Export Riwayat
+            </button>
+          </div>
+        </div>
+
+        <div className="payrollFinanceSummary">
+          <PayrollFinanceMetric icon={WalletCards} label="Total siap proses" value={formatCurrency(payableAmount)} meta={`${formatNumber(payableRows.length)} cycle siap/menunggu bayar`} tone="info" />
+          <PayrollFinanceMetric icon={Lock} label="Menunggu dibayar" value={formatCurrency(lockedAmount)} meta={`${formatNumber(lockedRows.length)} cycle sudah difinalkan`} tone="warning" />
+          <PayrollFinanceMetric icon={FileCheck2} label="Sudah terbayar" value={formatCurrency(paidAmount)} meta={`${formatNumber(paymentRows.length)} transaksi riwayat`} tone="success" />
+          <PayrollFinanceMetric icon={BadgeDollarSign} label="Masih berjalan" value={formatNumber(activeRows.length)} meta="masih mengikuti absensi" tone="neutral" />
+        </div>
+
+        <div className="payrollTableToolbar">
+          <CategoryTabs items={payrollTabs} activeId={activeTab} ariaLabel="Payroll tabs" onChange={setActiveTab} />
+        </div>
+
+        {activeTab === "paid" ? (
+          <PayrollPaymentHistoryTable
+            rows={pagedPaymentRows}
+            loading={loading}
+            errorMessage={errorMessage}
+            page={historyPage}
+            pageSize={historyPageSize}
+            totalRows={paymentRows.length}
+            scrollProps={historyScrollProps}
+            onPageChange={setHistoryPage}
+            onPageSizeChange={(nextSize) => {
+              setHistoryPageSize(nextSize)
+              setHistoryPage(1)
+            }}
+          />
+        ) : (
+          <>
+            <div className="tableScroller uiDataTableScroller uiDataTableHasColumns payrollCycleTableScroller" {...cycleScrollProps}>
+              <table>
+                <colgroup>
+                  <col className="tableNumberColumn" />
+                  <col style={{ width: "250px" }} />
+                  <col style={{ width: "230px" }} />
+                  <col style={{ width: "150px" }} />
+                  <col style={{ width: "150px" }} />
+                  <col style={{ width: "165px" }} />
+                  <col style={{ width: "150px" }} />
+                  <col style={{ width: "150px" }} />
+                  <col className="tableActionColumn" />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th className="tableNumberHeader">No</th>
+                    <th>Karyawan</th>
+                    <th>Periode</th>
+                    <th>Gaji Pokok</th>
+                    <th>Lembur</th>
+                    <th>Total Gaji</th>
+                    <th>Cycle</th>
+                    <th>Status</th>
+                    <th className="tableActionHeader">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading && <tr><td className="tableStateCell" colSpan={9}><TableState title="Memuat payroll" description="Menghitung preview payroll cycle." icon={BadgeDollarSign} /></td></tr>}
+                  {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={9}><TableState title="Gagal memuat" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
+                  {!loading && !errorMessage && pagedCycleRows.map((row, index) => (
+                    <ClickableTableRow key={row.payrollCycleId || row.employeeId} label={`Lihat detail payroll ${row.fullName}`} onOpen={() => setDetailRow(row)}>
+                      <td><TableNumberCell value={(cyclePage - 1) * cyclePageSize + index + 1} /></td>
+                      <td><EmployeeIdentityCell fullName={row.fullName} code={row.employeeCode} photoUrl={row.employeePhotoUrl} /></td>
+                      <td><TableText primary={formatPayrollPeriod(row)} secondary={row.payrollCycleNumber ? `Cycle ${row.payrollCycleNumber} / ${employeeSalaryTypeLabel[row.salaryType]}` : employeeSalaryTypeLabel[row.salaryType]} /></td>
+                      <td><TableText primary={row.basePayrollAmount ? formatCurrency(row.basePayrollAmount) : "-"} /></td>
+                      <td><TableText primary={row.overtimeAmount ? formatCurrency(row.overtimeAmount) : "-"} secondary={row.overtimeApprovedMinutes ? `${formatMinutesDuration(row.overtimeApprovedMinutes)} disetujui` : ""} /></td>
+                      <td><TableText primary={row.payrollAmount ? formatCurrency(row.payrollAmount) : "-"} secondary={row.payrollStatus === "paid" ? "Masuk riwayat bayar" : row.payrollStatus === "locked" ? "Menunggu bayar" : ""} /></td>
+                      <td><span className="cycleCell"><ProgressRing value={row.cycleDays} /><span>{row.cycleDays}/{row.targetDays}</span></span></td>
+                      <td><PayrollStatusBadge status={row.payrollStatus} /></td>
+                      <td className="tableActionCell">
+                        <RowActionMenu label={`Aksi payroll ${row.fullName}`}>
+                          <RowActionMenuItem disabled={!row.payrollCycleId || row.payrollStatus !== "ready"} onClick={() => onProcess(row, "lock")}>
+                            <Lock size={15} />
+                            Finalkan Nominal
+                          </RowActionMenuItem>
+                          <RowActionMenuItem disabled={!row.payrollCycleId || row.payrollStatus !== "locked"} onClick={() => onProcess(row, "mark_paid")}>
+                            <CreditCard size={15} />
+                            Catat Pembayaran
+                          </RowActionMenuItem>
+                          <RowActionMenuItem disabled={!row.payrollCycleId || row.payrollStatus !== "locked"} onClick={() => onProcess(row, "unlock")}>
+                            <FileCheck2 size={15} />
+                            Buka Koreksi
+                          </RowActionMenuItem>
+                          <RowActionMenuItem danger disabled={!row.payrollCycleId || row.payrollStatus === "paid" || row.payrollStatus === "void"} onClick={() => onProcess(row, "void")}>
+                            <Trash2 size={15} />
+                            Batalkan Cycle
+                          </RowActionMenuItem>
+                          <RowActionMenuItem disabled={!row.payrollCycleId || row.payrollStatus !== "void"} onClick={() => onProcess(row, "restore")}>
+                            <FileCheck2 size={15} />
+                            Pulihkan
+                          </RowActionMenuItem>
+                        </RowActionMenu>
+                      </td>
+                    </ClickableTableRow>
+                  ))}
+                  {!loading && !errorMessage && visibleCycleRows.length === 0 && <tr><td className="tableStateCell" colSpan={9}><TableState title="Tidak ada payroll" description="Belum ada data sesuai tab/filter ini." icon={Search} /></td></tr>}
+                </tbody>
+              </table>
+            </div>
+            <DataTablePagination
+              page={cyclePage}
+              pageSize={cyclePageSize}
+              totalRows={visibleCycleRows.length}
+              pageSizeOptions={[10, 25, 50, 100]}
+              onPageChange={setCyclePage}
+              onPageSizeChange={(nextSize) => {
+                setCyclePageSize(nextSize)
+                setCyclePage(1)
+              }}
+            />
+          </>
+        )}
+      </OperationalTableCard>
+      <AttendanceMonitorDetailDialog row={detailRow} onClose={() => setDetailRow(null)} />
+    </>
+  )
+}
+
+function PayrollFinanceMetric({
+  icon: Icon,
+  label,
+  value,
+  meta,
+  tone,
+}: {
+  icon: LucideIcon
+  label: string
+  value: string
+  meta: string
+  tone: "info" | "success" | "warning" | "neutral"
+}) {
+  return (
+    <div className={clsx("payrollFinanceMetric", tone)}>
+      <span>
+        <Icon size={15} />
+      </span>
+      <div>
+        <small>{label}</small>
+        <strong>{value}</strong>
+        <em>{meta}</em>
+      </div>
+    </div>
+  )
+}
+
+function getPayrollRowSortTime(row: AttendanceMonitorRow) {
+  const candidates = [row.payrollPaidAt, row.payrollLockedAt, row.payrollReadyAt, row.periodClosedAt, row.periodStartedAt, row.lastActivityAt, row.attendanceDate]
+  for (const value of candidates) {
+    const time = new Date(value || "").getTime()
+    if (Number.isFinite(time)) return time
+  }
+  return 0
+}
+
+function sortPayrollRows(rows: AttendanceMonitorRow[]) {
+  const statusWeight: Record<PayrollStatus, number> = {
+    locked: 5,
+    ready: 4,
+    active: 3,
+    paid: 2,
+    void: 1,
+  }
+
+  return [...rows].sort((a, b) => {
+    const statusDiff = statusWeight[b.payrollStatus] - statusWeight[a.payrollStatus]
+    if (statusDiff !== 0) return statusDiff
+    return getPayrollRowSortTime(b) - getPayrollRowSortTime(a)
+  })
+}
+
+function formatPayrollPaymentPeriod(row: Pick<PayrollPaymentRow, "periodStartedAt" | "periodClosedAt">) {
+  if (!row.periodStartedAt && !row.periodClosedAt) return "-"
+  return `${formatPayrollDate(row.periodStartedAt)} - ${row.periodClosedAt ? formatPayrollDate(row.periodClosedAt) : "berjalan"}`
+}
+
+function buildPayrollPaymentHistoryRows(rows: PayrollPaymentRow[]) {
+  return [...rows].sort((a, b) => {
+    const first = new Date(a.paidAt || "").getTime()
+    const second = new Date(b.paidAt || "").getTime()
+    return (Number.isFinite(second) ? second : 0) - (Number.isFinite(first) ? first : 0)
+  })
+}
+
+function PayrollPaymentStatusBadge({ status }: { status: PayrollPaymentStatus }) {
+  if (status === "paid") return <UiStatusBadge tone="valid">{payrollPaymentStatusLabel.paid}</UiStatusBadge>
+  if (status === "reversed") return <UiStatusBadge tone="pending">{payrollPaymentStatusLabel.reversed}</UiStatusBadge>
+  return <UiStatusBadge tone="failed">{payrollPaymentStatusLabel.void}</UiStatusBadge>
+}
+
+function mapPaidCycleToPaymentHistory(row: AttendanceMonitorRow): PayrollPaymentRow {
+  const fallbackDate = row.payrollPaidAt || row.payrollLockedAt || row.payrollReadyAt || row.periodClosedAt || row.lastActivityAt || ""
+
+  return {
+    id: row.payrollCycleId ? `cycle-${row.payrollCycleId}` : `paid-${row.employeeId}-${row.payrollCycleNumber || row.attendanceDate}`,
+    paymentNo: row.payrollCycleId ? `PAY-${row.payrollCycleId.slice(0, 8).toUpperCase()}` : "",
+    payrollCycleId: row.payrollCycleId,
+    employeeId: row.employeeId,
+    employeeCode: row.employeeCode,
+    employeeName: row.fullName,
+    cycleNumber: row.payrollCycleNumber,
+    periodStartedAt: row.periodStartedAt,
+    periodClosedAt: row.periodClosedAt,
+    grossAmount: row.basePayrollAmount,
+    overtimeAmount: row.overtimeAmount,
+    netAmount: row.payrollAmount,
+    paidAmount: row.payrollAmount,
+    paymentMethod: "other",
+    paymentReference: "Dari status payroll terbayar",
+    paidAt: fallbackDate,
+    paidByName: "Finance",
+    status: "paid",
+    notes: "Cycle sudah terbayar. Detail payment ledger belum tersedia.",
+  }
+}
+
+function PayrollPaymentHistoryTable({
+  rows,
+  loading,
+  errorMessage,
+  page,
+  pageSize,
+  totalRows,
+  scrollProps,
+  onPageChange,
+  onPageSizeChange,
+}: {
+  rows: PayrollPaymentRow[]
+  loading: boolean
+  errorMessage: string
+  page: number
+  pageSize: number
+  totalRows: number
+  scrollProps: ReturnType<typeof useHorizontalDragScroll<HTMLDivElement>>
+  onPageChange: (page: number) => void
+  onPageSizeChange: (pageSize: number) => void
+}) {
+  const copyPaymentNo = (paymentNo: string) => {
+    if (!paymentNo || !navigator.clipboard) return
+    void navigator.clipboard.writeText(paymentNo)
+  }
+
+  return (
+    <>
+      <div className="tableScroller uiDataTableScroller uiDataTableHasColumns payrollHistoryTableScroller" {...scrollProps}>
+        <table>
+          <colgroup>
+            <col className="tableNumberColumn" />
+            <col style={{ width: "190px" }} />
+            <col style={{ width: "240px" }} />
+            <col style={{ width: "220px" }} />
+            <col style={{ width: "155px" }} />
+            <col style={{ width: "155px" }} />
+            <col style={{ width: "170px" }} />
+            <col style={{ width: "180px" }} />
+            <col style={{ width: "140px" }} />
+            <col className="tableActionColumn" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th className="tableNumberHeader">No</th>
+              <th>No Bayar</th>
+              <th>Karyawan</th>
+              <th>Periode</th>
+              <th>Total Gaji</th>
+              <th>Dibayar</th>
+              <th>Metode</th>
+              <th>Tanggal Bayar</th>
+              <th>Status</th>
+              <th className="tableActionHeader">Aksi</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading && <tr><td className="tableStateCell" colSpan={10}><TableState title="Memuat riwayat bayar" description="Mengambil transaksi pembayaran gaji." icon={CreditCard} /></td></tr>}
+            {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={10}><TableState title="Gagal memuat" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
+            {!loading && !errorMessage && rows.map((row, index) => (
+              <tr key={row.id || row.paymentNo}>
+                <td><TableNumberCell value={(page - 1) * pageSize + index + 1} /></td>
+                <td><TableText primary={row.paymentNo || "-"} secondary={row.payrollCycleId ? `Cycle ${row.cycleNumber || "-"}` : ""} /></td>
+                <td><TableText primary={row.employeeName} secondary={row.employeeCode || "-"} /></td>
+                <td><TableText primary={formatPayrollPaymentPeriod(row)} secondary={row.notes || ""} /></td>
+                <td><TableText primary={formatCurrency(row.netAmount)} secondary={`Lembur ${formatCurrency(row.overtimeAmount)}`} /></td>
+                <td><TableText primary={formatCurrency(row.paidAmount)} secondary={row.paidByName || "Finance"} /></td>
+                <td><TableText primary={payrollPaymentMethodLabel[row.paymentMethod]} secondary={row.paymentReference || "Tanpa referensi"} /></td>
+                <td><TableText primary={formatUserDateTime(row.paidAt, "-")} /></td>
+                <td><PayrollPaymentStatusBadge status={row.status} /></td>
+                <td className="tableActionCell">
+                  <RowActionMenu label={`Aksi pembayaran ${row.paymentNo || row.employeeName}`}>
+                    <RowActionMenuItem disabled={!row.paymentNo} onClick={() => copyPaymentNo(row.paymentNo)}>
+                      <Copy size={15} />
+                      Copy No Bayar
+                    </RowActionMenuItem>
+                  </RowActionMenu>
+                </td>
+              </tr>
+            ))}
+            {!loading && !errorMessage && totalRows === 0 && <tr><td className="tableStateCell" colSpan={10}><TableState title="Belum ada riwayat bayar" description="Transaksi muncul setelah cycle Menunggu Bayar dicatat pembayarannya." icon={CreditCard} /></td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <DataTablePagination
+        page={page}
+        pageSize={pageSize}
+        totalRows={totalRows}
+        pageSizeOptions={[10, 25, 50, 100]}
+        onPageChange={onPageChange}
+        onPageSizeChange={onPageSizeChange}
+      />
+    </>
+  )
+}
+
+function PayrollPreviewTableLegacy({
   rows,
   loading,
   errorMessage,
@@ -15736,13 +17333,13 @@ function PayrollPreviewTable({
       <OperationalTableCard>
         <div className="tableHeader">
           <div>
-            <h2>Payroll Processing</h2>
-            <p>Finalisasi cycle 26 hari kerja: review nominal, lock payroll, lalu tandai terbayar.</p>
-            <InlinePageStats items={[`${formatCurrency(overtimeTotal)} lembur approved`, "Ready bisa dikunci", "Locked menunggu pembayaran"]} />
+            <h2>Proses Payroll</h2>
+            <p>Finalisasi cycle 26 hari kerja: cek nominal, finalkan gaji, lalu catat pembayaran.</p>
+            <InlinePageStats items={[`${formatCurrency(overtimeTotal)} lembur disetujui`, "Siap Dicek bisa difinalkan", "Menunggu Bayar siap dicatat"]} />
           </div>
           <button className="secondaryButton" type="button" onClick={() => exportPayrollCsv(rows)} disabled={loading || rows.length === 0}>
             <FileBarChart size={17} />
-            Export Payroll
+            Export Rekap
           </button>
         </div>
         <div className="tableScroller uiDataTableScroller uiDataTableHasColumns">
@@ -15765,7 +17362,7 @@ function PayrollPreviewTable({
                 <th>Periode</th>
                 <th>Gaji Pokok</th>
                 <th>Lembur</th>
-                <th>Total Payroll</th>
+                    <th>Total Gaji</th>
                 <th>Cycle</th>
                 <th>Status</th>
                 <th className="tableActionHeader">Aksi</th>
@@ -15788,29 +17385,29 @@ function PayrollPreviewTable({
                     <RowActionMenu label={`Aksi payroll ${row.fullName}`}>
                       <RowActionMenuItem disabled={!row.payrollCycleId || row.payrollStatus !== "ready"} onClick={() => onProcess(row, "lock")}>
                         <Lock size={15} />
-                        Lock Payroll
+                        Finalkan Nominal
                       </RowActionMenuItem>
                       <RowActionMenuItem disabled={!row.payrollCycleId || row.payrollStatus !== "locked"} onClick={() => onProcess(row, "mark_paid")}>
                         <CreditCard size={15} />
-                        Tandai Terbayar
+                        Catat Pembayaran
                       </RowActionMenuItem>
                       <RowActionMenuItem disabled={!row.payrollCycleId || row.payrollStatus !== "locked"} onClick={() => onProcess(row, "unlock")}>
                         <FileCheck2 size={15} />
-                        Buka Ulang
+                        Buka Koreksi
                       </RowActionMenuItem>
                       <RowActionMenuItem danger disabled={!row.payrollCycleId || row.payrollStatus === "paid" || row.payrollStatus === "void"} onClick={() => onProcess(row, "void")}>
                         <Trash2 size={15} />
-                        Void Cycle
+                        Batalkan Cycle
                       </RowActionMenuItem>
                       <RowActionMenuItem disabled={!row.payrollCycleId || row.payrollStatus !== "void"} onClick={() => onProcess(row, "restore")}>
                         <FileCheck2 size={15} />
-                        Restore
+                        Pulihkan
                       </RowActionMenuItem>
                     </RowActionMenu>
                   </td>
                 </ClickableTableRow>
               ))}
-              {!loading && !errorMessage && rows.length === 0 && <tr><td className="tableStateCell" colSpan={9}><TableState title="Tidak ada payroll" description="Belum ada cycle sesuai filter." icon={Search} /></td></tr>}
+              {!loading && !errorMessage && rows.length === 0 && <tr><td className="tableStateCell" colSpan={9}><TableState title="Tidak ada payroll" description="Belum ada data sesuai filter." icon={Search} /></td></tr>}
             </tbody>
           </table>
         </div>
@@ -15878,10 +17475,68 @@ function OvertimeStatusBadge({ status, source }: { status: OvertimeStatus; sourc
   return <UiStatusBadge tone="pending">Pending</UiStatusBadge>
 }
 
+function getAttendanceOvertimeTone(status: OvertimeStatus | "") {
+  if (status === "approved") return "valid"
+  if (status === "rejected") return "failed"
+  if (status === "draft") return "planned"
+  return "pending"
+}
+
+function getOvertimeStatusLabel(status: OvertimeStatus) {
+  if (status === "approved") return "Approved"
+  if (status === "rejected") return "Rejected"
+  if (status === "draft") return "Draft"
+  return "Pending"
+}
+
+function isOvertimePayrollFinal(row: Pick<OvertimeReviewRow, "payrollStatus">) {
+  return row.payrollStatus === "locked" || row.payrollStatus === "paid"
+}
+
+function getOvertimePayrollFinalLabel(row: Pick<OvertimeReviewRow, "payrollStatus">) {
+  if (row.payrollStatus === "paid") return "Payroll sudah terbayar"
+  if (row.payrollStatus === "locked") return "Payroll sudah locked"
+  return ""
+}
+
+function getAttendanceOvertimeInlineLabel(row: AttendanceMonitorRow) {
+  if (!row.overtimeRequestId || !row.overtimeRequestStatus) return ""
+
+  if (row.overtimeRequestStatus === "draft" && row.overtimeRequestSource === "planned") {
+    const planned = row.overtimePlannedMinutes ? ` ${formatMinutesDuration(row.overtimePlannedMinutes)}` : ""
+    return `Lembur terencana${planned}`
+  }
+  if (row.overtimeRequestStatus === "pending") {
+    const payable = row.overtimePayableMinutes ? ` ${formatMinutesDuration(row.overtimePayableMinutes)}` : ""
+    return `Lembur pending${payable}`
+  }
+  if (row.overtimeRequestStatus === "approved") {
+    const approved = row.overtimeApprovedMinutes ? ` ${formatMinutesDuration(row.overtimeApprovedMinutes)}` : ""
+    return `Lembur approved${approved}`
+  }
+  if (row.overtimeRequestStatus === "rejected") return "Lembur ditolak"
+
+  return "Lembur"
+}
+
+function getAttendanceOvertimeDetailMeta(row: AttendanceMonitorRow) {
+  if (!row.overtimeRequestId || !row.overtimeRequestStatus) return "Tidak ada request lembur"
+
+  const sourceLabel = getOvertimeSourceLabel(row.overtimeRequestSource || "auto")
+  const basisLabel = row.overtimeBasis ? getOvertimeBasisLabel(row.overtimeBasis) : "Basis belum ada"
+  const plannedLabel = row.overtimePlannedMinutes ? `rencana ${formatMinutesDuration(row.overtimePlannedMinutes)}` : "tanpa rencana durasi"
+  const payableLabel = row.overtimePayableMinutes ? `payable ${formatMinutesDuration(row.overtimePayableMinutes)}` : "belum payable"
+  const approvedLabel = row.overtimeApprovedMinutes ? `approved ${formatMinutesDuration(row.overtimeApprovedMinutes)}` : "belum approved"
+  const amountLabel = row.overtimeTotalAmount ? formatCurrency(row.overtimeTotalAmount) : "Rp 0"
+
+  return `${sourceLabel} / ${basisLabel} / ${plannedLabel} / ${payableLabel} / ${approvedLabel} / ${amountLabel}`
+}
+
 function OvertimeRequestDialog({
   open,
   saving,
   employees,
+  existingRequests,
   selectedDate,
   onClose,
   onSubmit,
@@ -15889,6 +17544,7 @@ function OvertimeRequestDialog({
   open: boolean
   saving: boolean
   employees: AttendanceMonitorRow[]
+  existingRequests: OvertimeReviewRow[]
   selectedDate: string
   onClose: () => void
   onSubmit: (payload: OvertimeRequestSubmitPayload) => void
@@ -15918,9 +17574,30 @@ function OvertimeRequestDialog({
   const plannedMinutes = getClockRangeDurationMinutes(plannedStartTime, plannedEndTime)
   const requestDayType = getOvertimeDayTypeFromDate(overtimeDate)
   const requestBasisPreview = getOvertimeRequestBasisPreview(overtimeDate)
+  const existingRequest = existingRequests.find((request) => request.employeeId === employeeId && request.overtimeDate === overtimeDate)
+  const existingRequestFinal = existingRequest?.status === "approved" || (existingRequest ? isOvertimePayrollFinal(existingRequest) : false)
+  const employeeSelectOptions = employees.map((employee) => ({
+    value: employee.employeeId,
+    label: employee.fullName,
+    description: employee.employeeCode,
+    searchLabel: `${employee.fullName} ${employee.employeeCode} ${employee.divisionName} ${employee.workLocationName}`,
+  }))
   const shiftLabel = selectedEmployee?.shiftStartTime && selectedEmployee?.shiftEndTime
     ? `${selectedEmployee.shiftStartTime.slice(0, 5)} - ${selectedEmployee.shiftEndTime.slice(0, 5)}`
     : "Shift belum lengkap"
+
+  useEffect(() => {
+    if (!open || !existingRequest) return
+
+    const fallbackStart = selectedEmployee?.shiftEndTime ? selectedEmployee.shiftEndTime.slice(0, 5) : "16:00"
+    const existingStart = formatAttendanceTimeInput(existingRequest.plannedStartAt, fallbackStart)
+    const existingEnd = formatAttendanceTimeInput(existingRequest.plannedEndAt, addMinutesToClockTime(existingStart, 120, "18:00"))
+
+    setPlannedStartTime(existingStart)
+    setPlannedEndTime(existingEnd)
+    setReason(existingRequest.requestReason || "")
+    setError("")
+  }, [existingRequest, open, selectedEmployee?.shiftEndTime])
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -15940,6 +17617,14 @@ function OvertimeRequestDialog({
     }
     if (trimmedReason.length < 4) {
       setError("Alasan lembur wajib diisi agar approval punya konteks.")
+      return
+    }
+    if (existingRequest?.status === "approved") {
+      setError("Request lembur tanggal ini sudah approved dan tidak bisa diganti dari form request.")
+      return
+    }
+    if (existingRequest && isOvertimePayrollFinal(existingRequest)) {
+      setError(`${getOvertimePayrollFinalLabel(existingRequest)}. Request lembur tidak bisa diubah dari form ini.`)
       return
     }
 
@@ -15972,20 +17657,33 @@ function OvertimeRequestDialog({
 
         <div className="overtimeRequestBody">
           <section className="overtimeRequestFormPanel">
-            <SelectFormField label="Karyawan" value={employeeId} onChange={(event) => setEmployeeId(event.target.value)} required>
-              <option value="">Pilih karyawan</option>
-              {employees.map((employee) => (
-                <option value={employee.employeeId} key={employee.employeeId}>
-                  {employee.employeeCode} - {employee.fullName}
-                </option>
-              ))}
-            </SelectFormField>
+            <FormField label="Karyawan" required>
+              <FoundationSelect
+                label="Karyawan"
+                value={employeeId}
+                options={employeeSelectOptions}
+                placeholder="Pilih karyawan"
+                searchable
+                disabled={saving || employees.length === 0}
+                onChange={setEmployeeId}
+              />
+            </FormField>
             <div className="overtimeRequestGrid">
               <DateFormField label="Tanggal Lembur" value={overtimeDate} onChange={setOvertimeDate} required />
               <TextFormField label="Mulai Lembur" type="time" value={plannedStartTime} onChange={(event) => setPlannedStartTime(event.target.value)} required />
               <TextFormField label="Selesai Rencana" type="time" value={plannedEndTime} onChange={(event) => setPlannedEndTime(event.target.value)} required />
             </div>
             <TextFormField label="Alasan Lembur" value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Contoh: closing order produksi / stock opname gudang" required />
+            {existingRequest && (
+              <div className={clsx("overtimeRequestInlineNotice", existingRequestFinal && "blocked")}>
+                {existingRequestFinal ? <Lock size={16} /> : <AlertCircle size={16} />}
+                <span>
+                  {existingRequestFinal
+                    ? `Request tanggal ini sudah ${existingRequest.status === "approved" ? "approved" : payrollLabel[existingRequest.payrollStatus]}.`
+                    : "Request tanggal ini sudah ada. Simpan request akan memperbarui rencana lembur lama."}
+                </span>
+              </div>
+            )}
             {error && <p className="formErrorMessage">{error}</p>}
           </section>
 
@@ -16030,7 +17728,7 @@ function OvertimeRequestDialog({
           <button className="secondaryButton" type="button" onClick={onClose} disabled={saving}>Batal</button>
           <button className="primaryButton" type="submit" disabled={saving || employees.length === 0}>
             <ClipboardList size={17} />
-            {saving ? "Menyimpan..." : "Simpan Request"}
+            {saving ? "Menyimpan..." : existingRequest && !existingRequestFinal ? "Update Request" : "Simpan Request"}
           </button>
         </div>
       </form>
@@ -16049,6 +17747,7 @@ function OvertimeReviewTable({
   errorMessage: string
   onReview: (row: OvertimeReviewRow) => void
 }) {
+  const [openOvertimeId, setOpenOvertimeId] = useState<string | null>(null)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(25)
   const overtimeTableDrag = useHorizontalDragScroll<HTMLDivElement>()
@@ -16061,6 +17760,12 @@ function OvertimeReviewTable({
     setPage(1)
   }, [rows.length, pageSize])
 
+  useEffect(() => {
+    if (openOvertimeId && !rows.some((row) => row.id === openOvertimeId)) {
+      setOpenOvertimeId(null)
+    }
+  }, [openOvertimeId, rows])
+
   const plannedRows = rows.filter((row) => row.status === "draft" && row.requestSource === "planned")
   const pendingRows = rows.filter((row) => row.status === "pending")
   const approvedRows = rows.filter((row) => row.status === "approved")
@@ -16071,7 +17776,7 @@ function OvertimeReviewTable({
       <div className="tableHeader">
         <div>
           <h2>Approval Lembur</h2>
-          <p>Request terencana dan kandidat lembur payable dari settlement absensi. Klik baris untuk review.</p>
+          <p>Request terencana dan kandidat lembur payable dari settlement absensi. Klik baris untuk membuka detail.</p>
         </div>
         <InlinePageStats items={[`${plannedRows.length} terencana`, `${pendingRows.length} pending`, `${approvedRows.length} approved`, `${formatCurrency(approvedTotal)} approved`]} />
       </div>
@@ -16112,25 +17817,71 @@ function OvertimeReviewTable({
               const hasRealization = Boolean(row.actualCheckOutAt)
               const displayMinutes = row.overtimeMinutes || row.plannedMinutes
               const previewAmount = row.status === "approved" ? row.totalAmount : row.overtimeMinutes > 0 ? Math.round((row.overtimeMinutes / 60) * row.rateAmount) : 0
+              const payrollFinal = isOvertimePayrollFinal(row)
+              const canApproveOvertime = row.status === "pending" && hasRealization && row.overtimeMinutes > 0 && !payrollFinal
+              const isFinal = row.status === "approved" || row.status === "rejected"
+              const isOpen = openOvertimeId === row.id
+              const actionLabel = payrollFinal || row.status === "approved" || row.status === "rejected"
+                ? "Lihat Detail"
+                : canApproveOvertime
+                  ? "Review & Approve"
+                  : "Lihat Request"
 
               return (
-                <ClickableTableRow key={row.id} label={`Review lembur ${row.fullName}`} onOpen={() => onReview(row)}>
-                  <td className="tableNumberCell"><TableNumberCell value={(currentPage - 1) * safePageSize + index + 1} /></td>
-                  <td>
-                    <EmployeeIdentityCell fullName={row.fullName} code={row.employeeCode} photoUrl={row.employeePhotoUrl} secondary={`${row.employeeCode} · ${row.divisionName}`} />
-                  </td>
-                  <td><TableText primary={formatWorkDate(row.overtimeDate)} secondary={`${getPayrollDayTypeLabel(row.dayType)} / ${getOvertimeSourceLabel(row.requestSource)}`} /></td>
-                  <td><TableText primary={`${row.shiftStartTime || "--:--"} - ${row.shiftEndTime || "--:--"}`} secondary={hasRealization ? `Checkout ${formatAttendanceTime(row.actualCheckOutAt)}` : `Rencana ${getOvertimePlanRange(row)}`} /></td>
-                  <td><TableText primary={displayMinutes ? formatMinutesDuration(displayMinutes) : "-"} secondary={row.status === "approved" ? `${formatMinutesDuration(row.approvedMinutes)} dibayar` : getOvertimeRealizationLabel(row)} /></td>
-                  <td><TableText primary={`${formatCurrency(row.rateAmount)}/jam`} secondary={row.componentName} /></td>
-                  <td><TableText primary={previewAmount > 0 ? formatCurrency(previewAmount) : "-"} secondary={getOvertimeBasisLabel(row.overtimeBasis)} /></td>
-                  <td><OvertimeStatusBadge status={row.status} source={row.requestSource} /></td>
-                  <td className="tableActionCell">
-                    <div className="rowActions">
-                      <RowActionButton />
-                    </div>
-                  </td>
-                </ClickableTableRow>
+                <Fragment key={row.id}>
+                  <tr
+                    className={clsx("clickableTableRow overtimeReviewRow", isOpen && "active")}
+                    tabIndex={0}
+                    onClick={() => setOpenOvertimeId(isOpen ? null : row.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault()
+                        setOpenOvertimeId(isOpen ? null : row.id)
+                      }
+                    }}
+                  >
+                    <td className="tableNumberCell"><TableNumberCell value={(currentPage - 1) * safePageSize + index + 1} /></td>
+                    <td>
+                      <EmployeeIdentityCell fullName={row.fullName} code={row.employeeCode} photoUrl={row.employeePhotoUrl} secondary={`${row.employeeCode} / ${row.divisionName}`} />
+                    </td>
+                    <td><TableText primary={formatWorkDate(row.overtimeDate)} secondary={`${getPayrollDayTypeLabel(row.dayType)} / ${getOvertimeSourceLabel(row.requestSource)}`} /></td>
+                    <td><TableText primary={`${row.shiftStartTime || "--:--"} - ${row.shiftEndTime || "--:--"}`} secondary="Shift kerja" /></td>
+                    <td><TableText primary={displayMinutes ? formatMinutesDuration(displayMinutes) : "-"} secondary={hasRealization ? "Realisasi terbaca" : "Menunggu checkout"} /></td>
+                    <td><TableText primary={`${formatCurrency(row.rateAmount)}/jam`} secondary={row.componentName} /></td>
+                    <td><TableText primary={previewAmount > 0 ? formatCurrency(previewAmount) : "-"} secondary={getOvertimeBasisLabel(row.overtimeBasis)} /></td>
+                    <td><OvertimeStatusBadge status={row.status} source={row.requestSource} /></td>
+                    <td className="tableActionCell">
+                      <div className="rowActions" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+                        <button className="rowExpandButton" type="button" aria-label={isOpen ? "Tutup detail lembur" : "Buka detail lembur"} onClick={() => setOpenOvertimeId(isOpen ? null : row.id)}>
+                          <ChevronDown size={18} />
+                        </button>
+                        <RowActionMenu label={`Aksi lembur ${row.fullName}`}>
+                          <RowActionMenuItem onClick={() => setOpenOvertimeId(isOpen ? null : row.id)}>
+                            <Eye size={15} />
+                            {isOpen ? "Tutup Detail" : "Lihat Detail"}
+                          </RowActionMenuItem>
+                          <RowActionMenuItem disabled={payrollFinal} onClick={() => onReview(row)}>
+                            <FileCheck2 size={15} />
+                            {payrollFinal ? getOvertimePayrollFinalLabel(row) : actionLabel}
+                          </RowActionMenuItem>
+                          {!isFinal && !payrollFinal && (
+                            <RowActionMenuItem danger onClick={() => onReview(row)}>
+                              <X size={15} />
+                              {canApproveOvertime ? "Reject Lembur" : "Batalkan Request"}
+                            </RowActionMenuItem>
+                          )}
+                        </RowActionMenu>
+                      </div>
+                    </td>
+                  </tr>
+                  {isOpen && (
+                    <tr className="overtimeReviewExpandRow">
+                      <td colSpan={9}>
+                        <OvertimeReviewExpandPanel row={row} onReview={onReview} />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               )
             })}
             {!loading && !errorMessage && rows.length === 0 && <tr><td className="tableStateCell" colSpan={9}><TableState title="Belum ada lembur" description="Kandidat lembur muncul otomatis saat jam kerja aktual melebihi kewajiban shift." icon={Search} /></td></tr>}
@@ -16151,6 +17902,143 @@ function OvertimeReviewTable({
   )
 }
 
+function OvertimeReviewExpandPanel({ row, onReview }: { row: OvertimeReviewRow; onReview: (row: OvertimeReviewRow) => void }) {
+  const hasRealization = Boolean(row.actualCheckOutAt)
+  const isFinal = row.status === "approved" || row.status === "rejected"
+  const payrollFinal = isOvertimePayrollFinal(row)
+  const canApproveOvertime = row.status === "pending" && hasRealization && row.overtimeMinutes > 0 && !payrollFinal
+  const plannedRange = getOvertimePlanRange(row)
+  const displayMinutes = row.overtimeMinutes || row.plannedMinutes
+  const payableAmount = row.status === "approved"
+    ? row.totalAmount
+    : row.overtimeMinutes > 0
+      ? Math.round((row.overtimeMinutes / 60) * row.rateAmount)
+      : 0
+  const decisionLabel = isFinal
+    ? "Lihat Detail"
+    : canApproveOvertime
+      ? "Review & Approve"
+      : row.requestSource === "planned"
+        ? "Lihat Request"
+        : "Review Lembur"
+  const statusNote = payrollFinal
+    ? `${getOvertimePayrollFinalLabel(row)}. Lembur tidak bisa diubah dari approval agar payroll tetap bersih.`
+    : row.status === "approved"
+    ? `${formatMinutesDuration(row.approvedMinutes)} approved dan masuk preview payroll.`
+    : row.status === "rejected"
+      ? "Ditolak HR, tidak masuk payroll."
+      : canApproveOvertime
+        ? "Sudah ada checkout dan menit payable, siap direview HR."
+        : "Menunggu checkout/settlement sebelum bisa masuk payroll."
+  const notes = row.notes || row.requestReason || "Belum ada catatan."
+
+  return (
+    <div className="overtimeReviewExpandPanel">
+      <div className="overtimeReviewExpandSummary">
+        <div>
+          <span>Detail Lembur</span>
+          <strong>{displayMinutes ? formatMinutesDuration(displayMinutes) : "Belum payable"}</strong>
+          <small>{getOvertimeSourceLabel(row.requestSource)} / {getPayrollDayTypeLabel(row.dayType)} / {getOvertimeBasisLabel(row.overtimeBasis)}</small>
+        </div>
+        <OvertimeStatusBadge status={row.status} source={row.requestSource} />
+      </div>
+
+      <div className="overtimeReviewExpandGrid">
+        <section>
+          <h3>Rencana</h3>
+          <div className="overtimeReviewFactGrid">
+            <div>
+              <span>Tanggal</span>
+              <strong>{formatWorkDate(row.overtimeDate)}</strong>
+              <small>{getPayrollDayTypeLabel(row.dayType)}</small>
+            </div>
+            <div>
+              <span>Shift</span>
+              <strong>{row.shiftStartTime || "--:--"} - {row.shiftEndTime || "--:--"}</strong>
+              <small>Jam kerja normal</small>
+            </div>
+            <div>
+              <span>Rencana</span>
+              <strong>{plannedRange}</strong>
+              <small>{row.plannedMinutes ? formatMinutesDuration(row.plannedMinutes) : "Tanpa durasi"}</small>
+            </div>
+            <div>
+              <span>Alasan</span>
+              <strong>{row.requestReason || "Belum ada alasan"}</strong>
+              <small>{row.requestedAt ? `Diajukan ${formatAttendanceTime(row.requestedAt)}` : getOvertimeSourceLabel(row.requestSource)}</small>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h3>Realisasi</h3>
+          <div className="overtimeReviewFactGrid">
+            <div>
+              <span>Checkout</span>
+              <strong>{row.actualCheckOutAt ? formatAttendanceTime(row.actualCheckOutAt) : "Belum checkout"}</strong>
+              <small>{row.matchedAttendance ? "Tersambung absensi" : "Belum match absensi"}</small>
+            </div>
+            <div>
+              <span>Payable</span>
+              <strong>{row.overtimeMinutes ? formatMinutesDuration(row.overtimeMinutes) : "-"}</strong>
+              <small>{getOvertimeRealizationLabel(row)}</small>
+            </div>
+            <div>
+              <span>Basis</span>
+              <strong>{getOvertimeBasisLabel(row.overtimeBasis)}</strong>
+              <small>{row.overtimeBasis === "full_duration" ? "Full durasi kerja" : "Setelah kewajiban shift"}</small>
+            </div>
+            <div>
+              <span>Status</span>
+              <strong>{statusNote}</strong>
+              <small>{row.payrollCycleNumber ? `Cycle ${row.payrollCycleNumber} / ${payrollLabel[row.payrollStatus]}` : "Cycle payroll belum tersambung"}</small>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h3>Payroll</h3>
+          <div className="overtimeReviewFactGrid">
+            <div>
+              <span>Rate</span>
+              <strong>{formatCurrency(row.rateAmount)}/jam</strong>
+              <small>{row.componentName}</small>
+            </div>
+            <div>
+              <span>Estimasi</span>
+              <strong>{payableAmount ? formatCurrency(payableAmount) : "-"}</strong>
+              <small>{row.status === "approved" ? "Nominal approved" : "Preview sebelum approval"}</small>
+            </div>
+            <div>
+              <span>Dibayar</span>
+              <strong>{row.approvedMinutes ? formatMinutesDuration(row.approvedMinutes) : "Belum approved"}</strong>
+              <small>{row.totalAmount ? formatCurrency(row.totalAmount) : "Belum masuk payroll"}</small>
+            </div>
+            <div>
+              <span>Payroll</span>
+              <strong>{row.payrollCycleNumber ? `Cycle ${row.payrollCycleNumber}` : "Cycle aktif"}</strong>
+              <small>{payrollLabel[row.payrollStatus]}</small>
+            </div>
+            <div>
+              <span>Catatan</span>
+              <strong>{notes}</strong>
+              <small>Satu request per karyawan per tanggal.</small>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div className="overtimeReviewExpandFooter">
+        <p>{statusNote}</p>
+        <button className="primaryButton compactButton" type="button" onClick={() => onReview(row)} disabled={payrollFinal}>
+          <FileCheck2 size={16} />
+          {payrollFinal ? getOvertimePayrollFinalLabel(row) : decisionLabel}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function OvertimeReviewDialog({
   row,
   saving,
@@ -16164,31 +18052,57 @@ function OvertimeReviewDialog({
 }) {
   const [approvedMinutes, setApprovedMinutes] = useState("0")
   const [notes, setNotes] = useState("")
+  const [noteError, setNoteError] = useState("")
 
   useEffect(() => {
     setApprovedMinutes(String(row?.approvedMinutes || row?.overtimeMinutes || 0))
     setNotes("")
+    setNoteError("")
   }, [row])
 
   if (!row) return null
 
+  const isFinal = row.status === "approved" || row.status === "rejected"
+  const isPlannedDraft = row.status === "draft" && row.requestSource === "planned"
+  const payrollFinal = isOvertimePayrollFinal(row)
   const minutes = Math.max(0, Math.min(row.overtimeMinutes, Number(approvedMinutes || 0)))
   const previewAmount = Math.round((minutes / 60) * row.rateAmount)
-  const canApprovePayroll = row.overtimeMinutes > 0 && Boolean(row.actualCheckOutAt) && row.status !== "draft"
+  const canApprovePayroll = !isFinal && !payrollFinal && row.overtimeMinutes > 0 && Boolean(row.actualCheckOutAt) && row.status !== "draft"
+  const canRejectOvertime = !isFinal && !payrollFinal
   const plannedLabel = getOvertimePlanRange(row)
   const sourceLabel = getOvertimeSourceLabel(row.requestSource)
   const displayMinutes = row.overtimeMinutes || row.plannedMinutes
   const realizationLabel = getOvertimeRealizationLabel(row)
+  const rejectActionLabel = isPlannedDraft ? "Batalkan Request" : canApprovePayroll ? "Reject" : "Tolak Request"
+  const submitOvertimeDecision = (decision: "approve" | "reject") => {
+    const trimmedNotes = notes.trim()
+    if (isFinal) return
+    if (payrollFinal) {
+      setNoteError(`${getOvertimePayrollFinalLabel(row)}. Perubahan lembur harus lewat koreksi payroll terpisah.`)
+      return
+    }
+    if (decision === "reject" && trimmedNotes.length < 5) {
+      setNoteError(isPlannedDraft ? "Catatan wajib diisi untuk membatalkan request." : "Catatan wajib diisi untuk reject lembur.")
+      return
+    }
+    if (decision === "approve" && !canApprovePayroll) return
+    if (decision === "approve" && minutes <= 0) {
+      setNoteError("Menit dibayar harus lebih dari 0.")
+      return
+    }
+
+    setNoteError("")
+    onSubmit(decision, decision === "approve" ? minutes : 0, trimmedNotes)
+  }
 
   return (
-    <div className="dialogBackdrop" role="presentation" onMouseDown={onClose}>
-      <section
-        className="dialogPanel attendanceReviewDialog overtimeReviewDialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="overtime-review-title"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
+    <FoundationDialog
+      open={Boolean(row)}
+      labelledBy="overtime-review-title"
+      className="attendanceReviewDialog overtimeReviewDialog"
+      closeOnBackdrop={!saving}
+      onClose={onClose}
+    >
         <div className="attendanceReviewHeader">
           <span className="attendanceReviewHeaderAvatar">
             {row.employeePhotoUrl ? <img src={row.employeePhotoUrl} alt="" /> : getProfileInitials(row.fullName || row.employeeCode)}
@@ -16196,11 +18110,9 @@ function OvertimeReviewDialog({
           <div>
             <span>Overtime Review</span>
             <h2 id="overtime-review-title">{row.requestSource === "planned" && row.status === "draft" ? "Request lembur" : "Review lembur"} {row.fullName}</h2>
-            <p>{canApprovePayroll ? "Approve menit yang dibayar. Lembur approved akan masuk preview payroll." : "Request sudah tercatat, tetapi payroll menunggu realisasi checkout dan kalkulasi payable."}</p>
+            <p>{payrollFinal ? `${getOvertimePayrollFinalLabel(row)}. Data lembur tidak bisa diubah dari approval.` : isFinal ? "Status lembur sudah final. Gunakan koreksi payroll terpisah jika perlu perubahan." : canApprovePayroll ? "Approve menit yang dibayar. Lembur approved akan masuk preview payroll." : "Request sudah tercatat, tetapi payroll menunggu realisasi checkout dan kalkulasi payable."}</p>
           </div>
-          <button className="iconButton dialogClose" type="button" aria-label="Tutup review lembur" onClick={onClose}>
-            <X size={18} />
-          </button>
+          <FoundationDialogCloseButton label="Tutup review lembur" onClose={onClose} disabled={saving} />
         </div>
 
         <div className="attendanceReviewContent">
@@ -16217,7 +18129,7 @@ function OvertimeReviewDialog({
             <div>
               <span>Karyawan</span>
               <strong>{row.fullName}</strong>
-              <small>{row.employeeCode} · {row.divisionName}</small>
+              <small>{row.employeeCode} / {row.divisionName}</small>
             </div>
             <div>
               <span>Tanggal</span>
@@ -16246,11 +18158,21 @@ function OvertimeReviewDialog({
             </div>
           </div>
 
-          {canApprovePayroll ? (
+          {payrollFinal ? (
+            <div className="overtimeRequestNotice">
+              <Lock size={17} />
+              <span>{getOvertimePayrollFinalLabel(row)}. Approval lembur dikunci agar payroll final tidak berubah tanpa proses koreksi terpisah.</span>
+            </div>
+          ) : isFinal ? (
+            <div className="overtimeRequestNotice">
+              <ShieldCheck size={17} />
+              <span>Approval lembur sudah final dengan status {getOvertimeStatusLabel(row.status)}. Aksi approve/reject dinonaktifkan agar audit payroll tetap bersih.</span>
+            </div>
+          ) : canApprovePayroll ? (
             <TextFormField
               label="Menit Dibayar"
               type="number"
-              min={0}
+              min={1}
               max={row.overtimeMinutes}
               value={approvedMinutes}
               onChange={(event) => setApprovedMinutes(event.target.value)}
@@ -16259,27 +18181,38 @@ function OvertimeReviewDialog({
           ) : (
             <div className="overtimeRequestNotice">
               <AlertCircle size={17} />
-              <span>Belum bisa approve pembayaran. Tunggu karyawan checkout, lalu klik Refresh Data di Payroll agar request berubah menjadi pending approval.</span>
+              <span>Belum bisa approve pembayaran. Tunggu karyawan checkout, lalu klik Refresh Data di Approval agar request berubah menjadi pending approval.</span>
             </div>
           )}
           <TextFormField
-            label={canApprovePayroll ? "Catatan Finance / HR" : "Catatan Penolakan / Koreksi"}
+            label={canApprovePayroll ? "Catatan Finance / HR" : isPlannedDraft ? "Catatan Pembatalan" : "Catatan Penolakan / Koreksi"}
             value={notes}
             onChange={(event) => setNotes(event.target.value)}
             placeholder="Contoh: lembur produksi disetujui karena closing order."
           />
+          {noteError && <p className="foundationFieldError">{noteError}</p>}
         </div>
 
         <div className="attendanceReviewActions">
           <button className="secondaryButton" type="button" onClick={onClose} disabled={saving}>
             Batal
           </button>
-          <button className="secondaryButton dangerSoftButton" type="button" onClick={() => onSubmit("reject", 0, notes)} disabled={saving}>
+          <button className="secondaryButton dangerSoftButton" type="button" onClick={() => submitOvertimeDecision("reject")} disabled={saving || !canRejectOvertime}>
             <X size={16} />
-            {canApprovePayroll ? "Reject" : "Tolak Request"}
+            {rejectActionLabel}
           </button>
-          {canApprovePayroll ? (
-            <button className="primaryButton" type="button" onClick={() => onSubmit("approve", minutes, notes)} disabled={saving}>
+          {payrollFinal ? (
+            <button className="primaryButton" type="button" onClick={onClose} disabled={saving}>
+              <Lock size={16} />
+              Payroll Final
+            </button>
+          ) : isFinal ? (
+            <button className="primaryButton" type="button" onClick={onClose} disabled={saving}>
+              <ShieldCheck size={16} />
+              Selesai
+            </button>
+          ) : canApprovePayroll ? (
+            <button className="primaryButton" type="button" onClick={() => submitOvertimeDecision("approve")} disabled={saving || isFinal}>
               <FileCheck2 size={16} />
               {saving ? "Memproses..." : "Approve Lembur"}
             </button>
@@ -16290,8 +18223,7 @@ function OvertimeReviewDialog({
             </button>
           )}
         </div>
-      </section>
-    </div>
+    </FoundationDialog>
   )
 }
 
@@ -17759,15 +19691,15 @@ function EmployeePwaApp({ profile, onLogout }: { profile: AppAccessProfile; onLo
 function AuthLoadingPage() {
   return (
     <main className="authSoftShell" aria-busy="true" aria-live="polite">
-      <span className="authTopProgress" aria-hidden="true" />
       <section className="authSoftPanel">
         <span className="authSoftLogo brandLogo">
           <img src={dmsLogo} alt="DMS" />
         </span>
         <div>
-          <strong>DMS Management</strong>
-          <small>Sinkronisasi akses...</small>
+          <strong>Memuat DMS</strong>
+          <small>Menyiapkan sesi dan akses...</small>
         </div>
+        <span className="authLoadingBar" aria-hidden="true" />
       </section>
     </main>
   )
@@ -18128,7 +20060,7 @@ export function App() {
           ) : activeView === "biofinger" ? (
             <BiofingerPage activeView={activeView} profile={accessProfile} onOpenGuide={openGuide} />
           ) : activeView === "attendance-live" || activeView === "attendance-requests" || activeView === "attendance-review" || activeView === "field-monitoring" || activeView === "payroll" ? (
-            <AttendanceCyclePage activeView={activeView} />
+            <AttendanceCyclePage activeView={activeView} profile={accessProfile} />
           ) : activeView === "employees" ? (
             <EmployeesPage activeView={activeView} profile={accessProfile} />
           ) : activeView === "users" ? (

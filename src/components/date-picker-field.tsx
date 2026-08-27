@@ -62,10 +62,12 @@ export function DatePickerField({
   placeholder = "Pilih tanggal",
   value: controlledValue,
   onChange,
+  disabled = false,
 }: {
   placeholder?: string
   value?: string
   onChange?: (value: string) => void
+  disabled?: boolean
 }) {
   const today = useMemo(() => new Date(), [])
   const buttonRef = useRef<HTMLButtonElement>(null)
@@ -254,6 +256,7 @@ export function DatePickerField({
         ref={buttonRef}
         className={clsx("dateInputButton", open && "active", !selectedValue && "empty")}
         type="button"
+        disabled={disabled}
         onClick={() => setOpen((value) => !value)}
       >
         <span>{selectedValue ? formatDisplayDate(selectedValue) : placeholder}</span>

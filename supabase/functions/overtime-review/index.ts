@@ -82,15 +82,46 @@ Deno.serve(async (request) => {
 
     const { data: overtime, error: overtimeError } = await adminClient
       .from("overtime_requests")
-      .select("id, employee_id, overtime_date, overtime_minutes, approved_minutes, rate_amount, total_amount, status, request_source, overtime_basis, actual_check_out_at, notes")
+      .select("id, employee_id, payroll_cycle_id, overtime_date, overtime_minutes, approved_minutes, rate_amount, total_amount, status, request_source, overtime_basis, actual_check_out_at, notes")
       .eq("id", payload.id)
       .maybeSingle()
 
     if (overtimeError) throw overtimeError
     if (!overtime) return jsonResponse({ error: "Data lembur tidak ditemukan." }, 404)
 
+    let payrollCycle: { status?: string; cycle_number?: number } | null = null
+
+    if (overtime.payroll_cycle_id) {
+      const { data: cycle, error: cycleError } = await adminClient
+        .from("payroll_cycles")
+        .select("status, cycle_number")
+        .eq("id", overtime.payroll_cycle_id)
+        .maybeSingle()
+
+      if (cycleError) throw cycleError
+      payrollCycle = cycle
+    }
+
     const approved = action === "approve"
     const requestedMinutes = Number(overtime.overtime_minutes || 0)
+    const reviewNote = payload.notes?.trim()
+    const isPlannedDraft = overtime.status === "draft" && overtime.request_source === "planned"
+
+    if (overtime.status === "approved" || overtime.status === "rejected") {
+      return jsonResponse({ error: "Approval lembur sudah final dan tidak bisa diproses ulang." }, 409)
+    }
+
+    if (payrollCycle?.status === "locked" || payrollCycle?.status === "paid") {
+      return jsonResponse({
+        error: payrollCycle.status === "paid"
+          ? "Payroll cycle sudah terbayar. Lembur tidak bisa diubah dari approval."
+          : "Payroll cycle sudah locked. Lembur tidak bisa diubah dari approval.",
+      }, 409)
+    }
+
+    if (!approved && !reviewNote) {
+      return jsonResponse({ error: "Catatan wajib diisi untuk reject lembur." }, 400)
+    }
 
     if (approved && (!overtime.actual_check_out_at || overtime.status === "draft" || requestedMinutes <= 0)) {
       return jsonResponse({ error: "Request lembur belum punya realisasi checkout dan menit payable." }, 400)
@@ -99,12 +130,17 @@ Deno.serve(async (request) => {
     const approvedMinutes = approved
       ? Math.max(0, Math.min(requestedMinutes, Number(payload.approvedMinutes ?? requestedMinutes)))
       : 0
+
+    if (approved && approvedMinutes <= 0) {
+      return jsonResponse({ error: "Menit lembur yang dibayar harus lebih dari 0." }, 400)
+    }
+
     const rateAmount = Number(overtime.rate_amount || 0)
     const totalAmount = approved ? Math.round((approvedMinutes / 60) * rateAmount) : 0
-    const reviewNote = payload.notes?.trim()
+    const rejectVerb = isPlannedDraft ? "batalkan request" : "reject"
     const nextNotes = [
       overtime.notes,
-      reviewNote ? `HR ${approved ? "approve" : "reject"} lembur: ${reviewNote}` : `HR ${approved ? "approve" : "reject"} lembur tanpa catatan tambahan.`,
+      reviewNote ? `HR ${approved ? "approve" : rejectVerb} lembur: ${reviewNote}` : `HR ${approved ? "approve" : rejectVerb} lembur tanpa catatan tambahan.`,
     ].filter(Boolean).join("\n")
 
     const { data: updatedOvertime, error: updateError } = await adminClient
@@ -130,7 +166,7 @@ Deno.serve(async (request) => {
     await adminClient.from("audit_logs").insert({
       actor_user_id: actor.id,
       actor_name: actor.full_name,
-      action: approved ? "Approve overtime" : "Reject overtime",
+      action: approved ? "Approve overtime" : isPlannedDraft ? "Cancel overtime request" : "Reject overtime",
       target_table: "overtime_requests",
       target_id: overtime.id,
       status: "success",
@@ -143,6 +179,8 @@ Deno.serve(async (request) => {
         total_amount: totalAmount,
         request_source: overtime.request_source,
         overtime_basis: overtime.overtime_basis,
+        payroll_cycle_number: payrollCycle?.cycle_number || null,
+        payroll_status: payrollCycle?.status || null,
         source: "edge-function",
       },
     })

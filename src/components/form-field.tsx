@@ -7,11 +7,12 @@ import { FoundationSelect, type FoundationSelectOption } from "./foundation-sele
 
 type BaseFieldProps = {
   label: string
+  helperText?: ReactNode
   required?: boolean
   children: ReactNode
 }
 
-export function FormField({ label, required, children }: BaseFieldProps) {
+export function FormField({ label, helperText, required, children }: BaseFieldProps) {
   return (
     <div className="formField">
       <label>
@@ -19,18 +20,21 @@ export function FormField({ label, required, children }: BaseFieldProps) {
         {required && <span className="requiredMark" aria-hidden="true">*</span>}
       </label>
       {children}
+      {helperText && <small className="formFieldHint">{helperText}</small>}
     </div>
   )
 }
 
 export function TextFormField({
   label,
+  helperText,
   ...props
 }: InputHTMLAttributes<HTMLInputElement> & {
   label: string
+  helperText?: ReactNode
 }) {
   return (
-    <FormField label={label} required={Boolean(props.required)}>
+    <FormField label={label} helperText={helperText} required={Boolean(props.required)}>
       <input {...props} />
     </FormField>
   )
@@ -38,10 +42,12 @@ export function TextFormField({
 
 export function SelectFormField({
   label,
+  helperText,
   children,
   ...props
 }: SelectHTMLAttributes<HTMLSelectElement> & {
   label: string
+  helperText?: ReactNode
   children: ReactNode
 }) {
   const options = Children.toArray(children).flatMap((child): FoundationSelectOption[] => {
@@ -77,7 +83,7 @@ export function SelectFormField({
   }
 
   return (
-    <FormField label={label} required={Boolean(props.required)}>
+    <FormField label={label} helperText={helperText} required={Boolean(props.required)}>
       <FoundationSelect
         label={label}
         value={selectedValue}
@@ -133,20 +139,24 @@ export function SegmentedFormField<TValue extends string>({
 
 export function DateFormField({
   label,
+  helperText,
   placeholder,
   value,
   onChange,
+  disabled,
   required,
 }: {
   label: string
+  helperText?: ReactNode
   placeholder?: string
   value?: string
   onChange?: (value: string) => void
+  disabled?: boolean
   required?: boolean
 }) {
   return (
-    <FormField label={label} required={required}>
-      <DatePickerField placeholder={placeholder} value={value} onChange={onChange} />
+    <FormField label={label} helperText={helperText} required={required}>
+      <DatePickerField placeholder={placeholder} value={value} onChange={onChange} disabled={disabled} />
     </FormField>
   )
 }
