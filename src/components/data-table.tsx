@@ -202,6 +202,7 @@ export function DataTablePagination({
   pageSize,
   totalRows,
   pageSizeOptions = [10, 25, 50],
+  maxPageSize = 100,
   onPageChange,
   onPageSizeChange,
 }: {
@@ -209,16 +210,17 @@ export function DataTablePagination({
   pageSize: number
   totalRows: number
   pageSizeOptions?: number[]
+  maxPageSize?: number
   onPageChange: (page: number) => void
   onPageSizeChange: (pageSize: number) => void
 }) {
-  const safePageSize = Math.min(50, Math.max(1, pageSize))
+  const safePageSize = Math.min(maxPageSize, Math.max(1, pageSize))
   const pageCount = Math.max(1, Math.ceil(totalRows / safePageSize))
   const currentPage = Math.min(Math.max(1, page), pageCount)
   const startRow = totalRows === 0 ? 0 : (currentPage - 1) * safePageSize + 1
   const endRow = Math.min(totalRows, currentPage * safePageSize)
   const normalizedOptions = pageSizeOptions
-    .filter((option) => option > 0 && option <= 50)
+    .filter((option) => option > 0 && option <= maxPageSize)
     .filter((option, index, options) => options.indexOf(option) === index)
 
   return (
@@ -228,10 +230,10 @@ export function DataTablePagination({
       </div>
       <div className="dataTablePaginationControls">
         <label>
-          Baris
+          <span>Tampilkan</span>
           <select value={safePageSize} onChange={(event) => onPageSizeChange(Number(event.target.value))}>
             {normalizedOptions.map((option) => (
-              <option value={option} key={option}>{option}</option>
+              <option value={option} key={option}>{option} / Halaman</option>
             ))}
           </select>
         </label>

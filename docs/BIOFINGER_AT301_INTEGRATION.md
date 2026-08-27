@@ -317,7 +317,7 @@ Importer melakukan:
 - Menjaga `source_hash` supaya import ulang tidak membuat duplikasi.
 - Mengisi `employee_id` hanya kalau link sudah berstatus `active`.
 
-Importer bisa langsung menjalankan konversi jika diberi flag `--convert`. Tanpa flag itu, konversi tetap bisa dijalankan dari UI Biofinger tombol `Proses Absensi` atau command `npm run biofinger:convert`. Untuk receiver VPS, default `BIOFINGER_CONVERT_ON_IMPORT=false`; aktifkan menjadi `true` hanya setelah sample conversion manual sudah valid.
+Importer bisa langsung menjalankan konversi jika diberi flag `--convert`. Tanpa flag itu, konversi tetap bisa dijalankan dari UI Biofinger tombol `Proses Absensi` atau command `npm run biofinger:convert`. Untuk receiver VPS produksi, gunakan `BIOFINGER_CONVERT_ON_IMPORT=true` agar raw event yang sudah mapped otomatis menjadi absensi final dan muncul di Live Absensi. Receiver juga punya loop `BIOFINGER_AUTO_CONVERT_INTERVAL_MS` untuk memproses event lama yang baru mendapat mapping.
 
 ## Flow Sinkron Operasional
 
@@ -332,14 +332,14 @@ Flow sinkron fallback lokal:
 5. Import raw transaction ke `biofinger_attendance_events`.
 6. Buka menu `Biofinger` di Management App.
 7. Mapping `User ID Mesin` ke `Karyawan DMS`.
-8. Setelah mapping valid, jalankan `Proses Absensi` dan cek hasilnya.
-9. Jika hasil sample sudah stabil, aktifkan auto-convert receiver agar `attendance_logs` final dibuat otomatis dengan `source = 'biofinger'`.
+8. Setelah mapping valid, jalankan `Proses Absensi` dan cek hasilnya bila memakai fallback lokal.
+9. Untuk cloud receiver VPS, auto-convert berjalan otomatis bila `BIOFINGER_CONVERT_ON_IMPORT=true`; `Proses Absensi` hanya fallback manual.
 
 Catatan flow cloud:
 
 - User atau fingerprint baru di mesin perlu melakukan scan minimal sekali agar User ID terkirim sebagai raw event.
 - Jika nama mesin belum ikut terkirim, klik `Sync User Mesin` di DMS untuk meminta payload `USERINFO`.
-- `Refresh Data` hanya membaca ulang data backend; tombol ini tidak memaksa mesin mengirim data.
+- `Refresh Data` hanya membaca ulang data backend; tombol ini tidak memaksa mesin mengirim data dan tidak menggantikan auto-convert receiver.
 - Urutan mapping default di DMS memakai User ID tertinggi agar user yang baru dibuat lebih cepat terlihat.
 - Shift malam lintas tanggal masih perlu policy final sebelum otomatis digabung ke hari kerja sebelumnya.
 

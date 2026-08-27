@@ -42,9 +42,10 @@ Status POC per 2026-08-26:
 - AT-301 push via WiFi sudah confirmed dari serial `GED7244800117`.
 - Receiver live sudah menulis ke Supabase staging dan mengabaikan duplicate histori lewat `source_hash`.
 - Receiver sudah bisa meminta ulang daftar user/nama lewat command `DATA QUERY USERINFO` pada firmware AT-301 yang diuji.
+- Receiver menjalankan auto-convert: raw event yang sudah punya mapping `active` dibuat otomatis menjadi `attendance_logs`, lalu trigger database memperbarui `attendance_daily_summaries` untuk Live Absensi.
 - Receiver menerima allowlist dari dua sumber: env `BIOFINGER_ALLOWED_SERIALS` dan Device Registry DMS (`attendance_devices.serial_number`) untuk device berstatus `active` atau `maintenance`.
 
-Mode dry-run hanya dipakai untuk test awal. Saat mode live aktif, data masuk staging Biofinger. Konversi ke `attendance_logs` sebaiknya dijalankan manual dulu dari DMS UI sampai sample valid. Setelah itu `BIOFINGER_CONVERT_ON_IMPORT=true` boleh diaktifkan agar event yang sudah mapped otomatis dibuat menjadi absensi final.
+Mode dry-run hanya dipakai untuk test awal. Saat mode live aktif, data masuk staging Biofinger. Setelah sample mapping valid, `BIOFINGER_CONVERT_ON_IMPORT=true` menjadi mode produksi agar event yang sudah mapped otomatis dibuat menjadi absensi final. Tombol `Proses Absensi` di DMS tetap tersedia sebagai fallback manual.
 
 Jalankan lokal untuk test:
 
@@ -77,8 +78,9 @@ BIOFINGER_DEVICE_CODE=BIO-AT301-001
 BIOFINGER_DEVICE_CODE_PREFIX=BIO-AT301
 BIOFINGER_ALLOWED_SERIALS=GED7244800117
 BIOFINGER_ALLOWED_REMOTE_IPS=
-BIOFINGER_CONVERT_ON_IMPORT=false
+BIOFINGER_CONVERT_ON_IMPORT=true
 BIOFINGER_CONVERSION_BATCH_SIZE=1000
+BIOFINGER_AUTO_CONVERT_INTERVAL_MS=60000
 BIOFINGER_AUTO_USER_SYNC_ENABLED=false
 BIOFINGER_AUTO_USER_SYNC_INTERVAL_MS=21600000
 BIOFINGER_RECEIVER_DRY_RUN=false
@@ -115,7 +117,7 @@ Flow resmi untuk mesin AT-301 tambahan:
 8. Setelah user/finger baru dibuat di mesin, lakukan 1 scan jari agar User ID dikirim ke receiver.
 9. Jika `Nama di Mesin` belum terkirim, klik `Sync User Mesin` di DMS untuk meminta `USERINFO` lewat polling ADMS.
 10. Klik `Refresh Data` di DMS; user baru akan muncul `pending` di tab `Mapping User`.
-11. Lakukan mapping ke karyawan DMS, lalu klik `Proses Absensi` jika raw event sudah siap dikonversi.
+11. Lakukan mapping ke karyawan DMS. Jika receiver production memakai `BIOFINGER_CONVERT_ON_IMPORT=true`, event mapped akan otomatis masuk Live Absensi. Tombol `Proses Absensi` hanya dipakai bila perlu memaksa konversi manual.
 
 Dengan flow ini, mesin tidak harus dicolok ke PC admin. PC admin hanya dipakai untuk troubleshooting lokal port `4370` jika ADMS/cloud push bermasalah.
 
@@ -244,8 +246,9 @@ Receiver melakukan:
 5. Jika User ID sudah punya mapping `active`, event baru langsung diberi `employee_id` dan `import_status = mapped`.
 6. Mapping dari DMS sebaiknya lewat RPC `update_biofinger_user_mapping` agar konflik karyawan dicegah, raw event ikut diperbarui, dan Audit Log tercatat.
 7. Jika `BIOFINGER_AUTO_USER_SYNC_ENABLED=true`, receiver membuat command `sync_users` berkala saat interval terakhir sudah lewat.
-8. Jika `BIOFINGER_CONVERT_ON_IMPORT=true`, panggil `convert_biofinger_attendance_events` untuk membuat `attendance_logs` dari event yang sudah `mapped`. Default env tetap `false` sampai sample manual sudah valid.
-9. Update `last_seen_at`, `last_sync_at`, dan `sync_cursor_at`.
+8. Jika `BIOFINGER_CONVERT_ON_IMPORT=true`, receiver langsung memanggil `convert_biofinger_attendance_events` saat ATTLOG masuk.
+9. Receiver juga menjalankan auto-convert loop sesuai `BIOFINGER_AUTO_CONVERT_INTERVAL_MS`. Ini menutup kasus mapping dibuat setelah raw event sudah masuk.
+10. Update `last_seen_at`, `last_sync_at`, dan `sync_cursor_at`.
 
 Konversi memakai aturan aman:
 
@@ -253,7 +256,7 @@ Konversi memakai aturan aman:
 - Check-out yang dipakai adalah event `Pulang` paling akhir per karyawan per tanggal.
 - Event duplikat ditandai `ignored` dengan catatan sistem.
 - Event yang bentrok dengan attendance dari sumber lain ditandai `error`, bukan menimpa data manual/mobile.
-- Setelah konversi, payroll cycle karyawan terkait di-refresh.
+- Setelah konversi, trigger database memperbarui `attendance_daily_summaries`; payroll cycle karyawan terkait juga di-refresh.
 - Shift malam lintas tanggal masih perlu policy operasional final; rule saat ini memakai tanggal mesin dari raw event.
 
 Manual convert juga tersedia dari DMS UI tombol `Proses Absensi` atau command:

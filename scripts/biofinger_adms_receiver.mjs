@@ -10,12 +10,13 @@ const DEFAULT_DEVICE_PORT = 4370;
 const DEFAULT_COMMAND_RESPONSE = "OK\n";
 const REGISTRY_ALLOWLIST_CACHE_MS = 60_000;
 const DEFAULT_CONVERSION_BATCH_SIZE = 1000;
+const DEFAULT_AUTO_CONVERT_INTERVAL_MS = 60_000;
 const DEFAULT_COMMAND_BATCH_SIZE = 3;
 const DEFAULT_COMMAND_RETRY_MS = 120_000;
 const DEFAULT_USER_SYNC_PIN = "ALL";
 const DEFAULT_USER_SYNC_COMMAND_TEMPLATE = "C:{id}:DATA QUERY USERINFO";
 const DEFAULT_AUTO_USER_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
-const RECEIVER_VERSION = "2026-08-26-auto-user-sync-v2";
+const RECEIVER_VERSION = "2026-08-27-auto-convert-v1";
 
 const env = process.env;
 
@@ -30,8 +31,9 @@ const config = {
   allowedSerials: parseCsv(env.BIOFINGER_ALLOWED_SERIALS),
   allowedRemoteIps: parseCsv(env.BIOFINGER_ALLOWED_REMOTE_IPS),
   receiverToken: env.BIOFINGER_RECEIVER_TOKEN || "",
-  convertOnImport: ["1", "true", "yes", "on"].includes(String(env.BIOFINGER_CONVERT_ON_IMPORT || "false").trim().toLowerCase()),
+  convertOnImport: parseBoolean(env.BIOFINGER_CONVERT_ON_IMPORT, true),
   conversionBatchSize: toInteger(env.BIOFINGER_CONVERSION_BATCH_SIZE, DEFAULT_CONVERSION_BATCH_SIZE),
+  autoConvertIntervalMs: toInteger(env.BIOFINGER_AUTO_CONVERT_INTERVAL_MS, DEFAULT_AUTO_CONVERT_INTERVAL_MS),
   commandBatchSize: toInteger(env.BIOFINGER_ADMS_COMMAND_BATCH_SIZE, DEFAULT_COMMAND_BATCH_SIZE),
   commandRetryMs: toInteger(env.BIOFINGER_ADMS_COMMAND_RETRY_MS, DEFAULT_COMMAND_RETRY_MS),
   userSyncPin: env.BIOFINGER_USER_SYNC_PIN || DEFAULT_USER_SYNC_PIN,
@@ -52,6 +54,10 @@ const requestLogPrefix = () => new Date().toISOString();
 const registrySerialCache = new Map();
 let commandQueueTableAvailable = true;
 let commandQueueMissingLogged = false;
+let autoConvertRunning = false;
+let lastAutoConvertAt = null;
+let lastAutoConvertResult = null;
+let lastAutoConvertError = "";
 
 function parseCsv(value) {
   return String(value || "")
@@ -60,8 +66,12 @@ function parseCsv(value) {
     .filter(Boolean);
 }
 
-function parseBoolean(value) {
-  return ["1", "true", "yes", "on"].includes(String(value || "").trim().toLowerCase());
+function parseBoolean(value, fallback = false) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
 }
 
 function toInteger(value, fallback = null) {
@@ -1039,6 +1049,68 @@ async function convertMappedEvents({ deviceId }) {
   return summary || null;
 }
 
+function getConversionActivityCount(summary) {
+  if (!summary || summary.error) return 0;
+  return (
+    toInteger(summary.events_converted, 0)
+    + toInteger(summary.events_ignored, 0)
+    + toInteger(summary.events_error, 0)
+    + toInteger(summary.attendance_logs_upserted, 0)
+  );
+}
+
+function formatConversionSummary(summary) {
+  if (!summary) return "no-result";
+  if (summary.error) return `error=${summary.error}`;
+  return [
+    `selected=${summary.events_selected ?? 0}`,
+    `converted=${summary.events_converted ?? 0}`,
+    `ignored=${summary.events_ignored ?? 0}`,
+    `error=${summary.events_error ?? 0}`,
+    `logs=${summary.attendance_logs_upserted ?? 0}`,
+    `employees=${summary.employees_refreshed ?? 0}`,
+  ].join(" ");
+}
+
+async function runAutoConvertTick(reason = "timer") {
+  if (!config.convertOnImport || config.dryRun || !supabase) return null;
+  if (autoConvertRunning) return lastAutoConvertResult;
+
+  autoConvertRunning = true;
+  lastAutoConvertAt = new Date().toISOString();
+
+  try {
+    const summary = await convertMappedEvents({ deviceId: null });
+    lastAutoConvertResult = summary;
+    lastAutoConvertError = "";
+
+    if (getConversionActivityCount(summary) > 0) {
+      console.log(`${requestLogPrefix()} auto-convert reason=${reason} ${formatConversionSummary(summary)}`);
+    }
+
+    return summary;
+  } catch (error) {
+    lastAutoConvertError = error.message || String(error);
+    console.warn(`${requestLogPrefix()} auto-convert failed reason=${reason} ${lastAutoConvertError}`);
+    return { error: lastAutoConvertError };
+  } finally {
+    autoConvertRunning = false;
+  }
+}
+
+function startAutoConvertLoop() {
+  if (!config.convertOnImport || config.dryRun || !supabase) return;
+  if (!Number.isFinite(config.autoConvertIntervalMs) || config.autoConvertIntervalMs <= 0) return;
+
+  setTimeout(() => {
+    void runAutoConvertTick("startup");
+  }, 3_000);
+
+  setInterval(() => {
+    void runAutoConvertTick("interval");
+  }, config.autoConvertIntervalMs);
+}
+
 function buildOptionsResponse(serialNumber) {
   return [
     `GET OPTION FROM: ${serialNumber || ""}`,
@@ -1154,6 +1226,13 @@ async function handleRequest(request, response) {
         allowedSerials: config.allowedSerials.length,
         registryAllowlist: !config.dryRun,
         commandQueue: commandQueueTableAvailable ? "available" : "fallback-metadata",
+        convertOnImport: config.convertOnImport,
+        conversionBatchSize: config.conversionBatchSize,
+        autoConvertIntervalMs: config.autoConvertIntervalMs,
+        autoConvertRunning,
+        lastAutoConvertAt,
+        lastAutoConvertResult,
+        lastAutoConvertError,
         commandBatchSize: config.commandBatchSize,
         autoUserSync: config.autoUserSync,
         autoUserSyncIntervalMs: config.autoUserSyncIntervalMs,
@@ -1186,7 +1265,8 @@ server.listen(config.port, config.host, () => {
   console.log(`${requestLogPrefix()} DMS Biofinger ADMS receiver listening on ${config.host}:${config.port}`);
   console.log(`${requestLogPrefix()} version=${RECEIVER_VERSION}`);
   console.log(`${requestLogPrefix()} dryRun=${config.dryRun} allowedSerials=${config.allowedSerials.join(",") || "*"}`);
-  console.log(`${requestLogPrefix()} convertOnImport=${config.convertOnImport} conversionBatchSize=${config.conversionBatchSize}`);
+  console.log(`${requestLogPrefix()} convertOnImport=${config.convertOnImport} conversionBatchSize=${config.conversionBatchSize} autoConvertIntervalMs=${config.autoConvertIntervalMs}`);
   console.log(`${requestLogPrefix()} commandBatchSize=${config.commandBatchSize} userSyncTemplate=${config.userSyncCommandTemplate}`);
   console.log(`${requestLogPrefix()} autoUserSync=${config.autoUserSync} autoUserSyncIntervalMs=${config.autoUserSyncIntervalMs}`);
+  startAutoConvertLoop();
 });

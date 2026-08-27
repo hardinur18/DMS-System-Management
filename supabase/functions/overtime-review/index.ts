@@ -82,7 +82,7 @@ Deno.serve(async (request) => {
 
     const { data: overtime, error: overtimeError } = await adminClient
       .from("overtime_requests")
-      .select("id, employee_id, overtime_date, overtime_minutes, approved_minutes, rate_amount, total_amount, status, notes")
+      .select("id, employee_id, overtime_date, overtime_minutes, approved_minutes, rate_amount, total_amount, status, request_source, overtime_basis, actual_check_out_at, notes")
       .eq("id", payload.id)
       .maybeSingle()
 
@@ -91,6 +91,11 @@ Deno.serve(async (request) => {
 
     const approved = action === "approve"
     const requestedMinutes = Number(overtime.overtime_minutes || 0)
+
+    if (approved && (!overtime.actual_check_out_at || overtime.status === "draft" || requestedMinutes <= 0)) {
+      return jsonResponse({ error: "Request lembur belum punya realisasi checkout dan menit payable." }, 400)
+    }
+
     const approvedMinutes = approved
       ? Math.max(0, Math.min(requestedMinutes, Number(payload.approvedMinutes ?? requestedMinutes)))
       : 0
@@ -136,6 +141,8 @@ Deno.serve(async (request) => {
         overtime_minutes: requestedMinutes,
         approved_minutes: approvedMinutes,
         total_amount: totalAmount,
+        request_source: overtime.request_source,
+        overtime_basis: overtime.overtime_basis,
         source: "edge-function",
       },
     })

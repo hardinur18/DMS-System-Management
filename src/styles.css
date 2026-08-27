@@ -22,8 +22,8 @@
   --ops-green: #10b981;
   --ops-amber: #f59e0b;
   --ops-danger: #f43f5e;
-  --ops-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 20px -14px rgba(15, 23, 42, 0.22);
-  --ops-shadow: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 22px 48px -24px rgba(15, 23, 42, 0.34);
+  --ops-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.035), 0 8px 18px -16px rgba(15, 23, 42, 0.18);
+  --ops-shadow: 0 1px 0 rgba(255, 255, 255, 0.66) inset, 0 14px 34px -28px rgba(15, 23, 42, 0.28);
   --ops-radius-lg: 26px;
   --ops-radius: 20px;
   --ops-radius-sm: 14px;
@@ -41,6 +41,15 @@
   --font-ui: 0.86rem;
   --font-small: 0.78rem;
   --font-xs: 0.68rem;
+  --fw-regular: 400;
+  --fw-body: 430;
+  --fw-body-strong: 520;
+  --fw-ui: 560;
+  --fw-ui-strong: 620;
+  --fw-heading: 720;
+  --fw-display: 760;
+  --fw-number: 780;
+  --fw-label: 600;
   --ink: var(--ops-ink);
   --ink-2: var(--ops-ink-2);
   --muted: var(--ops-muted);
@@ -67,7 +76,7 @@
   --field-bg: rgba(255, 255, 255, 0.9);
   --shadow-sm: var(--ops-shadow-sm);
   --shadow: var(--ops-shadow);
-  --shadow-lift: 0 1px 0 rgba(255, 255, 255, 0.7) inset, 0 34px 64px -28px rgba(15, 23, 42, 0.4);
+  --shadow-lift: 0 1px 0 rgba(255, 255, 255, 0.72) inset, 0 18px 42px -30px rgba(15, 23, 42, 0.32);
   --ring: 0 0 0 4px rgba(34, 174, 202, 0.16);
   --radius-lg: var(--ops-radius-lg);
   --radius: var(--ops-radius);
@@ -111,6 +120,7 @@ body {
   background: var(--ops-app-bg);
   font-family: var(--font-sans);
   font-size: var(--font-body);
+  font-weight: var(--fw-body);
   letter-spacing: 0;
 }
 
@@ -209,7 +219,7 @@ button {
   gap: 8px;
   color: var(--blue-ink);
   font-size: 0.74rem;
-  font-weight: 800;
+  font-weight: var(--fw-ui-strong);
   letter-spacing: 0;
   text-transform: uppercase;
 }
@@ -354,7 +364,7 @@ button {
 .brandText strong {
   color: var(--ops-ink);
   font-size: 1rem;
-  font-weight: 800;
+  font-weight: var(--fw-heading);
   letter-spacing: 0;
 }
 
@@ -362,7 +372,7 @@ button {
   margin-top: 2px;
   color: var(--ops-muted);
   font-size: 0.78rem;
-  font-weight: 600;
+  font-weight: var(--fw-body);
 }
 
 .navList {
@@ -398,7 +408,7 @@ button {
   padding: 0 12px;
   color: var(--ops-muted-2);
   font-size: 0.68rem;
-  font-weight: 850;
+  font-weight: var(--fw-label);
   letter-spacing: 0;
   line-height: 1;
   text-transform: uppercase;
@@ -440,7 +450,7 @@ button {
   color: #526179;
   background: transparent;
   font-size: 0.86rem;
-  font-weight: 700;
+  font-weight: var(--fw-ui);
   text-align: left;
   transition: background 180ms ease, border-color 180ms ease, color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
 }
@@ -574,7 +584,7 @@ button {
   color: #ffffff;
   background: linear-gradient(135deg, var(--grad-c), var(--grad-b));
   font-size: 0.78rem;
-  font-weight: 800;
+  font-weight: var(--fw-heading);
 }
 
 .userAvatar.small {
@@ -588,7 +598,7 @@ button {
   overflow: hidden;
   color: var(--ink);
   font-size: 0.86rem;
-  font-weight: 800;
+  font-weight: var(--fw-ui-strong);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -599,7 +609,7 @@ button {
   margin-top: 3px;
   color: var(--blue-ink);
   font-size: 0.72rem;
-  font-weight: 700;
+  font-weight: var(--fw-ui);
   line-height: 1.25;
 }
 
@@ -708,7 +718,7 @@ button {
   border: 1px solid transparent;
   border-radius: var(--ops-radius-sm);
   font-size: var(--font-ui);
-  font-weight: 700;
+  font-weight: var(--fw-ui-strong);
   letter-spacing: 0;
   line-height: 1;
   white-space: nowrap;
@@ -760,7 +770,7 @@ button {
   margin-bottom: 11px;
   color: var(--blue-ink);
   font-size: 0.74rem;
-  font-weight: 800;
+  font-weight: var(--fw-ui-strong);
   letter-spacing: 0;
   text-transform: uppercase;
 }
@@ -769,7 +779,7 @@ button {
   margin: 0;
   color: var(--ops-ink);
   font-size: 2rem;
-  font-weight: 800;
+  font-weight: var(--fw-display);
   letter-spacing: 0;
   line-height: 1.1;
 }
@@ -779,7 +789,7 @@ button {
   margin: 13px 0 0;
   color: var(--ops-muted);
   font-size: 1rem;
-  font-weight: 500;
+  font-weight: var(--fw-body);
   line-height: 1.5;
 }
 
@@ -794,7 +804,7 @@ button {
   flex-wrap: wrap;
   color: #738197;
   font-size: 0.82rem;
-  font-weight: 500;
+  font-weight: var(--fw-body);
   line-height: 1.4;
 }
 
@@ -865,7 +875,7 @@ button {
   display: block;
   color: var(--ops-muted);
   font-size: 0.78rem;
-  font-weight: 600;
+  font-weight: var(--fw-label);
   line-height: 1.35;
 }
 
@@ -875,7 +885,7 @@ button {
   margin-top: 4px;
   color: var(--ink);
   font-size: 1.45rem;
-  font-weight: 800;
+  font-weight: var(--fw-number);
   letter-spacing: 0;
   line-height: 1.1;
   overflow-wrap: anywhere;
@@ -887,7 +897,7 @@ button {
   color: var(--muted);
   font-size: 0.78rem;
   font-style: normal;
-  font-weight: 600;
+  font-weight: var(--fw-body);
   line-height: 1.25;
 }
 
@@ -920,6 +930,14 @@ button {
   gap: 12px;
   padding: 18px 20px;
   overflow: visible;
+}
+
+.filterPanel.surfacePanel,
+.uiFilterCard.surfacePanel {
+  border-color: rgba(15, 23, 42, 0.055);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 8px 24px -22px rgba(15, 23, 42, 0.22);
+  backdrop-filter: none;
 }
 
 .filterField {
@@ -1038,14 +1056,14 @@ button {
 .biofingerScopeStats span {
   color: #738197;
   font-size: 0.66rem;
-  font-weight: 760;
+  font-weight: var(--fw-label);
 }
 
 .biofingerScopeStats strong {
   min-width: 0;
   color: var(--ops-ink);
   font-size: 0.8rem;
-  font-weight: 840;
+  font-weight: var(--fw-ui-strong);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1185,6 +1203,20 @@ button {
   --table-cell-x: 16px;
   --table-cell-y: 9px;
   --table-min-width: 1180px;
+}
+
+.biofingerRawEventTableScroller {
+  --table-row-min-h: 62px;
+  --table-cell-x: 16px;
+  --table-cell-y: 10px;
+  --table-min-width: 1120px;
+}
+
+.overtimeReviewTableScroller {
+  --table-row-min-h: 66px;
+  --table-cell-x: 16px;
+  --table-cell-y: 11px;
+  --table-min-width: 1390px;
 }
 
 .biofingerTableSelect .foundationSelectButton {
@@ -2168,7 +2200,7 @@ button {
   margin: 7px 0 0;
   color: var(--ops-ink);
   font-size: clamp(1.26rem, 1.5vw, 1.48rem);
-  font-weight: 880;
+  font-weight: var(--fw-heading);
   letter-spacing: 0;
   line-height: 1.1;
 }
@@ -2182,7 +2214,7 @@ button {
   margin-top: 8px;
   color: var(--ops-muted);
   font-size: 0.8rem;
-  font-weight: 650;
+  font-weight: var(--fw-body);
   line-height: 1.3;
 }
 
@@ -2238,7 +2270,7 @@ button {
 .biofingerDrawerHeaderStats span {
   color: #738197;
   font-size: 0.68rem;
-  font-weight: 800;
+  font-weight: var(--fw-label);
 }
 
 .biofingerDrawerHeaderStats strong {
@@ -2246,7 +2278,7 @@ button {
   min-width: 0;
   color: var(--ops-ink);
   font-size: 0.82rem;
-  font-weight: 850;
+  font-weight: var(--fw-ui-strong);
   line-height: 1.15;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2282,7 +2314,7 @@ button {
   margin: 0;
   color: #627089;
   font-size: 0.72rem;
-  font-weight: 850;
+  font-weight: var(--fw-label);
   letter-spacing: 0;
   text-transform: uppercase;
 }
@@ -3337,13 +3369,13 @@ button {
 .guideRelatedPanel strong {
   color: var(--ops-ink);
   font-size: 0.78rem;
-  font-weight: 850;
+  font-weight: var(--fw-ui-strong);
 }
 
 .guideRelatedPanel small {
   color: #738197;
   font-size: 0.68rem;
-  font-weight: 720;
+  font-weight: var(--fw-body);
 }
 
 .biofingerDeviceRegistryRow > .secondaryButton {
@@ -3408,7 +3440,7 @@ button {
   gap: 8px;
   color: var(--blue-ink);
   font-size: 0.72rem;
-  font-weight: 850;
+  font-weight: var(--fw-ui-strong);
   letter-spacing: 0;
   text-transform: uppercase;
 }
@@ -3417,7 +3449,7 @@ button {
   margin: 10px 0 0;
   color: var(--ops-ink);
   font-size: 1.38rem;
-  font-weight: 880;
+  font-weight: var(--fw-heading);
   letter-spacing: 0;
   line-height: 1.08;
 }
@@ -3755,7 +3787,7 @@ button {
   background: #ffffff;
   color: var(--ops-ink);
   font-size: var(--font-ui);
-  font-weight: 820;
+  font-weight: var(--fw-ui-strong);
   text-align: left;
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.04);
   cursor: pointer;
@@ -3792,36 +3824,43 @@ button {
 .attendanceDatePopover {
   position: absolute;
   left: 0;
-  top: calc(100% + 12px);
+  top: calc(100% + 8px);
   z-index: 220;
   display: grid;
-  width: min(760px, calc(100vw - 64px));
-  grid-template-columns: 210px minmax(0, 1fr);
+  width: min(640px, calc(100vw - 64px));
+  grid-template-columns: 150px minmax(0, 1fr);
   overflow: hidden;
   border: 1px solid rgba(34, 174, 202, 0.24);
-  border-radius: 24px;
+  border-radius: 16px;
   background: #ffffff;
-  box-shadow: 0 30px 80px -44px rgba(7, 24, 74, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.72) inset;
+  box-shadow: 0 24px 56px -34px rgba(7, 24, 74, 0.62), 0 0 0 1px rgba(255, 255, 255, 0.72) inset;
   animation: datePickerIn 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.dateModePickerPopover.rangeMode {
+  width: min(820px, calc(100vw - 64px));
 }
 
 .attendanceDateSidebar {
   display: grid;
   align-content: start;
-  gap: 2px;
-  padding: 18px 0;
+  gap: 0;
+  padding: 8px 0;
   background: #fbfdff;
   border-right: 1px solid rgba(15, 23, 42, 0.05);
 }
 
 .attendanceDateSidebar button {
-  min-height: 42px;
-  padding: 0 20px;
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  padding: 6px 14px;
   border: 0;
   background: transparent;
   color: #52617a;
-  font-size: 0.92rem;
-  font-weight: 820;
+  font-size: 0.8rem;
+  font-weight: var(--fw-ui);
+  line-height: 1.15;
   text-align: left;
   cursor: pointer;
   transition: background 150ms ease, color 150ms ease, transform 150ms ease;
@@ -3839,36 +3878,56 @@ button {
 
 .attendanceDateCalendar {
   display: grid;
+  gap: 10px;
+  padding: 14px 16px 12px;
+}
+
+.dateModePickerMonths,
+.dateModePickerMonthPanel {
+  display: grid;
+  min-width: 0;
+}
+
+.dateModePickerMonths {
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
-  padding: 22px 24px 18px;
+}
+
+.dateModePickerPopover.rangeMode .dateModePickerMonths {
+  grid-template-columns: repeat(2, minmax(230px, 1fr));
+}
+
+.dateModePickerMonthPanel {
+  align-content: start;
+  gap: 8px;
 }
 
 .attendanceDateCalendarHeader {
   display: grid;
-  grid-template-columns: 36px 36px minmax(0, 1fr) 36px 36px;
+  grid-template-columns: 28px 28px minmax(0, 1fr) 28px 28px;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
 }
 
 .attendanceDateCalendarHeader strong {
   color: var(--ops-ink);
-  font-size: 1.08rem;
-  font-weight: 900;
+  font-size: 0.96rem;
+  font-weight: var(--fw-ui-strong);
   text-align: center;
 }
 
 .attendanceDateCalendarHeader button,
 .attendanceDateFooter button {
   display: inline-flex;
-  min-height: 36px;
+  min-height: 28px;
   align-items: center;
   justify-content: center;
   border: 1px solid transparent;
-  border-radius: 12px;
+  border-radius: 9px;
   background: transparent;
   color: #65748c;
-  font-size: 1.15rem;
-  font-weight: 820;
+  font-size: 0.95rem;
+  font-weight: var(--fw-ui);
   cursor: pointer;
   transition: background 150ms ease, color 150ms ease, transform 150ms ease;
 }
@@ -3888,33 +3947,33 @@ button {
 
 .attendanceDateWeekdays span {
   color: #93a2b8;
-  font-size: 0.78rem;
-  font-weight: 720;
+  font-size: 0.72rem;
+  font-weight: var(--fw-label);
   text-align: center;
 }
 
 .attendanceDateGrid {
-  row-gap: 8px;
+  row-gap: 3px;
 }
 
 .attendanceDateGrid button {
   display: grid;
-  width: 36px;
-  height: 36px;
+  width: 30px;
+  height: 30px;
   place-items: center;
   justify-self: center;
   border: 1px solid transparent;
   border-radius: 0;
   background: transparent;
   color: var(--ink);
-  font-size: 0.9rem;
-  font-weight: 620;
+  font-size: 0.82rem;
+  font-weight: var(--fw-ui);
   cursor: pointer;
   transition: background 150ms ease, color 150ms ease, transform 150ms ease, border-radius 150ms ease;
 }
 
 .attendanceDateGrid button:hover {
-  border-radius: 12px;
+  border-radius: 10px;
   color: var(--blue-ink);
   background: rgba(34, 174, 202, 0.09);
   transform: translateY(-1px);
@@ -3926,7 +3985,7 @@ button {
 
 .attendanceDateGrid button.today {
   border-color: rgba(34, 174, 202, 0.34);
-  border-radius: 12px;
+  border-radius: 10px;
 }
 
 .attendanceDateGrid button.active {
@@ -3936,28 +3995,53 @@ button {
   box-shadow: 0 12px 24px -16px rgba(40, 118, 255, 0.72);
 }
 
+.attendanceDateGrid button.rangeMiddle {
+  border-radius: 0;
+  color: #0a579a;
+  background: rgba(40, 118, 255, 0.09);
+}
+
+.attendanceDateGrid button.rangeStart,
+.attendanceDateGrid button.rangeEnd {
+  color: #ffffff;
+  background: #2876ff;
+  box-shadow: 0 12px 24px -16px rgba(40, 118, 255, 0.72);
+}
+
+.attendanceDateGrid button.rangeStart {
+  border-radius: 10px 0 0 10px;
+}
+
+.attendanceDateGrid button.rangeEnd {
+  border-radius: 0 10px 10px 0;
+}
+
+.attendanceDateGrid button.singleRange {
+  border-radius: 10px;
+}
+
 .attendanceDateFooter {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding-top: 4px;
+  gap: 12px;
+  padding-top: 2px;
 }
 
 .attendanceDateFooter strong {
   color: var(--ops-ink);
-  font-size: 0.88rem;
-  font-weight: 860;
+  font-size: 0.8rem;
+  font-weight: var(--fw-ui-strong);
 }
 
 .attendanceDateFooter button {
-  min-width: 88px;
+  min-width: 78px;
   border-color: rgba(15, 23, 42, 0.1);
-  border-radius: 16px;
+  border-radius: 12px;
   background: #ffffff;
   color: var(--ops-ink);
-  font-size: 0.82rem;
-  box-shadow: 0 14px 28px -20px rgba(15, 23, 42, 0.5);
+  font-size: 0.78rem;
+  box-shadow: 0 12px 22px -18px rgba(15, 23, 42, 0.5);
 }
 
 .employeeFilterPanel {
@@ -3973,7 +4057,7 @@ button {
   background: #ffffff;
   color: var(--ink);
   font-size: var(--font-ui);
-  font-weight: 650;
+  font-weight: var(--fw-ui);
 }
 
 .foundationSelect {
@@ -3995,7 +4079,7 @@ button {
   background: #ffffff;
   color: var(--ink);
   font-size: var(--font-ui);
-  font-weight: 760;
+  font-weight: var(--fw-ui);
   text-align: left;
   box-shadow: 0 1px 0 rgba(15, 23, 42, 0.02);
   cursor: pointer;
@@ -4072,7 +4156,7 @@ button {
   color: var(--ops-ink);
   background: transparent;
   font-size: 0.84rem;
-  font-weight: 680;
+  font-weight: var(--fw-body-strong);
 }
 
 .foundationSelectList {
@@ -4132,13 +4216,13 @@ button {
 
 .foundationSelectOptionText strong {
   font-size: 0.84rem;
-  font-weight: 780;
+  font-weight: var(--fw-ui);
 }
 
 .foundationSelectOptionText small {
   color: #738197;
   font-size: 0.74rem;
-  font-weight: 650;
+  font-weight: var(--fw-body);
 }
 
 .foundationSelectEmpty {
@@ -4146,7 +4230,7 @@ button {
   padding: 16px 10px;
   color: #738197;
   font-size: 0.82rem;
-  font-weight: 680;
+  font-weight: var(--fw-body-strong);
   text-align: center;
 }
 
@@ -4198,43 +4282,6 @@ button {
   background-position: calc(100% - 28px) 50%;
   background-repeat: no-repeat;
   background-size: 18px 18px;
-}
-
-.recapRangeField {
-  flex: 0 0 280px;
-}
-
-.recapRangeControl {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  min-height: var(--ops-control-h);
-  padding: 5px;
-  gap: 4px;
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  border-radius: var(--ops-radius-sm);
-  background: rgba(255, 255, 255, 0.9);
-}
-
-.recapRangeControl button {
-  border: 0;
-  border-radius: 14px;
-  background: transparent;
-  color: #66758b;
-  font-size: 0.82rem;
-  font-weight: 820;
-  cursor: pointer;
-  transition: background 160ms ease, color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
-}
-
-.recapRangeControl button:hover {
-  transform: translateY(-1px);
-  color: var(--blue-ink);
-}
-
-.recapRangeControl button.active {
-  color: var(--blue-ink);
-  background: #eefcff;
-  box-shadow: inset 0 0 0 1px rgba(34, 174, 202, 0.24), 0 10px 22px rgba(34, 174, 202, 0.08);
 }
 
 .dashboardStack {
@@ -4385,14 +4432,29 @@ button {
   display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
   overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
   padding: 3px 2px 6px;
   scrollbar-width: none;
+  touch-action: pan-x pan-y;
+  -webkit-overflow-scrolling: touch;
 }
 
 .masterCategoryStrip::-webkit-scrollbar {
   display: none;
+}
+
+.masterCategoryStrip.dragging {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.masterCategoryStrip.dragging .masterCategoryButton {
+  cursor: grabbing;
 }
 
 .masterCategoryButton {
@@ -4411,9 +4473,10 @@ button {
   background: rgba(255, 255, 255, 0.62);
   box-shadow: 0 8px 22px -22px rgba(7, 24, 74, 0.38);
   font-size: 0.78rem;
-  font-weight: 650;
+  font-weight: var(--fw-ui);
   line-height: 1.2;
   white-space: nowrap;
+  user-select: none;
   transition: color 180ms ease, background 180ms ease, border-color 180ms ease, box-shadow 220ms ease, transform 170ms ease;
 }
 
@@ -4459,7 +4522,7 @@ button {
   background: rgba(34, 174, 202, 0.12);
   font-size: 0.67rem;
   font-style: normal;
-  font-weight: 750;
+  font-weight: var(--fw-ui-strong);
   transition: color 180ms ease, background 180ms ease;
 }
 
@@ -4475,7 +4538,7 @@ button {
   color: #be123c;
   background: rgba(255, 241, 242, 0.92);
   font-size: 0.82rem;
-  font-weight: 650;
+  font-weight: var(--fw-body-strong);
 }
 
 .profileLayout {
@@ -4635,13 +4698,13 @@ button {
   gap: 4px;
   color: var(--ink-2);
   font-size: 0.76rem;
-  font-weight: 800;
+  font-weight: var(--fw-label);
 }
 
 .requiredMark {
   color: var(--danger);
   font-size: 0.9em;
-  font-weight: 850;
+  font-weight: var(--fw-ui-strong);
   line-height: 1;
 }
 
@@ -4656,7 +4719,7 @@ button {
   color: var(--ink);
   background: #ffffff;
   font-size: var(--font-ui);
-  font-weight: 650;
+  font-weight: var(--fw-ui);
   outline: 0;
   transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
 }
@@ -4734,7 +4797,7 @@ button {
 .formSegmentedOption strong {
   color: inherit;
   font-size: 0.82rem;
-  font-weight: 800;
+  font-weight: var(--fw-ui-strong);
   line-height: 1.15;
 }
 
@@ -4742,7 +4805,7 @@ button {
   overflow: hidden;
   color: #8492a8;
   font-size: 0.68rem;
-  font-weight: 620;
+  font-weight: var(--fw-body);
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4830,7 +4893,7 @@ button {
 .formSwitchCopy strong {
   color: var(--ink);
   font-size: 0.84rem;
-  font-weight: 760;
+  font-weight: var(--fw-ui-strong);
   line-height: 1.2;
 }
 
@@ -4861,9 +4924,21 @@ button {
   color: var(--ink);
   background: #ffffff;
   font-size: var(--font-ui);
-  font-weight: 650;
+  font-weight: 570;
   letter-spacing: 0;
   transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.dateInputButton span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dateInputButton svg {
+  flex: 0 0 auto;
+  color: #718096;
 }
 
 .dateInputButton.empty {
@@ -4876,15 +4951,21 @@ button {
   box-shadow: var(--ring), 0 10px 24px -20px rgba(15, 23, 42, 0.5);
 }
 
+.dateInputButton.active svg,
+.dateInputButton:hover svg {
+  color: var(--blue-ink);
+}
+
 .datePickerPopover {
   position: absolute;
   left: 0;
   top: calc(100% + 8px);
   z-index: 40;
-  width: min(328px, calc(100vw - 32px));
-  padding: 14px;
+  width: min(476px, calc(100vw - 32px));
+  overflow: hidden;
+  padding: 0;
   border: 1px solid rgba(15, 23, 42, 0.1);
-  border-radius: 18px;
+  border-radius: 22px;
   background: rgba(255, 255, 255, 0.98);
   box-shadow: 0 24px 60px -34px rgba(7, 24, 74, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.68) inset;
   animation: datePickerIn 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
@@ -4895,19 +4976,81 @@ button {
   z-index: 1200;
 }
 
+.datePickerShell {
+  display: grid;
+  grid-template-columns: 138px minmax(0, 1fr);
+  min-width: 0;
+}
+
+.datePickerSidebar {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  min-width: 0;
+  padding: 14px 12px;
+  border-right: 1px solid rgba(15, 23, 42, 0.07);
+  background:
+    radial-gradient(circle at 10% 0, rgba(34, 174, 202, 0.11), transparent 34%),
+    linear-gradient(180deg, rgba(248, 251, 255, 0.94), rgba(255, 255, 255, 0.92));
+}
+
+.datePickerSidebar small {
+  color: #738197;
+  font-size: 0.64rem;
+  font-weight: 680;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.datePickerPreset {
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  color: #526179;
+  background: transparent;
+  font-size: 0.76rem;
+  font-weight: 560;
+  text-align: left;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
+}
+
+.datePickerPreset:hover,
+.datePickerPreset.active {
+  border-color: rgba(34, 174, 202, 0.18);
+  color: var(--blue-ink);
+  background: rgba(230, 248, 252, 0.82);
+  box-shadow: 0 12px 26px -22px rgba(7, 24, 74, 0.58);
+}
+
+.datePickerCalendarPanel {
+  min-width: 0;
+  padding: 14px;
+}
+
 .datePickerHeader {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) 34px;
+  grid-template-columns: 76px minmax(0, 1fr) 76px;
   align-items: center;
   gap: 8px;
   margin-bottom: 12px;
+}
+
+.datePickerHeaderNav {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.datePickerHeaderNav:last-child {
+  justify-content: flex-end;
 }
 
 .datePickerHeader strong {
   overflow: hidden;
   color: var(--ops-ink);
   font-size: 0.88rem;
-  font-weight: 800;
+  font-weight: 640;
   text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4920,12 +5063,13 @@ button {
   justify-content: center;
   gap: 6px;
   min-height: 34px;
+  min-width: 34px;
   border: 1px solid transparent;
   border-radius: 12px;
   color: #64748b;
-  background: rgba(248, 251, 255, 0.9);
+  background: rgba(248, 251, 255, 0.82);
   font-size: 0.75rem;
-  font-weight: 700;
+  font-weight: 590;
   transition: background 160ms ease, color 160ms ease, transform 150ms ease;
 }
 
@@ -4966,7 +5110,7 @@ button {
   color: var(--ink);
   background: transparent;
   font-size: 0.8rem;
-  font-weight: 650;
+  font-weight: 560;
   justify-self: center;
   transition: background 160ms ease, border-color 160ms ease, color 160ms ease, transform 150ms ease, box-shadow 180ms ease;
 }
@@ -4987,26 +5131,111 @@ button {
 
 .datePickerDay.active {
   color: #ffffff;
-  background: linear-gradient(135deg, var(--grad-c), var(--grad-a) 48%, var(--grad-b));
+  background: linear-gradient(135deg, #22aecb, #0a75a8 56%, #073b78);
   box-shadow: 0 12px 24px -14px rgba(7, 24, 74, 0.68);
 }
 
 .datePickerFooter {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
   margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.datePickerFooter > span {
+  min-width: 0;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 520;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .datePickerFooter button {
   padding: 0 12px;
 }
 
+@media (max-width: 560px) {
+  .datePickerPopover {
+    border-radius: 20px;
+  }
+
+  .datePickerShell {
+    grid-template-columns: 1fr;
+  }
+
+  .datePickerSidebar {
+    grid-auto-flow: column;
+    grid-auto-columns: max-content;
+    align-items: center;
+    overflow-x: auto;
+    padding: 11px 12px;
+    border-right: 0;
+    border-bottom: 1px solid rgba(15, 23, 42, 0.07);
+  }
+
+  .datePickerSidebar small {
+    display: none;
+  }
+
+  .datePickerPreset {
+    min-height: 32px;
+    white-space: nowrap;
+  }
+
+  .datePickerCalendarPanel {
+    padding: 12px;
+  }
+
+  .datePickerHeader {
+    grid-template-columns: 70px minmax(0, 1fr) 70px;
+    gap: 6px;
+  }
+
+  .datePickerHeader button {
+    min-width: 31px;
+    min-height: 31px;
+  }
+
+  .datePickerWeekdays,
+  .datePickerGrid {
+    gap: 3px;
+  }
+
+  .datePickerDay {
+    width: 32px;
+    height: 32px;
+    border-radius: 11px;
+  }
+
+  .datePickerFooter {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .datePickerFooter > span {
+    grid-column: 1 / -1;
+  }
+}
+
 @keyframes datePickerIn {
   from {
     opacity: 0;
     transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes datePickerSheetIn {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.98);
   }
   to {
     opacity: 1;
@@ -5901,7 +6130,7 @@ button {
   margin: 0;
   color: var(--ops-ink);
   font-size: 1.24rem;
-  font-weight: 850;
+  font-weight: var(--fw-heading);
   letter-spacing: 0;
   line-height: 1.15;
 }
@@ -5927,7 +6156,7 @@ button {
   margin: 4px 0 0;
   color: var(--ops-ink);
   font-size: 1.18rem;
-  font-weight: 850;
+  font-weight: var(--fw-heading);
   letter-spacing: 0;
 }
 
@@ -5942,7 +6171,7 @@ button {
 .dialogEyebrow {
   color: var(--blue-ink);
   font-size: 0.72rem;
-  font-weight: 850;
+  font-weight: var(--fw-ui-strong);
   letter-spacing: 0;
   text-transform: uppercase;
 }
@@ -7149,7 +7378,7 @@ button {
 
 .checkoutCorrectionFields {
   display: grid;
-  grid-template-columns: 180px minmax(0, 1fr);
+  grid-template-columns: minmax(150px, 0.8fr) minmax(132px, 0.6fr) minmax(220px, 1.2fr);
   gap: 12px;
 }
 
@@ -7679,6 +7908,205 @@ button {
 
 .overtimeReviewDialog {
   width: min(760px, calc(100vw - 48px));
+}
+
+.overtimeRequestDialog {
+  display: flex;
+  width: min(940px, calc(100vw - 48px));
+  max-height: calc(100dvh - 48px);
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+  border-radius: 28px;
+}
+
+.overtimeRequestShell {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.overtimeRequestHeader {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: start;
+  padding: 24px 30px 18px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+  background:
+    radial-gradient(circle at 0% 0%, rgba(34, 174, 202, 0.1), transparent 34%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(247, 252, 255, 0.94));
+}
+
+.overtimeRequestHeader span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--blue-ink);
+  font-size: 0.72rem;
+  font-weight: 850;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.overtimeRequestHeader h2 {
+  margin: 7px 0 0;
+  color: var(--ops-ink);
+  font-size: 1.45rem;
+  font-weight: 820;
+  letter-spacing: 0;
+  line-height: 1.08;
+}
+
+.overtimeRequestHeader p {
+  max-width: 610px;
+  margin: 7px 0 0;
+  color: var(--ops-muted);
+  font-size: 0.84rem;
+  font-weight: 520;
+  line-height: 1.42;
+}
+
+.overtimeRequestBody {
+  display: grid;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1.15fr) minmax(300px, 0.85fr);
+  gap: 18px;
+  overflow-y: auto;
+  padding: 22px 30px;
+  background: linear-gradient(180deg, rgba(248, 251, 255, 0.72), rgba(255, 255, 255, 0.96));
+}
+
+.overtimeRequestFormPanel,
+.overtimeRequestPreview {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  gap: 14px;
+}
+
+.overtimeRequestGrid {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) repeat(2, minmax(132px, 0.72fr));
+  gap: 12px;
+}
+
+.overtimeRequestPreview {
+  padding: 18px;
+  border: 1px solid rgba(34, 174, 202, 0.17);
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 0% 0%, rgba(34, 174, 202, 0.12), transparent 42%),
+    linear-gradient(145deg, rgba(237, 252, 255, 0.86), rgba(255, 255, 255, 0.98));
+  box-shadow: 0 24px 48px -42px rgba(7, 24, 74, 0.66);
+}
+
+.overtimeRequestPreviewHeader {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.overtimeRequestPreviewHeader > span {
+  display: grid;
+  width: 46px;
+  height: 46px;
+  place-items: center;
+  border-radius: 16px;
+  color: var(--blue-ink);
+  background: rgba(230, 248, 252, 0.9);
+}
+
+.overtimeRequestPreviewHeader small,
+.overtimeRequestPreview dt {
+  color: #738197;
+  font-size: 0.68rem;
+  font-weight: 760;
+  letter-spacing: 0;
+}
+
+.overtimeRequestPreviewHeader strong {
+  display: block;
+  margin-top: 2px;
+  color: var(--ops-ink);
+  font-size: 1.42rem;
+  font-weight: 850;
+  line-height: 1.05;
+}
+
+.overtimeRequestPreview dl {
+  display: grid;
+  overflow: hidden;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.overtimeRequestPreview dl > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  min-height: 74px;
+  padding: 13px;
+  border-right: 1px solid rgba(148, 163, 184, 0.13);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.13);
+}
+
+.overtimeRequestPreview dl > div:nth-child(even) {
+  border-right: 0;
+}
+
+.overtimeRequestPreview dl > div:nth-last-child(-n + 2) {
+  border-bottom: 0;
+}
+
+.overtimeRequestPreview dd {
+  margin: 0;
+  overflow: hidden;
+  color: var(--ops-ink);
+  font-size: 0.84rem;
+  font-weight: 730;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+}
+
+.overtimeRequestNotice {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid rgba(34, 174, 202, 0.16);
+  border-radius: 16px;
+  color: #416179;
+  background: rgba(240, 253, 255, 0.84);
+  font-size: 0.78rem;
+  font-weight: 560;
+  line-height: 1.38;
+}
+
+.overtimeRequestNotice svg {
+  color: var(--blue-ink);
+}
+
+.overtimeRequestActions {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.3fr) minmax(0, 1fr);
+  gap: 12px;
+  padding: 16px 30px 22px;
+  border-top: 1px solid rgba(148, 163, 184, 0.15);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 -18px 38px -36px rgba(7, 24, 74, 0.62);
+}
+
+.overtimeRequestActions .primaryButton,
+.overtimeRequestActions .secondaryButton {
+  min-height: 50px;
 }
 
 .overtimeHero {
@@ -8915,7 +9343,7 @@ button {
   background: rgba(255, 255, 255, 0.86);
   font: inherit;
   font-size: 0.78rem;
-  font-weight: 780;
+  font-weight: var(--fw-ui);
   cursor: pointer;
   transition: border-color 160ms ease, box-shadow 160ms ease, color 160ms ease, transform 160ms ease;
 }
@@ -9033,7 +9461,7 @@ button {
   margin: 0;
   color: var(--ops-ink);
   font-size: 1.04rem;
-  font-weight: 850;
+  font-weight: var(--fw-heading);
   letter-spacing: 0;
 }
 
@@ -9184,9 +9612,9 @@ button {
 }
 
 .dataTablePaginationControls select {
-  min-width: 72px;
+  min-width: 136px;
   height: 38px;
-  padding: 0 42px 0 12px;
+  padding: 0 42px 0 14px;
   border: 1px solid rgba(15, 23, 42, 0.1);
   border-radius: 13px;
   color: var(--ops-ink);
@@ -9329,6 +9757,100 @@ button {
 
 .attendanceRecapTableScroller {
   --table-min-width: 1510px;
+  overflow-x: scroll;
+  overflow-y: visible;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 0 0 24px 24px;
+}
+
+.attendanceRecapTableScroller table {
+  min-width: var(--table-min-width);
+}
+
+.attendanceRecapTableScroller .attendanceSettlementCell {
+  max-width: 100%;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.attendanceRecapTableScroller .attendanceSettlementCell.tone-valid,
+.attendanceRecapTableScroller .attendanceSettlementCell.tone-pending,
+.attendanceRecapTableScroller .attendanceSettlementCell.tone-failed,
+.attendanceRecapTableScroller .attendanceSettlementCell.tone-missing {
+  border-color: transparent;
+  background: transparent !important;
+}
+
+.attendanceRecapTableScroller .attendanceSettlementHeader {
+  gap: 7px;
+}
+
+.attendanceRecapTableScroller .attendanceSettlementPulse {
+  width: 7px;
+  height: 7px;
+  box-shadow: 0 0 0 4px rgba(148, 163, 184, 0.1);
+}
+
+.attendanceRecapTableScroller .attendanceSettlementHeader strong {
+  font-size: 0.82rem;
+  font-weight: var(--fw-ui-strong);
+}
+
+.attendanceRecapTableScroller .attendanceSettlementCell > small {
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: var(--fw-body-strong);
+}
+
+.attendanceRecapTableScroller .attendanceSettlementMetrics {
+  gap: 8px;
+}
+
+.attendanceRecapTableScroller .attendanceSettlementMetric {
+  min-height: 0;
+  max-width: none;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent !important;
+}
+
+.attendanceRecapTableScroller .attendanceSettlementMetric span {
+  color: #7c8ca3;
+  font-size: 0.66rem;
+  font-weight: var(--fw-body-strong);
+}
+
+.attendanceRecapTableScroller .attendanceSettlementMetric strong {
+  color: var(--ops-ink);
+  font-size: 0.72rem;
+  font-weight: var(--fw-ui);
+}
+
+.attendanceRecapTableScroller .attendanceSettlementMetric.tone-valid strong {
+  color: #047857;
+}
+
+.attendanceRecapTableScroller .attendanceSettlementMetric.tone-pending strong {
+  color: #a05b00;
+}
+
+.attendanceRecapTableScroller .attendanceSettlementMetric.tone-failed strong {
+  color: #be123c;
+}
+
+.attendanceRecapTableScroller .statusPill {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-weight: var(--fw-ui);
 }
 
 .liveAttendanceTableScroller tbody tr:hover {
@@ -9336,53 +9858,83 @@ button {
 }
 
 .liveAttendanceDataRow.active,
-.liveAttendanceDataRow.active:hover {
+.liveAttendanceDataRow.active:hover,
+.attendanceRecapDataRow.active,
+.attendanceRecapDataRow.active:hover {
   background: linear-gradient(90deg, rgba(236, 253, 255, 0.42), rgba(255, 255, 255, 0.98) 42%, rgba(248, 251, 255, 0.86));
 }
 
-.liveAttendanceDataRow.active .rowExpandButton {
+.liveAttendanceDataRow.active .rowExpandButton,
+.attendanceRecapDataRow.active .rowExpandButton {
   color: var(--blue-ink);
-  border-color: rgba(34, 174, 202, 0.22);
-  background: rgba(230, 248, 252, 0.9);
+  border-color: transparent;
+  background: transparent;
 }
 
-.liveAttendanceDataRow.active .rowExpandButton svg {
+.liveAttendanceDataRow.active .rowExpandButton svg,
+.attendanceRecapDataRow.active .rowExpandButton svg {
   transform: rotate(180deg);
+}
+
+.liveAttendanceTableScroller .rowExpandButton,
+.attendanceRecapTableScroller .rowExpandButton {
+  width: 30px;
+  height: 30px;
+  border-color: transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: #64748b;
+}
+
+.liveAttendanceTableScroller .rowExpandButton:hover,
+.liveAttendanceTableScroller .rowExpandButton:focus-visible,
+.attendanceRecapTableScroller .rowExpandButton:hover,
+.attendanceRecapTableScroller .rowExpandButton:focus-visible {
+  color: var(--blue-ink);
+  background: transparent;
+  outline: 0;
+  transform: translateY(-1px);
 }
 
 .attendanceLiveRecap {
   position: relative;
   z-index: 1;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
-  gap: 8px;
-  padding: 14px;
-  border: 1px solid rgba(15, 23, 42, 0.05);
-  border-radius: 24px;
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 24px 70px -54px rgba(7, 24, 74, 0.72);
+  display: flex;
+  gap: 0;
+  padding: 8px 10px;
+  overflow-x: auto;
+  border: 1px solid rgba(15, 23, 42, 0.055);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 4px 14px -12px rgba(15, 23, 42, 0.18);
+  scrollbar-width: thin;
 }
 
 .attendanceLiveRecapItem {
   position: relative;
   display: grid;
-  gap: 3px;
-  min-width: 0;
-  min-height: 58px;
+  flex: 1 0 126px;
+  gap: 2px;
+  min-width: 126px;
+  min-height: 48px;
   align-content: center;
-  padding: 9px 11px 9px 14px;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: 15px;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(248, 251, 255, 0.94));
+  padding: 8px 14px 8px 16px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   overflow: hidden;
+}
+
+.attendanceLiveRecapItem + .attendanceLiveRecapItem {
+  border-left: 1px solid rgba(15, 23, 42, 0.065);
 }
 
 .attendanceLiveRecapItem::before {
   content: "";
   position: absolute;
-  left: 0;
-  top: 11px;
-  bottom: 11px;
+  left: 6px;
+  top: 13px;
+  bottom: 13px;
   width: 3px;
   border-radius: 999px;
   background: #cbd5e1;
@@ -9404,14 +9956,14 @@ button {
 .attendanceLiveRecapItem small {
   color: #738197;
   font-size: 0.62rem;
-  font-weight: 820;
+  font-weight: var(--fw-label);
   text-transform: uppercase;
 }
 
 .attendanceLiveRecapItem strong {
   color: var(--ops-ink);
-  font-size: 0.9rem;
-  font-weight: 800;
+  font-size: 0.88rem;
+  font-weight: var(--fw-number);
 }
 
 .recapEventText {
@@ -9452,7 +10004,7 @@ button {
 .recapEventText span {
   color: #718096;
   font-size: 0.66rem;
-  font-weight: 850;
+  font-weight: var(--fw-label);
   letter-spacing: 0;
   text-transform: uppercase;
 }
@@ -9471,13 +10023,13 @@ button {
 .recapEventText small {
   color: #718096;
   font-size: 0.74rem;
-  font-weight: 650;
+  font-weight: var(--fw-body);
 }
 
 .recapValidationSummary {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 10px;
   min-width: 0;
 }
 
@@ -9485,34 +10037,28 @@ button {
   display: inline-flex;
   align-items: center;
   max-width: 100%;
-  min-height: 29px;
+  min-height: 0;
   gap: 6px;
-  padding: 5px 9px;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: 999px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
   color: #526179;
-  background: rgba(248, 251, 255, 0.82);
+  background: transparent;
   font-size: 0.72rem;
-  font-weight: 760;
+  font-weight: var(--fw-ui);
   white-space: nowrap;
 }
 
 .recapValidationPill.valid {
-  border-color: rgba(31, 196, 106, 0.22);
   color: #07935f;
-  background: rgba(232, 252, 240, 0.85);
 }
 
 .recapValidationPill.pending {
-  border-color: rgba(245, 158, 11, 0.24);
   color: #a05b00;
-  background: rgba(255, 251, 235, 0.86);
 }
 
 .recapValidationPill.failed {
-  border-color: rgba(255, 59, 99, 0.22);
   color: #be123c;
-  background: rgba(255, 241, 242, 0.86);
 }
 
 .attendanceTimelineCell {
@@ -9870,37 +10416,28 @@ button {
 
 .liveAttendanceInlineDetail {
   display: grid;
-  gap: 14px;
+  gap: 0;
   min-width: 0;
-  padding: 16px 18px;
+  overflow: hidden;
   border: 1px solid rgba(34, 174, 202, 0.16);
-  border-radius: 20px;
+  border-radius: 18px;
   background:
-    radial-gradient(circle at 0 0, rgba(34, 174, 202, 0.08), transparent 34%),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(248, 251, 255, 0.95));
-  box-shadow: 0 22px 54px -42px rgba(7, 24, 74, 0.62);
+    linear-gradient(90deg, rgba(236, 253, 255, 0.7), rgba(255, 255, 255, 0.96) 24%, rgba(248, 251, 255, 0.98));
+  box-shadow: 0 18px 42px -38px rgba(7, 24, 74, 0.58);
   animation: liveAttendanceInlineIn 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-.liveAttendanceInlineHeader {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
 }
 
 .liveAttendanceInlineStatus {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  min-height: 30px;
-  padding: 0 11px;
+  min-height: 26px;
+  padding: 0 10px;
   border: 1px solid rgba(148, 163, 184, 0.16);
   border-radius: 999px;
   color: #526179;
   background: rgba(255, 255, 255, 0.76);
-  font-size: 0.76rem;
+  font-size: 0.72rem;
   font-weight: 620;
   white-space: nowrap;
 }
@@ -9950,33 +10487,25 @@ button {
 
 .liveAttendanceInlineGrid {
   display: grid;
-  grid-template-columns: minmax(0, 1.3fr) minmax(220px, 0.85fr) minmax(240px, 0.95fr);
+  grid-template-columns: minmax(360px, 1.04fr) minmax(320px, 1fr) minmax(300px, 0.92fr);
   gap: 0;
-  padding: 14px 0;
-  border-top: 1px solid rgba(15, 23, 42, 0.07);
-  border-bottom: 1px solid rgba(15, 23, 42, 0.07);
+  align-items: stretch;
 }
 
 .liveAttendanceInlinePanel {
   display: grid;
+  align-content: start;
   min-width: 0;
   gap: 10px;
-  padding: 0 18px;
+  min-height: 172px;
+  padding: 16px 18px;
   border: 0;
   border-radius: 0;
   background: transparent;
 }
 
-.liveAttendanceInlinePanel:first-child {
-  padding-left: 0;
-}
-
 .liveAttendanceInlinePanel + .liveAttendanceInlinePanel {
   border-left: 1px solid rgba(15, 23, 42, 0.07);
-}
-
-.liveAttendanceInlinePanel:last-child {
-  padding-right: 0;
 }
 
 .liveAttendanceInlinePanel > small {
@@ -9986,19 +10515,35 @@ button {
   text-transform: uppercase;
 }
 
-.liveAttendanceInlineMetrics,
-.liveAttendanceInlineSources {
-  display: grid;
-  gap: 8px;
+.liveAttendanceInlineSectionHeader {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
-.liveAttendanceInlineMetrics {
+.liveAttendanceInlineSectionHeader > small {
+  color: #738197;
+  font-size: 0.66rem;
+  font-weight: 560;
+  text-transform: uppercase;
+}
+
+.liveAttendanceInlineMetrics,
+.liveAttendanceInlineSources,
+.liveAttendanceInlineValidation {
+  display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+  align-items: start;
 }
 
 .liveAttendanceInlineMetrics > span,
-.liveAttendanceInlineSources > span {
+.liveAttendanceInlineSources > span,
+.liveAttendanceInlineValidation > span {
   display: grid;
+  align-content: start;
   min-width: 0;
   gap: 3px;
   padding-left: 10px;
@@ -10006,14 +10551,16 @@ button {
 }
 
 .liveAttendanceInlineMetrics small,
-.liveAttendanceInlineSources small {
+.liveAttendanceInlineSources small,
+.liveAttendanceInlineValidation small {
   color: #738197;
   font-size: 0.66rem;
   font-weight: 560;
 }
 
 .liveAttendanceInlineMetrics strong,
-.liveAttendanceInlineSources strong {
+.liveAttendanceInlineSources strong,
+.liveAttendanceInlineValidation strong {
   color: var(--ops-ink);
   font-size: 0.88rem;
   font-weight: 570;
@@ -10021,7 +10568,8 @@ button {
 }
 
 .liveAttendanceInlineMetrics em,
-.liveAttendanceInlineSources em {
+.liveAttendanceInlineSources em,
+.liveAttendanceInlineValidation em {
   overflow: hidden;
   color: #64748b;
   font-size: 0.73rem;
@@ -10029,14 +10577,42 @@ button {
   font-weight: 430;
   line-height: 1.35;
   text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.liveAttendanceInlineValidation > span.tone-valid {
+  border-left-color: rgba(16, 185, 129, 0.55);
+}
+
+.liveAttendanceInlineValidation > span.tone-pending {
+  border-left-color: rgba(245, 158, 11, 0.62);
+}
+
+.liveAttendanceInlineValidation > span.tone-failed {
+  border-left-color: rgba(244, 63, 94, 0.56);
+}
+
+.liveAttendanceInlineValidation > span.tone-missing {
+  border-left-color: rgba(148, 163, 184, 0.2);
+}
+
+.liveAttendanceInlineFooter {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  border-top: 1px solid rgba(15, 23, 42, 0.07);
+  background: rgba(255, 255, 255, 0.5);
 }
 
 .liveAttendanceInlineBreakdown {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px 12px;
-  padding-top: 10px;
-  border-top: 1px solid rgba(15, 23, 42, 0.06);
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 8px 14px;
 }
 
 .liveAttendanceInlineBreakdown > span {
@@ -10091,29 +10667,6 @@ button {
   color: #be123c;
 }
 
-.liveAttendanceInlinePanel.compact .attendanceValidationMetrics {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-  padding-left: 0;
-}
-
-.liveAttendanceInlineDetail .attendanceValidationCell {
-  gap: 10px;
-}
-
-.liveAttendanceInlineDetail .attendanceValidationLocation {
-  grid-template-columns: 32px minmax(0, 1fr);
-  align-items: center;
-  gap: 10px;
-}
-
-.liveAttendanceInlineDetail .attendanceValidationIcon {
-  width: 32px;
-  height: 32px;
-  border-radius: 13px;
-}
-
 .liveAttendanceInlineActions {
   display: flex;
   justify-content: flex-end;
@@ -10124,23 +10677,31 @@ button {
 @media (max-width: 1120px) {
   .liveAttendanceInlineGrid {
     grid-template-columns: 1fr;
-    gap: 14px;
+    gap: 0;
   }
 
   .liveAttendanceInlinePanel,
-  .liveAttendanceInlinePanel:first-child,
-  .liveAttendanceInlinePanel:last-child {
-    padding: 0;
+  .liveAttendanceInlinePanel:first-child {
+    min-height: 0;
+    padding: 14px 16px;
   }
 
   .liveAttendanceInlinePanel + .liveAttendanceInlinePanel {
-    padding-top: 14px;
     border-left: 0;
     border-top: 1px solid rgba(15, 23, 42, 0.07);
   }
 
+  .liveAttendanceInlineFooter {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .liveAttendanceInlineActions {
+    justify-content: flex-start;
+  }
+
   .liveAttendanceInlineBreakdown {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 12px;
   }
 }
 
@@ -10208,7 +10769,7 @@ button {
 .tableState strong {
   color: var(--ops-ink);
   font-size: 0.92rem;
-  font-weight: 800;
+  font-weight: var(--fw-ui-strong);
 }
 
 .tableState small {
@@ -10867,7 +11428,7 @@ button {
   border: 1px solid transparent;
   border-radius: 999px;
   font-size: 0.72rem;
-  font-weight: 800;
+  font-weight: var(--fw-ui);
 }
 
 .statusPill.valid {
@@ -10901,7 +11462,7 @@ button {
   max-width: 100%;
   color: #64748b;
   font-size: 0.78rem;
-  font-weight: 850;
+  font-weight: var(--fw-ui-strong);
   line-height: 1.25;
 }
 
@@ -12177,7 +12738,15 @@ button {
   }
 
   .masterCategoryStrip {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    display: flex;
+    align-items: center;
+    width: 100%;
+    overflow-x: auto;
+    padding: 2px 2px 8px;
+  }
+
+  .masterCategoryButton {
+    flex: 0 0 auto;
   }
 
   .filterPanel {
@@ -12438,47 +13007,69 @@ button {
   }
 
   .attendanceDatePopover {
-    width: min(100%, calc(100vw - 40px));
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    top: auto;
+    bottom: 12px;
+    width: auto;
+    max-height: min(76vh, 620px);
     grid-template-columns: 1fr;
+    overflow: auto;
+    border-radius: 20px;
+    animation: datePickerSheetIn 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .dateModePickerPopover.rangeMode {
+    width: auto;
   }
 
   .attendanceDateSidebar {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    padding: 12px;
+    gap: 2px 4px;
+    padding: 8px;
     border-right: 0;
     border-bottom: 1px solid rgba(15, 23, 42, 0.05);
   }
 
   .attendanceDateSidebar button {
-    min-height: 38px;
-    padding: 0 12px;
-    border-radius: 12px;
-    font-size: 0.78rem;
+    min-height: 32px;
+    padding: 6px 10px;
+    border-radius: 10px;
+    font-size: 0.76rem;
+    line-height: 1.14;
   }
 
   .attendanceDateCalendar {
-    padding: 16px;
+    padding: 12px;
+  }
+
+  .dateModePickerPopover.rangeMode .dateModePickerMonths,
+  .dateModePickerMonths {
+    grid-template-columns: 1fr;
+    gap: 14px;
   }
 
   .attendanceDateCalendarHeader {
-    grid-template-columns: 32px 32px minmax(0, 1fr) 32px 32px;
+    grid-template-columns: 28px 28px minmax(0, 1fr) 28px 28px;
   }
 
   .attendanceDateGrid button {
-    width: 32px;
-    height: 32px;
+    width: 30px;
+    height: 30px;
   }
 
   .attendanceLiveRecap {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-    padding: 10px;
-    border-radius: 20px;
+    gap: 0;
+    padding: 8px;
+    border-radius: 18px;
   }
 
   .attendanceLiveRecapItem {
-    min-height: 54px;
-    padding: 8px 10px 8px 13px;
+    flex-basis: 118px;
+    min-width: 118px;
+    min-height: 46px;
+    padding: 8px 12px 8px 15px;
   }
 
   .rolePermissionSummary {
@@ -12531,6 +13122,7 @@ button {
   .masterDetailDialog,
   .fieldAttendanceDialog,
   .faceEnrollmentDialog,
+  .overtimeRequestDialog,
   .locationMapDialog {
     display: flex;
     width: 100%;
@@ -13056,6 +13648,57 @@ button {
 
   .attendanceTimelineCopy {
     padding-top: 0;
+  }
+
+  .overtimeRequestHeader {
+    padding: 30px 18px 14px;
+  }
+
+  .overtimeRequestHeader::before {
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    width: 42px;
+    height: 4px;
+    border-radius: 999px;
+    background: rgba(100, 116, 139, 0.34);
+    content: "";
+    transform: translateX(-50%);
+  }
+
+  .overtimeRequestHeader h2 {
+    font-size: 1.08rem;
+  }
+
+  .overtimeRequestHeader p {
+    font-size: 0.74rem;
+  }
+
+  .overtimeRequestBody {
+    grid-template-columns: 1fr;
+    gap: 14px;
+    padding: 14px 18px 10px;
+  }
+
+  .overtimeRequestGrid,
+  .overtimeRequestPreview dl {
+    grid-template-columns: 1fr;
+  }
+
+  .overtimeRequestPreview dl > div,
+  .overtimeRequestPreview dl > div:nth-child(even),
+  .overtimeRequestPreview dl > div:nth-last-child(-n + 2) {
+    border-right: 0;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.13);
+  }
+
+  .overtimeRequestPreview dl > div:last-child {
+    border-bottom: 0;
+  }
+
+  .overtimeRequestActions {
+    grid-template-columns: 1fr;
+    padding: 12px 18px max(14px, env(safe-area-inset-bottom));
   }
 
   .attendanceSettlementCell {
@@ -14732,7 +15375,7 @@ button {
 .kioskEmptyCopy p,
 .kioskEmptyState p,
 .kioskPageShell .kioskEmptyCopy p {
-  font-weight: 500;
+  font-weight: var(--fw-body);
 }
 
 .kioskPageShell .kioskEmptySteps {
@@ -14986,4 +15629,96 @@ button {
     gap: 8px;
     padding: 12px 14px max(14px, env(safe-area-inset-bottom));
   }
+}
+
+/* DMS typography foundation: keep operational UI readable without making every value feel bold. */
+.appShell .topbar h1 {
+  font-weight: var(--fw-display);
+}
+
+.appShell .topbar p,
+.appShell .inlinePageStats,
+.appShell .tableHeader p,
+.appShell .dialogHeader p,
+.appShell .dialogCompactHeader p,
+.appShell .biofingerDrawerSubline,
+.appShell .biofingerDeviceDialog .dialogCompactHeader p,
+.appShell .attendanceSettlementCell > small,
+.appShell .foundationSelectOptionText small,
+.appShell .formSegmentedOption small,
+.appShell .formSwitchCopy small {
+  font-weight: var(--fw-body);
+}
+
+.appShell .tableHeader h2,
+.appShell .tableHeader h3,
+.appShell .dialogHeader h2,
+.appShell .dialogCompactHeader h2,
+.appShell .biofingerDeviceDialog .dialogCompactHeader h2,
+.appShell .biofingerDrawerHeader h2,
+.appShell .brandText strong {
+  font-weight: var(--fw-heading);
+}
+
+.appShell .primaryButton,
+.appShell .secondaryButton,
+.appShell .foundationRefreshButton,
+.appShell .dialogEyebrow,
+.appShell .eyebrowLine,
+.appShell .crumbLine,
+.appShell .formSegmentedOption strong,
+.appShell .formSwitchCopy strong,
+.appShell .tableState strong,
+.appShell .guideRelatedPanel strong,
+.appShell .biofingerScopeStats strong,
+.appShell .biofingerDrawerHeaderStats strong,
+.appShell .attendanceSettlementHeader strong,
+.appShell .attendanceSettlementMetric strong {
+  font-weight: var(--fw-ui-strong);
+}
+
+.appShell .metricCard strong,
+.appShell .metricValue,
+.appShell .cycleRing strong,
+.appShell .attendanceLiveRecap strong {
+  font-weight: var(--fw-number);
+}
+
+.appShell .metricCard small,
+.appShell .biofingerScopeStats span,
+.appShell .biofingerDrawerHeaderStats span,
+.appShell .biofingerDrawerSection h3,
+.appShell .formField label,
+.appShell .attendanceSettlementMetric span {
+  font-weight: var(--fw-label);
+}
+
+.appShell .metricCard em,
+.appShell .navItem,
+.appShell .masterCategoryButton,
+.appShell .statusPill,
+.appShell .statusChoiceButton,
+.appShell .foundationSelectButton,
+.appShell .foundationSelectOptionText strong,
+.appShell .formField input,
+.appShell .formField select,
+.appShell .formField .foundationSelectButton,
+.appShell .uiInput,
+.appShell .uiSelectTrigger,
+.appShell .rowActionMenuPanel button {
+  font-weight: var(--fw-ui);
+}
+
+.appShell .uiDataTableScroller td strong,
+.appShell .uiDataTableScroller .tableTextPrimary,
+.appShell .liveAttendanceTableScroller .tableTextPrimary,
+.appShell .tableTextPrimary {
+  font-weight: var(--fw-body-strong);
+}
+
+.appShell .uiDataTableScroller td small,
+.appShell .uiDataTableScroller .tableTextSecondary,
+.appShell .liveAttendanceTableScroller .tableTextSecondary,
+.appShell .tableTextSecondary {
+  font-weight: var(--fw-body);
 }

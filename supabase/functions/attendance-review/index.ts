@@ -1,11 +1,14 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0"
 
-type AttendanceReviewAction = "approve" | "reject" | "reset_day" | "correct_checkout"
+type AttendanceReviewAction = "approve" | "reject" | "reset_day" | "correct_checkin" | "correct_checkout"
 
 interface AttendanceReviewPayload {
   id?: string
   employeeId?: string
   attendanceDate?: string
+  checkInDate?: string
+  checkInTime?: string
+  checkOutDate?: string
   checkOutTime?: string
   notes?: string
 }
@@ -31,11 +34,26 @@ function appendReviewNote(existing: unknown, note: string) {
   return [String(existing || "").trim(), note].filter(Boolean).join("\n")
 }
 
-function buildJakartaDateTime(attendanceDate: string, time: string) {
-  const normalizedTime = time.trim()
-  assertPayload(/^\d{2}:\d{2}$/.test(normalizedTime), "Jam pulang wajib format HH:mm.")
+function shiftDateKey(dateKey: string, offsetDays: number) {
+  const [year, month, day] = dateKey.split("-").map((value) => Number(value))
+  const base = new Date(Date.UTC(year, month - 1, day + offsetDays))
+  return base.toISOString().slice(0, 10)
+}
+
+function parseTimeMinutes(value: unknown) {
+  const match = String(value || "").match(/^(\d{1,2}):(\d{2})/)
+  if (!match) return null
+  const hour = Number(match[1])
+  const minute = Number(match[2])
+  if (!Number.isFinite(hour) || !Number.isFinite(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) return null
+  return hour * 60 + minute
+}
+
+function buildJakartaDateTime(attendanceDate: string, time: string, label: string) {
+  const normalizedTime = String(time || "").trim()
+  assertPayload(/^\d{2}:\d{2}$/.test(normalizedTime), `${label} wajib format HH:mm.`)
   const [hour, minute] = normalizedTime.split(":").map((value) => Number(value))
-  assertPayload(hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59, "Jam pulang tidak valid.")
+  assertPayload(hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59, `${label} tidak valid.`)
   return `${attendanceDate}T${normalizedTime}:00+07:00`
 }
 
@@ -67,7 +85,7 @@ Deno.serve(async (request) => {
     const action = body.action
     const payload = body.payload || {}
 
-    assertPayload(action === "approve" || action === "reject" || action === "reset_day" || action === "correct_checkout", "Action review tidak valid.")
+    assertPayload(action === "approve" || action === "reject" || action === "reset_day" || action === "correct_checkin" || action === "correct_checkout", "Action review tidak valid.")
 
     const token = authorization.replace(/^Bearer\s+/i, "")
     const { data: authData, error: authError } = await userClient.auth.getUser(token)
@@ -101,7 +119,7 @@ Deno.serve(async (request) => {
 
       const { data: logs, error: logsError } = await adminClient
         .from("attendance_logs")
-        .select("id, employee_id, attendance_date, event_type, face_snapshot_path, status")
+        .select("id, employee_id, attendance_date, event_type, face_snapshot_path, status, biofinger_event_id")
         .eq("employee_id", employeeId)
         .eq("attendance_date", attendanceDate)
 
@@ -117,6 +135,41 @@ Deno.serve(async (request) => {
         if (storageError) throw storageError
       }
 
+      const deletedLogIds = logs.map((log) => String(log.id)).filter(Boolean)
+      const biofingerEventIds = logs.map((log) => String(log.biofinger_event_id || "")).filter(Boolean)
+      const biofingerResetNote = appendReviewNote(
+        "",
+        `Direset HR ${attendanceDate}. Raw event lama diabaikan agar tidak otomatis membuat ulang absensi yang sudah direset.`,
+      )
+
+      if (biofingerEventIds.length > 0) {
+        const { error: rawEventError } = await adminClient
+          .from("biofinger_attendance_events")
+          .update({
+            import_status: "ignored",
+            converted_attendance_log_id: null,
+            notes: biofingerResetNote,
+            updated_at: new Date().toISOString(),
+          })
+          .in("id", biofingerEventIds)
+
+        if (rawEventError) throw rawEventError
+      }
+
+      if (deletedLogIds.length > 0) {
+        const { error: linkedRawEventError } = await adminClient
+          .from("biofinger_attendance_events")
+          .update({
+            import_status: "ignored",
+            converted_attendance_log_id: null,
+            notes: biofingerResetNote,
+            updated_at: new Date().toISOString(),
+          })
+          .in("converted_attendance_log_id", deletedLogIds)
+
+        if (linkedRawEventError) throw linkedRawEventError
+      }
+
       const { error: deleteError } = await adminClient
         .from("attendance_logs")
         .delete()
@@ -124,6 +177,12 @@ Deno.serve(async (request) => {
         .eq("attendance_date", attendanceDate)
 
       if (deleteError) throw deleteError
+
+      const { error: summaryRefreshError } = await adminClient.rpc("refresh_attendance_daily_summary", {
+        target_employee_id: employeeId,
+        target_attendance_date: attendanceDate,
+      })
+      if (summaryRefreshError) throw summaryRefreshError
 
       const { error: refreshError } = await adminClient.rpc("refresh_employee_payroll_cycles", { target_employee_id: employeeId })
       if (refreshError) throw refreshError
@@ -140,6 +199,7 @@ Deno.serve(async (request) => {
           employee_id: employeeId,
           deleted_count: logs.length,
           deleted_ids: logs.map((log) => log.id),
+          biofinger_raw_events_ignored: biofingerEventIds.length,
           snapshot_paths: snapshotPaths,
           notes: payload.notes?.trim() || "",
           source: "edge-function",
@@ -154,6 +214,133 @@ Deno.serve(async (request) => {
       })
     }
 
+    if (action === "correct_checkin") {
+      assertPayload(payload.employeeId, "ID karyawan wajib ada.")
+      assertPayload(payload.attendanceDate && /^\d{4}-\d{2}-\d{2}$/.test(payload.attendanceDate), "Tanggal absensi wajib format YYYY-MM-DD.")
+      assertPayload(payload.checkInTime, "Jam masuk koreksi wajib ada.")
+
+      const employeeId = payload.employeeId as string
+      const attendanceDate = payload.attendanceDate as string
+      const checkInDate = payload.checkInDate && /^\d{4}-\d{2}-\d{2}$/.test(payload.checkInDate)
+        ? payload.checkInDate
+        : attendanceDate
+      const checkInAt = buildJakartaDateTime(checkInDate, payload.checkInTime as string, "Jam masuk")
+      const reviewNote = payload.notes?.trim()
+
+      assertPayload(checkInDate === attendanceDate, "Tanggal masuk harus sama dengan tanggal absensi.")
+
+      const { data: employee, error: employeeError } = await adminClient
+        .from("employees")
+        .select("id, work_location_id")
+        .eq("id", employeeId)
+        .maybeSingle()
+
+      if (employeeError) throw employeeError
+      if (!employee) return jsonResponse({ error: "Data karyawan tidak ditemukan." }, 404)
+
+      const { data: dayLogs, error: dayLogsError } = await adminClient
+        .from("attendance_logs")
+        .select("id, employee_id, app_user_id, work_location_id, attendance_date, event_type, event_at, status, notes")
+        .eq("employee_id", employeeId)
+        .eq("attendance_date", attendanceDate)
+
+      if (dayLogsError) throw dayLogsError
+
+      const existingCheckIn = dayLogs?.find((log) => log.event_type === "check_in")
+      const existingCheckOut = dayLogs?.find((log) => log.event_type === "check_out" && log.status !== "rejected")
+
+      const checkInMs = new Date(checkInAt).getTime()
+      assertPayload(Number.isFinite(checkInMs), "Jam masuk tidak valid.")
+      assertPayload(checkInMs <= Date.now() + 5 * 60 * 1000, "Jam masuk tidak boleh melebihi waktu sekarang.")
+
+      if (existingCheckOut?.event_at) {
+        const checkOutMs = new Date(String(existingCheckOut.event_at)).getTime()
+        assertPayload(Number.isFinite(checkOutMs) && checkInMs < checkOutMs, "Jam masuk harus sebelum jam pulang.")
+        assertPayload(checkOutMs - checkInMs <= 24 * 60 * 60 * 1000, "Durasi koreksi terlalu panjang. Cek ulang tanggal dan jam masuk.")
+      }
+
+      const { data: appUser, error: appUserError } = await adminClient
+        .from("app_users")
+        .select("id")
+        .eq("employee_id", employeeId)
+        .maybeSingle()
+
+      if (appUserError) throw appUserError
+
+      const correctionNote = reviewNote
+        ? `HR koreksi check-in ${checkInDate} ${payload.checkInTime}: ${reviewNote}`
+        : `HR koreksi check-in ${checkInDate} ${payload.checkInTime} tanpa catatan tambahan.`
+
+      const nowIso = new Date().toISOString()
+      const { data: checkIn, error: checkInError } = await adminClient
+        .from("attendance_logs")
+        .upsert({
+          employee_id: employeeId,
+          app_user_id: existingCheckIn?.app_user_id || existingCheckOut?.app_user_id || appUser?.id || null,
+          work_location_id: existingCheckIn?.work_location_id || existingCheckOut?.work_location_id || employee.work_location_id || null,
+          attendance_date: attendanceDate,
+          event_type: "check_in",
+          event_at: checkInAt,
+          gps_status: "missing",
+          face_status: "not_required",
+          status: "valid",
+          workday_counted: Boolean(existingCheckOut),
+          source: "management",
+          attendance_media: "manual",
+          notes: appendReviewNote(existingCheckIn?.notes, correctionNote),
+          updated_at: nowIso,
+        }, { onConflict: "employee_id,attendance_date,event_type" })
+        .select("id, employee_id, attendance_date, event_type, status, workday_counted, notes")
+        .single()
+
+      if (checkInError) throw checkInError
+
+      if (existingCheckOut) {
+        const { error: checkOutUpdateError } = await adminClient
+          .from("attendance_logs")
+          .update({
+            notes: appendReviewNote(existingCheckOut.notes, correctionNote),
+            updated_at: nowIso,
+          })
+          .eq("id", existingCheckOut.id)
+
+        if (checkOutUpdateError) throw checkOutUpdateError
+      }
+
+      const { error: summaryRefreshError } = await adminClient.rpc("refresh_attendance_daily_summary", {
+        target_employee_id: employeeId,
+        target_attendance_date: attendanceDate,
+      })
+      if (summaryRefreshError) throw summaryRefreshError
+
+      const { error: refreshError } = await adminClient.rpc("refresh_employee_payroll_cycles", { target_employee_id: employeeId })
+      if (refreshError) throw refreshError
+
+      await adminClient.from("audit_logs").insert({
+        actor_user_id: actor.id,
+        actor_name: actor.full_name,
+        action: "Correct missing checkin",
+        target_table: "attendance_logs",
+        target_id: `${employeeId}:${attendanceDate}`,
+        status: "success",
+        metadata: {
+          attendance_date: attendanceDate,
+          employee_id: employeeId,
+          check_in_id: checkIn.id,
+          check_out_id: existingCheckOut?.id || null,
+          check_in_at: checkInAt,
+          check_in_date: checkInDate,
+          source: "edge-function",
+        },
+      })
+
+      return jsonResponse({
+        ok: true,
+        check_in: checkIn,
+        attendance_date: attendanceDate,
+      })
+    }
+
     if (action === "correct_checkout") {
       assertPayload(payload.employeeId, "ID karyawan wajib ada.")
       assertPayload(payload.attendanceDate && /^\d{4}-\d{2}-\d{2}$/.test(payload.attendanceDate), "Tanggal absensi wajib format YYYY-MM-DD.")
@@ -161,8 +348,42 @@ Deno.serve(async (request) => {
 
       const employeeId = payload.employeeId as string
       const attendanceDate = payload.attendanceDate as string
-      const checkOutAt = buildJakartaDateTime(attendanceDate, payload.checkOutTime as string)
+      const checkOutDate = payload.checkOutDate && /^\d{4}-\d{2}-\d{2}$/.test(payload.checkOutDate)
+        ? payload.checkOutDate
+        : attendanceDate
+      const checkOutAt = buildJakartaDateTime(checkOutDate, payload.checkOutTime as string, "Jam pulang")
       const reviewNote = payload.notes?.trim()
+
+      const { data: employee, error: employeeError } = await adminClient
+        .from("employees")
+        .select("shift_id")
+        .eq("id", employeeId)
+        .maybeSingle()
+
+      if (employeeError) throw employeeError
+
+      let overnightShift = false
+      if (employee?.shift_id) {
+        const { data: shift, error: shiftError } = await adminClient
+          .from("shifts")
+          .select("start_time, end_time")
+          .eq("id", employee.shift_id)
+          .maybeSingle()
+
+        if (shiftError) throw shiftError
+
+        const startMinutes = parseTimeMinutes(shift?.start_time)
+        const endMinutes = parseTimeMinutes(shift?.end_time)
+        overnightShift = startMinutes !== null && endMinutes !== null && endMinutes <= startMinutes
+      }
+
+      const maxAllowedCheckoutDate = overnightShift ? shiftDateKey(attendanceDate, 1) : attendanceDate
+      assertPayload(
+        checkOutDate === attendanceDate || (overnightShift && checkOutDate === maxAllowedCheckoutDate),
+        overnightShift
+          ? "Tanggal pulang shift malam hanya boleh tanggal masuk atau tanggal berikutnya."
+          : "Tanggal pulang harus sama dengan tanggal absensi untuk shift reguler.",
+      )
 
       const { data: checkIn, error: checkInError } = await adminClient
         .from("attendance_logs")
@@ -179,10 +400,12 @@ Deno.serve(async (request) => {
       const checkInAt = new Date(String(checkIn.event_at || "")).getTime()
       const checkOutMs = new Date(checkOutAt).getTime()
       assertPayload(Number.isFinite(checkInAt) && Number.isFinite(checkOutMs) && checkOutMs > checkInAt, "Jam pulang harus setelah jam masuk.")
+      assertPayload(checkOutMs <= Date.now() + 5 * 60 * 1000, "Jam pulang tidak boleh melebihi waktu sekarang.")
+      assertPayload(checkOutMs - checkInAt <= 24 * 60 * 60 * 1000, "Durasi koreksi terlalu panjang. Cek ulang tanggal dan jam pulang.")
 
       const correctionNote = reviewNote
-        ? `HR koreksi checkout ${payload.checkOutTime}: ${reviewNote}`
-        : `HR koreksi checkout ${payload.checkOutTime} tanpa catatan tambahan.`
+        ? `HR koreksi checkout ${checkOutDate} ${payload.checkOutTime}: ${reviewNote}`
+        : `HR koreksi checkout ${checkOutDate} ${payload.checkOutTime} tanpa catatan tambahan.`
 
       const { data: checkOut, error: checkOutError } = await adminClient
         .from("attendance_logs")
@@ -198,6 +421,7 @@ Deno.serve(async (request) => {
           status: "valid",
           workday_counted: false,
           source: "management",
+          attendance_media: "manual",
           notes: correctionNote,
           updated_at: new Date().toISOString(),
         }, { onConflict: "employee_id,attendance_date,event_type" })
@@ -218,6 +442,12 @@ Deno.serve(async (request) => {
 
       if (checkInUpdateError) throw checkInUpdateError
 
+      const { error: summaryRefreshError } = await adminClient.rpc("refresh_attendance_daily_summary", {
+        target_employee_id: employeeId,
+        target_attendance_date: attendanceDate,
+      })
+      if (summaryRefreshError) throw summaryRefreshError
+
       const { error: refreshError } = await adminClient.rpc("refresh_employee_payroll_cycles", { target_employee_id: employeeId })
       if (refreshError) throw refreshError
 
@@ -234,6 +464,7 @@ Deno.serve(async (request) => {
           check_in_id: checkIn.id,
           check_out_id: checkOut.id,
           check_out_at: checkOutAt,
+          check_out_date: checkOutDate,
           source: "edge-function",
         },
       })
@@ -305,6 +536,12 @@ Deno.serve(async (request) => {
         if (checkInUpdateError) throw checkInUpdateError
       }
     }
+
+    const { error: summaryRefreshError } = await adminClient.rpc("refresh_attendance_daily_summary", {
+      target_employee_id: attendance.employee_id,
+      target_attendance_date: attendance.attendance_date,
+    })
+    if (summaryRefreshError) throw summaryRefreshError
 
     const { error: refreshError } = await adminClient.rpc("refresh_employee_payroll_cycles", { target_employee_id: attendance.employee_id })
     if (refreshError) throw refreshError

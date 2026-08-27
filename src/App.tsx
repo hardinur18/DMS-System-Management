@@ -63,9 +63,10 @@ import dmsLogo from "../assets/brand/dms-logo.jpeg"
 import { CategoryTabs } from "./components/category-tabs"
 import { ConfirmDialog } from "./components/confirm-dialog"
 import { ClickableTableRow, DataTablePagination, RowActionButton, RowActionMenu, RowActionMenuItem, TableNumberCell, TableText } from "./components/data-table"
+import { DateModePicker, type DateModePickerMode } from "./components/date-mode-picker"
 import { FoundationDialog, FoundationDialogCloseButton } from "./components/foundation-dialog"
 import { FoundationRefreshButton } from "./components/foundation-refresh-button"
-import { FoundationSkeleton, FoundationTableSkeletonRows } from "./components/foundation-loading"
+import { FoundationSkeleton, FoundationTableSkeletonRows, useFoundationCachedData } from "./components/foundation-loading"
 import { FoundationSelect } from "./components/foundation-select"
 import { DateFormField, SegmentedFormField, SelectFormField, SwitchFormField, TextFormField } from "./components/form-field"
 import { AutoStatusBadge, StatusBadge as UiStatusBadge } from "./components/status-badge"
@@ -115,18 +116,6 @@ interface NavItem {
   group: string
 }
 
-interface EmployeeRow {
-  id: string
-  name: string
-  division: string
-  location: string
-  attendance: AttendanceStatus
-  faceScore: number | null
-  cycleDays: number
-  payrollStatus: PayrollStatus
-  kasbon: number
-}
-
 interface AttendanceMonitorRow {
   id: string
   employeeId: string
@@ -140,6 +129,8 @@ interface AttendanceMonitorRow {
   shiftName: string
   shiftStartTime: string
   shiftEndTime: string
+  shiftLateToleranceMinutes: number
+  shiftEarlyLeaveToleranceMinutes: number
   attendanceDate: string
   eventAt: string
   checkInId: string
@@ -297,6 +288,8 @@ interface FieldReadinessRow {
 }
 
 type OvertimeStatus = "draft" | "pending" | "approved" | "rejected"
+type OvertimeRequestSource = "auto" | "planned" | "manual"
+type OvertimeCalculationBasis = "extra_after_shift" | "full_duration"
 
 interface OvertimeReviewRow {
   id: string
@@ -315,9 +308,25 @@ interface OvertimeReviewRow {
   rateAmount: number
   totalAmount: number
   dayType: "weekday" | "sunday" | "holiday"
+  overtimeBasis: OvertimeCalculationBasis
   status: OvertimeStatus
+  requestSource: OvertimeRequestSource
+  plannedStartAt: string
+  plannedEndAt: string
+  plannedMinutes: number
+  requestReason: string
+  requestedAt: string
+  matchedAttendance: boolean
   componentName: string
   notes: string
+}
+
+interface OvertimeRequestSubmitPayload {
+  employeeId: string
+  overtimeDate: string
+  plannedStartTime: string
+  plannedEndTime: string
+  reason: string
 }
 
 interface OperationsFoundationData {
@@ -329,8 +338,28 @@ interface OperationsFoundationData {
   overtime: OvertimeReviewRow[]
 }
 
-type AttendanceRecapRange = "day" | "week" | "month"
-type AttendanceDateMode = "today" | "yesterday" | "last7" | "last30" | "day" | "week" | "month" | "year" | "all"
+function createEmptyOperationsFoundationData(): OperationsFoundationData {
+  return { rows: [], allRows: [], locations: [], fieldReadiness: [], reviews: [], overtime: [] }
+}
+
+type AttendanceDateMode = DateModePickerMode
+type AttendanceLoadScope = "full" | "attendance-recap"
+
+interface AttendanceLoadOptions {
+  startDate?: string
+  endDate?: string
+  refreshBackend?: boolean
+  refreshPayroll?: boolean
+  scope?: AttendanceLoadScope
+}
+
+function getOperationsFoundationCacheKey(
+  selectedDate: string,
+  range: Pick<AttendanceLoadOptions, "startDate" | "endDate">,
+  scope: AttendanceLoadScope,
+) {
+  return `${scope}:${selectedDate}:${range.startDate || selectedDate}:${range.endDate || selectedDate}`
+}
 
 interface FieldAttendanceSubmitPayload {
   mode?: "field" | "kiosk"
@@ -450,45 +479,7 @@ interface EmployeePortalData {
 
 type ModuleViewId = Exclude<ViewId, "dashboard" | "kiosk-mode" | "biofinger" | "master-data" | "users" | "role-permission" | "audit-log" | "guide" | "profile">
 
-interface ModuleKpi {
-  label: string
-  value: string | number
-  detail: string
-  icon: LucideIcon
-  tone: "default" | "blue" | "green" | "amber" | "rose" | "violet"
-}
-
-interface ModuleFormField {
-  label: string
-  placeholder: string
-  type?: "text" | "number" | "date"
-}
-
-interface ModuleConfig {
-  subtitle: string
-  kpis: ModuleKpi[]
-  filters: string[]
-  formTitle: string
-  formDescription: string
-  formFields: ModuleFormField[]
-  tableTitle: string
-  tableDescription: string
-  columns: string[]
-  rows: Array<Record<string, string | number>>
-}
-
 type UserStatus = "active" | "invited" | "locked"
-
-interface ManagementUser {
-  id: string
-  name: string
-  email: string
-  role: string
-  division: string
-  lastLogin: string
-  twoFactor: string
-  status: UserStatus
-}
 
 type TwoFactorStatus = "enabled" | "pending" | "disabled"
 type PasswordActionType = "setup" | "reset"
@@ -589,6 +580,20 @@ interface AttendancePolicyOption {
   requireLocation: boolean
   allowedMedia: string[]
   isActive: boolean
+}
+
+interface EmployeeDirectoryData {
+  rows: EmployeeDirectoryRow[]
+  divisions: EmployeeOption[]
+  positions: EmployeeOption[]
+  locations: EmployeeOption[]
+  shifts: EmployeeOption[]
+  policies: AttendancePolicyOption[]
+  kioskSchemaReady: boolean
+}
+
+function createEmptyEmployeeDirectoryData(): EmployeeDirectoryData {
+  return { rows: [], divisions: [], positions: [], locations: [], shifts: [], policies: [], kioskSchemaReady: true }
 }
 
 interface AttendanceKioskOption {
@@ -777,13 +782,10 @@ interface BiofingerConversionSummary {
   employeesRefreshed: number
 }
 
-type BiofingerDataUpdater = BiofingerData | ((current: BiofingerData) => BiofingerData)
-
 function createEmptyBiofingerData(): BiofingerData {
   return { schemaReady: true, devices: [], links: [], events: [], eventCount: 0, eventSummary: [], commands: [], employees: [], workLocations: [] }
 }
 
-let biofingerDataCache: BiofingerData | null = null
 let biofingerSelectedDeviceCache = ""
 let biofingerActiveTabCache: BiofingerWorkspaceTab = "overview"
 let biofingerStatusFilterCache: "all" | BiofingerLinkStatus = "all"
@@ -946,10 +948,13 @@ interface MasterDataRow {
   radiusM?: number
   startTime?: string
   endTime?: string
+  lateToleranceMinutes?: number
+  earlyLeaveToleranceMinutes?: number
   componentType?: string
   calculationUnit?: string
   rateAmount?: number
   dayType?: string
+  overtimeBasis?: string
   autoDetectOvertime?: boolean
   requiresApproval?: boolean
   isSystem?: boolean
@@ -969,10 +974,13 @@ interface MasterDataFormValues {
   radiusM: string
   startTime: string
   endTime: string
+  lateToleranceMinutes: string
+  earlyLeaveToleranceMinutes: string
   componentType: "earning" | "deduction"
   calculationUnit: "fixed" | "hour" | "day"
   rateAmount: string
   dayType: "all" | "weekday" | "sunday" | "holiday"
+  overtimeBasis: OvertimeCalculationBasis
   autoDetectOvertime: boolean
   requiresApproval: boolean
   status: string
@@ -1168,7 +1176,7 @@ const guideArticles: GuideArticle[] = [
       "Jika nama user dari mesin belum ikut masuk, klik Sync User Mesin untuk meminta AT-301 mengirim USERINFO lewat ADMS.",
       "Klik Refresh Data di DMS untuk menarik ulang data yang sudah masuk ke Supabase.",
       "Mapping User ID mesin ke karyawan DMS sebelum raw event dipakai sebagai absensi payroll.",
-      "Klik Proses Absensi untuk mengubah event mapped menjadi attendance final, atau aktifkan auto-convert di receiver VPS.",
+      "Receiver VPS otomatis mengubah event mapped menjadi attendance final. Gunakan Proses Absensi hanya untuk fallback manual.",
       "Jika auto-sync user di receiver diaktifkan, receiver akan meminta USERINFO berkala saat mesin polling ADMS.",
     ],
     checks: [
@@ -1310,7 +1318,15 @@ const guideArticles: GuideArticle[] = [
     tags: ["gaji", "cycle", "finance"],
     steps: [
       "Pastikan rekap absensi dan approval periode sudah bersih.",
-      "Cek komponen gaji, lembur, bonus, potongan, dan kasbon.",
+      "Pastikan komponen Lembur Weekday/Minggu aktif, unit Per Jam, dan Auto Detect Lembur menyala di Master Data > Komponen Gaji.",
+      "Set basis hitung lembur: Weekday memakai Setelah Shift, sedangkan Minggu/Hari Libur memakai Full Durasi Kerja.",
+      "Untuk lembur terencana, buka Payroll > Request Lembur, pilih karyawan, tanggal, jam rencana, dan alasan.",
+      "Request lembur hanya menandai rencana; pembayaran tetap menunggu checkout real dan settlement absensi.",
+      "Untuk Minggu/libur, karyawan tetap scan masuk dan pulang. Payable dihitung dari durasi kerja aktual.",
+      "Klik Refresh Data di Payroll untuk mencocokkan request dengan attendance settlement terbaru.",
+      "Review Approval Lembur: sistem menampilkan rencana, realisasi, basis hitung, dan estimasi bayar.",
+      "Approve/reject menit lembur yang dibayar beserta catatan HR/Finance.",
+      "Cek komponen gaji, bonus, potongan, dan kasbon.",
       "Review draft payroll per karyawan sebelum lock.",
       "Lock payroll hanya setelah HR/Finance setuju.",
       "Tandai paid setelah pembayaran benar-benar dilakukan.",
@@ -1318,11 +1334,17 @@ const guideArticles: GuideArticle[] = [
     checks: [
       "Tidak ada absensi pending di periode payroll.",
       "Komponen gaji aktif sesuai master data.",
+      "Request lembur terencana sudah punya realisasi checkout atau sudah ditolak bila batal.",
+      "Request Minggu/libur sudah terbaca sebagai full durasi kerja aktual.",
+      "Lembur pending sudah di-approve atau reject sebelum lock payroll.",
       "Kasbon dan potongan sudah masuk perhitungan.",
       "Payroll locked tidak berubah tanpa proses unlock yang diaudit.",
     ],
     pitfalls: [
       "Jangan lock payroll sebelum approval absensi selesai.",
+      "Jangan approve pembayaran lembur sebelum ada checkout real dari Biofinger/app lapangan.",
+      "Jangan membayar pulang lewat sebagai lembur jika total jam kerja aktual masih kurang dari kewajiban shift.",
+      "Jangan memakai basis Full Durasi Kerja untuk Semua Hari karena bisa membuat hari kerja normal terhitung full lembur.",
       "Jangan edit manual nominal tanpa catatan dan jejak audit.",
     ],
     related: ["attendance-requests", "attendance-review", "cash-advance"],
@@ -1543,24 +1565,6 @@ function canAccessView(profile: AppAccessProfile, view: ViewId) {
   return !permission || profile.permissions.includes(permission)
 }
 
-const employees: EmployeeRow[] = [
-  { id: "EMP-001", name: "Rizky Pratama", division: "Produksi", location: "Gudang Utama", attendance: "valid", faceScore: 98, cycleDays: 26, payrollStatus: "ready", kasbon: 350000 },
-  { id: "EMP-002", name: "Nadya Lestari", division: "Packing", location: "Gudang Utama", attendance: "valid", faceScore: 96, cycleDays: 21, payrollStatus: "active", kasbon: 0 },
-  { id: "EMP-003", name: "Aldi Saputra", division: "Marketplace", location: "Kantor Admin", attendance: "pending", faceScore: 72, cycleDays: 26, payrollStatus: "ready", kasbon: 600000 },
-  { id: "EMP-004", name: "Sinta Maharani", division: "Finance", location: "Kantor Admin", attendance: "missing", faceScore: null, cycleDays: 18, payrollStatus: "active", kasbon: 0 },
-  { id: "EMP-005", name: "Bagas Maulana", division: "Warehouse", location: "Gudang Utama", attendance: "failed", faceScore: 48, cycleDays: 12, payrollStatus: "active", kasbon: 150000 },
-  { id: "EMP-006", name: "Fajar Nugroho", division: "Produksi", location: "Workshop", attendance: "valid", faceScore: 94, cycleDays: 26, payrollStatus: "paid", kasbon: 0 },
-]
-
-const managementUsers: ManagementUser[] = [
-  { id: "USR-001", name: "Hardinur Rahman", email: "hardinurahman@gmail.com", role: "Owner", division: "Management", lastLogin: "Hari ini 08:12", twoFactor: "Enabled", status: "active" },
-  { id: "USR-002", name: "Sinta Maharani", email: "sinta@dms.local", role: "HR Manager", division: "HR", lastLogin: "Hari ini 07:48", twoFactor: "Enabled", status: "active" },
-  { id: "USR-003", name: "Aldi Saputra", email: "aldi.finance@dms.local", role: "Finance", division: "Finance", lastLogin: "Kemarin 17:30", twoFactor: "Pending", status: "invited" },
-  { id: "USR-004", name: "Fajar Nugroho", email: "fajar.ops@dms.local", role: "Supervisor", division: "Produksi", lastLogin: "04 Aug 06:59", twoFactor: "Disabled", status: "active" },
-  { id: "USR-005", name: "Nadya Lestari", email: "nadya.admin@dms.local", role: "Admin", division: "Packing", lastLogin: "Belum login", twoFactor: "Pending", status: "invited" },
-  { id: "USR-006", name: "Bagas Maulana", email: "bagas.viewer@dms.local", role: "Viewer", division: "Warehouse", lastLogin: "01 Aug 14:11", twoFactor: "Disabled", status: "locked" },
-]
-
 const masterCategories: MasterCategory[] = [
   { id: "all", label: "Semua", description: "Seluruh master", icon: Database },
   { id: "roles", label: "Role Management", description: "Akses pengguna", icon: Lock },
@@ -1642,211 +1646,6 @@ const appScopeLabel: Record<AppScope, string> = {
   management: "Management",
   field: "Lapangan",
   both: "Management + Lapangan",
-}
-
-const moduleConfigs: Record<ModuleViewId, ModuleConfig> = {
-  "attendance-live": {
-    subtitle: "Pantau absensi masuk/keluar secara realtime dengan validasi GPS, radius lokasi, dan face verification.",
-    kpis: [
-      { label: "Check-in Valid", value: 42, detail: "Hari ini", icon: UserRoundCheck, tone: "green" },
-      { label: "Di Luar Radius", value: 3, detail: "Butuh approval", icon: LocateFixed, tone: "amber" },
-      { label: "Face Failed", value: 2, detail: "Skor rendah", icon: ScanFace, tone: "rose" },
-      { label: "Belum Absen", value: 8, detail: "Shift berjalan", icon: AlertCircle, tone: "violet" },
-    ],
-    filters: ["Semua Lokasi", "Gudang Utama", "Kantor Admin", "Workshop"],
-    formTitle: "Override Absensi",
-    formDescription: "Draft form untuk koreksi HR saat data valid di lapangan perlu disesuaikan.",
-    formFields: [
-      { label: "Karyawan", placeholder: "Pilih / cari karyawan" },
-      { label: "Tanggal", placeholder: "2026-08-04", type: "date" },
-      { label: "Catatan", placeholder: "Alasan koreksi absensi" },
-    ],
-    tableTitle: "Realtime Attendance Feed",
-    tableDescription: "Log draft absensi mobile yang masuk dari user karyawan.",
-    columns: ["Karyawan", "Waktu", "Lokasi", "Radius", "Face", "Status"],
-    rows: [
-      { Karyawan: "Rizky Pratama", Waktu: "07:58 WIB", Lokasi: "Gudang Utama", Radius: "18 m", Face: "98%", Status: "Valid" },
-      { Karyawan: "Aldi Saputra", Waktu: "08:12 WIB", Lokasi: "Kantor Admin", Radius: "126 m", Face: "72%", Status: "Review" },
-      { Karyawan: "Bagas Maulana", Waktu: "08:20 WIB", Lokasi: "Workshop", Radius: "24 m", Face: "48%", Status: "Face Failed" },
-      { Karyawan: "Nadya Lestari", Waktu: "17:03 WIB", Lokasi: "Gudang Utama", Radius: "11 m", Face: "96%", Status: "Checkout" },
-    ],
-  },
-  employees: {
-    subtitle: "Kelola master karyawan, divisi, jabatan, status kerja, dan komponen gaji dasar.",
-    kpis: [
-      { label: "Aktif", value: 58, detail: "Karyawan", icon: UsersRound, tone: "blue" },
-      { label: "Baru Masuk", value: 6, detail: "Bulan ini", icon: UserPlus, tone: "green" },
-      { label: "Kontrak Review", value: 4, detail: "Perlu update", icon: FileCheck2, tone: "amber" },
-      { label: "Nonaktif", value: 2, detail: "Arsip data", icon: ShieldCheck, tone: "violet" },
-    ],
-    filters: ["Semua Divisi", "Produksi", "Packing", "Finance", "Warehouse"],
-    formTitle: "Tambah Karyawan",
-    formDescription: "Draft form awal untuk struktur data karyawan sebelum CRUD backend.",
-    formFields: [
-      { label: "Nama Lengkap", placeholder: "Nama karyawan" },
-      { label: "Divisi", placeholder: "Produksi / Finance / Warehouse" },
-      { label: "Gaji Harian", placeholder: "150000", type: "number" },
-    ],
-    tableTitle: "Employee Directory",
-    tableDescription: "Daftar draft karyawan dengan status payroll cycle.",
-    columns: ["Karyawan", "Divisi", "Jabatan", "Gaji Harian", "Cycle", "Status"],
-    rows: [
-      { Karyawan: "Rizky Pratama", Divisi: "Produksi", Jabatan: "Operator", "Gaji Harian": "Rp150.000", Cycle: "26/26", Status: "Aktif" },
-      { Karyawan: "Nadya Lestari", Divisi: "Packing", Jabatan: "Staff Packing", "Gaji Harian": "Rp140.000", Cycle: "21/26", Status: "Aktif" },
-      { Karyawan: "Sinta Maharani", Divisi: "Finance", Jabatan: "Admin Finance", "Gaji Harian": "Rp180.000", Cycle: "18/26", Status: "Aktif" },
-      { Karyawan: "Bagas Maulana", Divisi: "Warehouse", Jabatan: "Picker", "Gaji Harian": "Rp145.000", Cycle: "12/26", Status: "Review" },
-    ],
-  },
-  "attendance-requests": {
-    subtitle: "Kelola pengajuan izin, sakit, cuti, koreksi jam, dan lampiran bukti dari karyawan.",
-    kpis: [
-      { label: "Pending", value: 12, detail: "Menunggu HR", icon: MessageSquare, tone: "amber" },
-      { label: "Disetujui", value: 28, detail: "Bulan ini", icon: FileCheck2, tone: "green" },
-      { label: "Ditolak", value: 3, detail: "Tidak valid", icon: AlertTriangle, tone: "rose" },
-      { label: "SLA", value: "1.8 jam", detail: "Rata-rata respon", icon: Bell, tone: "blue" },
-    ],
-    filters: ["Semua Request", "Izin", "Sakit", "Cuti", "Koreksi Jam"],
-    formTitle: "Input Request Manual",
-    formDescription: "Draft form untuk request yang masuk via HR/management.",
-    formFields: [
-      { label: "Tipe Request", placeholder: "Izin / Sakit / Cuti" },
-      { label: "Tanggal", placeholder: "2026-08-04", type: "date" },
-      { label: "Keterangan", placeholder: "Ringkasan pengajuan" },
-    ],
-    tableTitle: "Attendance Requests",
-    tableDescription: "Antrian draft pengajuan absensi karyawan.",
-    columns: ["Request", "Karyawan", "Tanggal", "Lampiran", "PIC", "Status"],
-    rows: [
-      { Request: "Sakit", Karyawan: "Aldi Saputra", Tanggal: "04 Aug 2026", Lampiran: "Surat dokter", PIC: "HR Manager", Status: "Pending" },
-      { Request: "Koreksi Jam", Karyawan: "Sinta Maharani", Tanggal: "03 Aug 2026", Lampiran: "GPS log", PIC: "Supervisor", Status: "Review" },
-      { Request: "Cuti", Karyawan: "Nadya Lestari", Tanggal: "06 Aug 2026", Lampiran: "-", PIC: "HR Manager", Status: "Approved" },
-    ],
-  },
-  "attendance-review": {
-    subtitle: "Review data absensi bermasalah sebelum dihitung sebagai hari kerja valid di cycle payroll.",
-    kpis: [
-      { label: "Anomali", value: 7, detail: "Perlu audit", icon: AlertTriangle, tone: "amber" },
-      { label: "Radius Aman", value: "92%", detail: "Hari ini", icon: LocateFixed, tone: "green" },
-      { label: "Face Match", value: "88%", detail: "Rata-rata", icon: ScanFace, tone: "blue" },
-      { label: "Locked", value: 18, detail: "Sudah final", icon: ShieldCheck, tone: "violet" },
-    ],
-    filters: ["Semua Status", "Pending", "Approved", "Rejected"],
-    formTitle: "Keputusan Review",
-    formDescription: "Draft action untuk approve/reject absensi sebelum masuk hitungan gaji.",
-    formFields: [
-      { label: "ID Absensi", placeholder: "ATT-00021" },
-      { label: "Keputusan", placeholder: "Approve / Reject" },
-      { label: "Catatan HR", placeholder: "Catatan audit" },
-    ],
-    tableTitle: "Review Queue",
-    tableDescription: "Data draft yang belum otomatis valid.",
-    columns: ["ID", "Karyawan", "Issue", "Radius", "Face", "Status"],
-    rows: [
-      { ID: "ATT-00021", Karyawan: "Bagas Maulana", Issue: "Face score rendah", Radius: "24 m", Face: "48%", Status: "Pending" },
-      { ID: "ATT-00022", Karyawan: "Aldi Saputra", Issue: "Di luar radius", Radius: "126 m", Face: "72%", Status: "Review" },
-      { ID: "ATT-00023", Karyawan: "Rizky Pratama", Issue: "Checkout terlambat", Radius: "18 m", Face: "98%", Status: "Approved" },
-    ],
-  },
-  "field-monitoring": {
-    subtitle: "Pantau sebaran tim, lokasi kerja aktif, dan aktivitas lapangan per shift.",
-    kpis: [
-      { label: "Di Lokasi", value: 44, detail: "Terdeteksi GPS", icon: LocateFixed, tone: "green" },
-      { label: "Mobile Aktif", value: 51, detail: "Device online", icon: ScanFace, tone: "blue" },
-      { label: "Outlier", value: 5, detail: "Perlu cek", icon: AlertCircle, tone: "amber" },
-      { label: "Zona Kerja", value: 4, detail: "Radius aktif", icon: Package, tone: "violet" },
-    ],
-    filters: ["Semua Zona", "Gudang Utama", "Kantor Admin", "Workshop"],
-    formTitle: "Assign Lokasi",
-    formDescription: "Draft form untuk mengatur lokasi kerja sementara per karyawan/shift.",
-    formFields: [
-      { label: "Karyawan", placeholder: "Pilih karyawan" },
-      { label: "Lokasi Kerja", placeholder: "Gudang Utama" },
-      { label: "Radius", placeholder: "100", type: "number" },
-    ],
-    tableTitle: "Field Monitor",
-    tableDescription: "Snapshot draft posisi dan aktivitas tim.",
-    columns: ["Karyawan", "Zona", "Last Seen", "Radius", "Device", "Status"],
-    rows: [
-      { Karyawan: "Fajar Nugroho", Zona: "Workshop", "Last Seen": "2 menit lalu", Radius: "12 m", Device: "Android", Status: "Online" },
-      { Karyawan: "Rizky Pratama", Zona: "Gudang Utama", "Last Seen": "5 menit lalu", Radius: "18 m", Device: "Android", Status: "Online" },
-      { Karyawan: "Sinta Maharani", Zona: "Kantor Admin", "Last Seen": "27 menit lalu", Radius: "8 m", Device: "iPhone", Status: "Idle" },
-    ],
-  },
-  payroll: {
-    subtitle: "Proses gaji karyawan berdasarkan 26 hari kerja valid, bonus, potongan, dan kasbon.",
-    kpis: [
-      { label: "Siap Gajian", value: 9, detail: "Cycle 26/26", icon: BadgeDollarSign, tone: "green" },
-      { label: "Cycle Aktif", value: 43, detail: "Belum 26 hari", icon: CalendarCheck2, tone: "blue" },
-      { label: "Bonus Draft", value: "Rp4,8 jt", detail: "Menunggu lock", icon: FileBarChart, tone: "violet" },
-      { label: "Potongan", value: "Rp1,1 jt", detail: "Kasbon + lainnya", icon: WalletCards, tone: "amber" },
-    ],
-    filters: ["Semua Cycle", "Siap Gajian", "Cycle Aktif", "Terbayar"],
-    formTitle: "Input Komponen Gaji",
-    formDescription: "Draft form untuk bonus, potongan, dan penyesuaian sebelum payroll final.",
-    formFields: [
-      { label: "Karyawan", placeholder: "Pilih karyawan" },
-      { label: "Bonus", placeholder: "250000", type: "number" },
-      { label: "Potongan", placeholder: "0", type: "number" },
-    ],
-    tableTitle: "Payroll Cycle",
-    tableDescription: "Draft payroll berdasarkan 26 hari kerja valid.",
-    columns: ["Karyawan", "Hari Valid", "Gaji Pokok", "Bonus", "Kasbon", "Status"],
-    rows: [
-      { Karyawan: "Rizky Pratama", "Hari Valid": "26/26", "Gaji Pokok": "Rp3.900.000", Bonus: "Rp250.000", Kasbon: "Rp350.000", Status: "Ready" },
-      { Karyawan: "Aldi Saputra", "Hari Valid": "26/26", "Gaji Pokok": "Rp3.640.000", Bonus: "Rp100.000", Kasbon: "Rp600.000", Status: "Ready" },
-      { Karyawan: "Nadya Lestari", "Hari Valid": "21/26", "Gaji Pokok": "Rp2.940.000", Bonus: "-", Kasbon: "-", Status: "Active" },
-    ],
-  },
-  "cash-advance": {
-    subtitle: "Kelola kasbon karyawan, approval, limit, cicilan, dan potongan otomatis saat payroll.",
-    kpis: [
-      { label: "Outstanding", value: "Rp8,6 jt", detail: "Belum lunas", icon: WalletCards, tone: "amber" },
-      { label: "Request Baru", value: 5, detail: "Menunggu approval", icon: MessageSquare, tone: "blue" },
-      { label: "Disetujui", value: 18, detail: "Bulan ini", icon: FileCheck2, tone: "green" },
-      { label: "Over Limit", value: 2, detail: "Butuh owner", icon: AlertTriangle, tone: "rose" },
-    ],
-    filters: ["Semua Kasbon", "Pending", "Approved", "Dicicil", "Lunas"],
-    formTitle: "Input Kasbon",
-    formDescription: "Draft form untuk pengajuan dan pencatatan kasbon manual.",
-    formFields: [
-      { label: "Karyawan", placeholder: "Pilih karyawan" },
-      { label: "Nominal", placeholder: "500000", type: "number" },
-      { label: "Tenor Potong", placeholder: "1x / 2x / 3x" },
-    ],
-    tableTitle: "Cash Advance Ledger",
-    tableDescription: "Ledger draft kasbon yang akan terhubung ke payroll.",
-    columns: ["Kode", "Karyawan", "Nominal", "Terbayar", "Sisa", "Status"],
-    rows: [
-      { Kode: "KB-001", Karyawan: "Rizky Pratama", Nominal: "Rp500.000", Terbayar: "Rp150.000", Sisa: "Rp350.000", Status: "Dicicil" },
-      { Kode: "KB-002", Karyawan: "Aldi Saputra", Nominal: "Rp600.000", Terbayar: "-", Sisa: "Rp600.000", Status: "Approved" },
-      { Kode: "KB-003", Karyawan: "Bagas Maulana", Nominal: "Rp150.000", Terbayar: "-", Sisa: "Rp150.000", Status: "Pending" },
-    ],
-  },
-  "work-locations": {
-    subtitle: "Atur titik lokasi absen, radius valid, divisi yang boleh absen, dan status area kerja.",
-    kpis: [
-      { label: "Lokasi Aktif", value: 4, detail: "Radius berjalan", icon: LocateFixed, tone: "green" },
-      { label: "Avg Radius", value: "85 m", detail: "Standar area", icon: Database, tone: "blue" },
-      { label: "Perlu Audit", value: 1, detail: "Koordinat berubah", icon: AlertCircle, tone: "amber" },
-      { label: "Device Lock", value: "On", detail: "Anti manipulasi", icon: ShieldCheck, tone: "violet" },
-    ],
-    filters: ["Semua Lokasi", "Aktif", "Draft", "Nonaktif"],
-    formTitle: "Tambah Lokasi",
-    formDescription: "Draft form untuk titik GPS dan radius absen karyawan.",
-    formFields: [
-      { label: "Nama Lokasi", placeholder: "Gudang Utama" },
-      { label: "Koordinat", placeholder: "-6.200000, 106.816666" },
-      { label: "Radius Meter", placeholder: "100", type: "number" },
-    ],
-    tableTitle: "Work Location Master",
-    tableDescription: "Master draft lokasi yang menjadi acuan absensi mobile.",
-    columns: ["Lokasi", "Koordinat", "Radius", "Divisi", "PIC", "Status"],
-    rows: [
-      { Lokasi: "Gudang Utama", Koordinat: "-6.2201, 106.8321", Radius: "100 m", Divisi: "Produksi, Packing", PIC: "Supervisor", Status: "Aktif" },
-      { Lokasi: "Kantor Admin", Koordinat: "-6.2148, 106.8219", Radius: "60 m", Divisi: "Finance, HR", PIC: "HR Manager", Status: "Aktif" },
-      { Lokasi: "Workshop", Koordinat: "-6.2308, 106.8452", Radius: "80 m", Divisi: "Warehouse", PIC: "Ops Lead", Status: "Draft" },
-    ],
-  },
 }
 
 const masterCategoryLabels = masterCategories.reduce<Record<string, string>>((labels, category) => {
@@ -1998,10 +1797,13 @@ function createEmptyMasterForm(categoryId: Exclude<MasterCategoryId, "all">): Ma
     radiusM: "100",
     startTime: "",
     endTime: "",
+    lateToleranceMinutes: "0",
+    earlyLeaveToleranceMinutes: "0",
     componentType: "earning",
     calculationUnit: "fixed",
     rateAmount: "0",
     dayType: "all",
+    overtimeBasis: "extra_after_shift",
     autoDetectOvertime: false,
     requiresApproval: true,
     status: "Aktif",
@@ -2043,10 +1845,13 @@ function buildMasterRow(
     radiusM: typeof row.radius_m === "number" ? row.radius_m : undefined,
     startTime: row.start_time ? String(row.start_time).slice(0, 5) : "",
     endTime: row.end_time ? String(row.end_time).slice(0, 5) : "",
+    lateToleranceMinutes: Number(row.late_tolerance_minutes || 0),
+    earlyLeaveToleranceMinutes: Number(row.early_leave_tolerance_minutes || 0),
     componentType: row.component_type ? String(row.component_type) : undefined,
     calculationUnit: row.calculation_unit ? String(row.calculation_unit) : "fixed",
     rateAmount: row.rate_amount === null || row.rate_amount === undefined ? 0 : Number(row.rate_amount),
     dayType: row.day_type ? String(row.day_type) : "all",
+    overtimeBasis: row.overtime_basis === "full_duration" ? "full_duration" : "extra_after_shift",
     autoDetectOvertime: row.auto_detect_overtime === true,
     requiresApproval: row.requires_approval !== false,
     isSystem: Boolean(row.is_system),
@@ -2060,8 +1865,8 @@ async function loadMasterDataRows() {
     supabase.from("divisions").select("id, code, name, description, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
     supabase.from("positions").select("id, code, name, division_id, description, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
     supabase.from("work_locations").select("id, code, name, address, latitude, longitude, radius_m, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
-    supabase.from("shifts").select("id, code, name, start_time, end_time, description, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
-    supabase.from("payroll_components").select("id, code, name, component_type, description, calculation_unit, rate_amount, day_type, auto_detect_overtime, requires_approval, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
+    supabase.from("shifts").select("id, code, name, start_time, end_time, late_tolerance_minutes, early_leave_tolerance_minutes, description, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
+    supabase.from("payroll_components").select("id, code, name, component_type, description, calculation_unit, rate_amount, day_type, overtime_basis, auto_detect_overtime, requires_approval, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
   ])
 
   const error = roles.error || divisions.error || positions.error || locations.error || shifts.error || payrollComponents.error
@@ -2112,6 +1917,7 @@ function createMasterPayload(values: MasterDataFormValues, codeOverride?: string
       calculation_unit: values.calculationUnit,
       rate_amount: Number(values.rateAmount || 0),
       day_type: values.dayType,
+      overtime_basis: values.overtimeBasis,
       auto_detect_overtime: values.autoDetectOvertime,
       requires_approval: values.requiresApproval,
     }
@@ -2130,6 +1936,8 @@ function createMasterPayload(values: MasterDataFormValues, codeOverride?: string
       ...basePayload,
       start_time: values.startTime || null,
       end_time: values.endTime || null,
+      late_tolerance_minutes: Number(values.lateToleranceMinutes || 0),
+      early_leave_tolerance_minutes: Number(values.earlyLeaveToleranceMinutes || 0),
     }
   }
 
@@ -2362,7 +2170,12 @@ function validateMasterForm(values: MasterDataFormValues) {
   }
 
   if (values.categoryId === "shifts") {
+    const lateTolerance = Number(values.lateToleranceMinutes || 0)
+    const earlyLeaveTolerance = Number(values.earlyLeaveToleranceMinutes || 0)
+
     if (!values.startTime || !values.endTime) errors.push("Shift wajib memiliki jam mulai dan jam selesai.")
+    if (!Number.isFinite(lateTolerance) || lateTolerance < 0 || lateTolerance > 240) errors.push("Toleransi telat harus angka 0 sampai 240 menit.")
+    if (!Number.isFinite(earlyLeaveTolerance) || earlyLeaveTolerance < 0 || earlyLeaveTolerance > 240) errors.push("Toleransi pulang cepat harus angka 0 sampai 240 menit.")
   }
 
   if (values.categoryId === "locations") {
@@ -2384,6 +2197,9 @@ function validateMasterForm(values: MasterDataFormValues) {
     if (!Number.isFinite(rateAmount) || rateAmount < 0) errors.push("Nominal rate komponen wajib angka 0 atau lebih.")
     if (values.autoDetectOvertime && values.componentType !== "earning") errors.push("Auto lembur wajib memakai jenis Penambah Gaji.")
     if (values.autoDetectOvertime && values.calculationUnit !== "hour") errors.push("Auto lembur wajib memakai unit Per Jam.")
+    if (values.autoDetectOvertime && values.dayType === "weekday" && values.overtimeBasis !== "extra_after_shift") errors.push("Lembur weekday wajib memakai basis Setelah Shift.")
+    if (values.autoDetectOvertime && (values.dayType === "sunday" || values.dayType === "holiday") && values.overtimeBasis !== "full_duration") errors.push("Lembur Minggu/Hari Libur wajib memakai basis Full Durasi Kerja.")
+    if (values.autoDetectOvertime && values.dayType === "all" && values.overtimeBasis === "full_duration") errors.push("Basis Full Durasi Kerja tidak boleh dipakai untuk Semua Hari.")
   }
 
   return errors
@@ -2407,6 +2223,8 @@ function getMasterUsageWarnings(row: MasterDataRow, rows: MasterDataRow[]): Mast
 
   if (row.categoryId === "shifts") {
     warnings.push({ label: "Dipakai di", value: "Jadwal kerja dan validasi absensi" })
+    warnings.push({ label: "Toleransi telat", value: formatMinutesDuration(row.lateToleranceMinutes || 0) })
+    warnings.push({ label: "Pulang cepat", value: formatMinutesDuration(row.earlyLeaveToleranceMinutes || 0) })
   }
 
   if (row.categoryId === "locations") {
@@ -2418,6 +2236,7 @@ function getMasterUsageWarnings(row: MasterDataRow, rows: MasterDataRow[]): Mast
     warnings.push({ label: "Payroll", value: getPayrollComponentLabel(row.componentType) })
     warnings.push({ label: "Rate", value: row.calculationUnit === "hour" ? `${formatCurrency(row.rateAmount || 0)} / jam` : getPayrollCalculationLabel(row.calculationUnit) })
     if (row.autoDetectOvertime) warnings.push({ label: "Auto Lembur", value: getPayrollDayTypeLabel(row.dayType) })
+    if (row.autoDetectOvertime) warnings.push({ label: "Basis Hitung", value: getOvertimeBasisLabel(row.overtimeBasis) })
   }
 
   return warnings
@@ -2457,6 +2276,9 @@ function getMasterDetailFields(row: MasterDataRow): MasterDetailField[] {
   if (row.categoryId === "shifts") {
     fields.push(
       { label: "Jam Kerja", value: formatMasterTimeRange(row) },
+      { label: "Shift Malam", value: isOvernightMasterShift(row) ? "Ya, selesai hari berikutnya" : "Tidak" },
+      { label: "Toleransi Telat", value: formatMinutesDuration(row.lateToleranceMinutes || 0) },
+      { label: "Toleransi Pulang Cepat", value: formatMinutesDuration(row.earlyLeaveToleranceMinutes || 0) },
       { label: "Dipakai Di", value: getMasterUsage(row) },
     )
   }
@@ -2475,6 +2297,7 @@ function getMasterDetailFields(row: MasterDataRow): MasterDetailField[] {
       { label: "Unit Hitung", value: getPayrollCalculationLabel(row.calculationUnit) },
       { label: "Rate", value: row.calculationUnit === "hour" ? `${formatCurrency(row.rateAmount || 0)} / jam` : formatCurrency(row.rateAmount || 0) },
       { label: "Tipe Hari", value: getPayrollDayTypeLabel(row.dayType) },
+      { label: "Basis Lembur", value: row.autoDetectOvertime ? getOvertimeBasisLabel(row.overtimeBasis) : "Tidak otomatis" },
       { label: "Auto Detect Lembur", value: row.autoDetectOvertime ? "Aktif" : "Tidak" },
       { label: "Perlu Approval", value: row.requiresApproval ? "Ya" : "Tidak" },
       { label: "Dipakai Di", value: getMasterUsage(row) },
@@ -2486,7 +2309,19 @@ function getMasterDetailFields(row: MasterDataRow): MasterDetailField[] {
 
 function formatMasterTimeRange(row: MasterDataRow) {
   if (!row.startTime && !row.endTime) return "-"
-  return `${row.startTime || "--:--"} - ${row.endTime || "--:--"}`
+  return `${row.startTime || "--:--"} - ${row.endTime || "--:--"}${isOvernightMasterShift(row) ? " +1 hari" : ""}`
+}
+
+function isOvernightMasterShift(row: MasterDataRow) {
+  const startMinutes = parseShiftTimeMinutes(row.startTime)
+  const endMinutes = parseShiftTimeMinutes(row.endTime)
+  return startMinutes !== null && endMinutes !== null && endMinutes <= startMinutes
+}
+
+function formatShiftTolerance(row: MasterDataRow) {
+  const late = formatMinutesDuration(row.lateToleranceMinutes || 0)
+  const earlyLeave = formatMinutesDuration(row.earlyLeaveToleranceMinutes || 0)
+  return `Telat ${late} / Pulang cepat ${earlyLeave}`
 }
 
 function formatMasterCoordinate(row: MasterDataRow) {
@@ -2525,14 +2360,19 @@ function getPayrollDayTypeLabel(dayType?: string) {
   return "Semua Hari"
 }
 
+function getOvertimeBasisLabel(basis?: string) {
+  if (basis === "full_duration") return "Full durasi kerja"
+  return "Setelah shift"
+}
+
 function getMasterDetail(row: MasterDataRow) {
   if (row.categoryId === "roles") return `Level ${row.level || 100}`
   if (row.categoryId === "positions") return row.description || "Belum ada deskripsi"
   if (row.categoryId === "shifts") return formatMasterTimeRange(row)
   if (row.categoryId === "locations") return `${row.radiusM || 100} meter`
   if (row.categoryId === "payroll-components") {
-    if (row.calculationUnit === "hour") return `${getPayrollComponentLabel(row.componentType)} · ${formatCurrency(row.rateAmount || 0)}/jam`
-    return `${getPayrollComponentLabel(row.componentType)} · ${getPayrollCalculationLabel(row.calculationUnit)}`
+    if (row.calculationUnit === "hour") return `${getPayrollComponentLabel(row.componentType)} / ${formatCurrency(row.rateAmount || 0)}/jam`
+    return `${getPayrollComponentLabel(row.componentType)} / ${getPayrollCalculationLabel(row.calculationUnit)}`
   }
   return row.description || row.usedBy || "-"
 }
@@ -2540,6 +2380,7 @@ function getMasterDetail(row: MasterDataRow) {
 function getMasterUsage(row: MasterDataRow) {
   if (row.categoryId === "roles") return row.usedBy || "Permission management app"
   if (row.categoryId === "positions") return row.usedBy || "Karyawan, user"
+  if (row.categoryId === "shifts") return row.description || formatShiftTolerance(row)
   if (row.categoryId === "locations") return formatMasterCoordinate(row)
   return row.usedBy || "-"
 }
@@ -3432,126 +3273,6 @@ function AttendanceValidationCell({ row }: { row: AttendanceMonitorRow }) {
           <span>{faceLabel}</span>
         </span>
       </span>
-    </div>
-  )
-}
-
-function AttendanceDateFilter({
-  value,
-  mode,
-  onChange,
-}: {
-  value: string
-  mode: AttendanceDateMode
-  onChange: (nextDate: string, nextMode: AttendanceDateMode) => void
-}) {
-  const [open, setOpen] = useState(false)
-  const [calendarMonth, setCalendarMonth] = useState(() => new Date(`${value || getLocalDateKey()}T00:00:00+07:00`))
-  const fieldRef = useRef<HTMLDivElement | null>(null)
-  const todayDate = getLocalDateKey()
-  const yesterdayDate = shiftDateKey(todayDate, -1)
-  const activeLabel = getAttendanceDateFilterLabel(value, mode)
-  const calendarDays = getCalendarMonthDays(calendarMonth)
-  const monthLabel = new Intl.DateTimeFormat("id-ID", { month: "long", year: "numeric" }).format(calendarMonth)
-  const presets: Array<{ mode: AttendanceDateMode; label: string; date?: string }> = [
-    { mode: "today", label: "Hari ini", date: todayDate },
-    { mode: "yesterday", label: "Kemarin", date: yesterdayDate },
-    { mode: "last7", label: "7 hari sebelumnya" },
-    { mode: "last30", label: "30 hari sebelumnya" },
-    { mode: "day", label: "Per Hari" },
-    { mode: "week", label: "Per Minggu" },
-    { mode: "month", label: "Per Bulan" },
-    { mode: "year", label: "Berdasarkan Tahun" },
-    { mode: "all", label: "Semua Waktu" },
-  ]
-
-  useEffect(() => {
-    setCalendarMonth(new Date(`${value || todayDate}T00:00:00+07:00`))
-  }, [todayDate, value])
-
-  useEffect(() => {
-    if (!open) return
-
-    const handlePointerDown = (event: PointerEvent) => {
-      if (!fieldRef.current?.contains(event.target as Node)) setOpen(false)
-    }
-
-    window.addEventListener("pointerdown", handlePointerDown)
-    return () => window.removeEventListener("pointerdown", handlePointerDown)
-  }, [open])
-
-  const selectPreset = (preset: { mode: AttendanceDateMode; label: string; date?: string }) => {
-    const nextDate = preset.date || value || todayDate
-    onChange(nextDate, preset.mode)
-    if (preset.date) setCalendarMonth(new Date(`${nextDate}T00:00:00+07:00`))
-  }
-
-  const moveMonth = (amount: number) => {
-    setCalendarMonth((current) => {
-      const next = new Date(current)
-      next.setMonth(current.getMonth() + amount)
-      return next
-    })
-  }
-
-  return (
-    <div className={clsx("attendanceDateFilter", open && "open")} ref={fieldRef}>
-      <button
-        className={clsx("attendanceDateTrigger", open && "active")}
-        type="button"
-        onClick={() => setOpen((current) => !current)}
-      >
-        <CalendarCheck2 size={18} />
-        <span>{activeLabel}</span>
-        <ChevronDown size={18} />
-      </button>
-      {open && (
-        <div className="attendanceDatePopover">
-          <aside className="attendanceDateSidebar">
-            {presets.map((preset) => (
-              <button
-                className={clsx(mode === preset.mode && "active")}
-                key={preset.mode}
-                type="button"
-                onClick={() => selectPreset(preset)}
-              >
-                {preset.label}
-              </button>
-            ))}
-          </aside>
-          <section className="attendanceDateCalendar">
-            <div className="attendanceDateCalendarHeader">
-              <button type="button" onClick={() => moveMonth(-12)} aria-label="Tahun sebelumnya">«</button>
-              <button type="button" onClick={() => moveMonth(-1)} aria-label="Bulan sebelumnya">‹</button>
-              <strong>{monthLabel}</strong>
-              <button type="button" onClick={() => moveMonth(1)} aria-label="Bulan berikutnya">›</button>
-              <button type="button" onClick={() => moveMonth(12)} aria-label="Tahun berikutnya">»</button>
-            </div>
-            <div className="attendanceDateWeekdays">
-              {["Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Min"].map((day) => <span key={day}>{day}</span>)}
-            </div>
-            <div className="attendanceDateGrid">
-              {calendarDays.map((day) => (
-                <button
-                  className={clsx(day.muted && "muted", day.key === todayDate && "today", day.key === value && "active")}
-                  key={day.key}
-                  type="button"
-                  onClick={() => {
-                    onChange(day.key, "day")
-                    setCalendarMonth(day.date)
-                  }}
-                >
-                  {day.date.getDate()}
-                </button>
-              ))}
-            </div>
-            <div className="attendanceDateFooter">
-              <strong>{mode === "today" ? "Real-time (GMT+07)" : getAttendanceDateFilterLabel(value, mode)}</strong>
-              <button type="button" onClick={() => setOpen(false)}>Tutup</button>
-            </div>
-          </section>
-        </div>
-      )}
     </div>
   )
 }
@@ -5514,7 +5235,7 @@ function mapEmployeeRow(
   }
 }
 
-async function loadEmployeeData() {
+async function loadEmployeeData(): Promise<EmployeeDirectoryData> {
   const baseEmployeeSelect = "id, employee_code, full_name, photo_path, nik, phone, email, division_id, position_id, work_location_id, shift_id, salary_type, daily_salary, monthly_salary, payroll_method, prorate_enabled, join_date, payroll_cycle_days, status, notes, deleted_at, created_at"
   const kioskEmployeeSelect = `${baseEmployeeSelect}, qr_token, rfid_uid, attendance_policy_id, kiosk_access_enabled, last_card_issued_at`
   const employeeQuery = supabase.from("employees").select(kioskEmployeeSelect).order("employee_code", { ascending: true })
@@ -5845,6 +5566,99 @@ function exportPayrollCsv(rows: AttendanceMonitorRow[]) {
   URL.revokeObjectURL(url)
 }
 
+function exportAttendanceRecapCsv(rows: AttendanceMonitorRow[], selectedDate: string, mode: AttendanceDateMode) {
+  const header = [
+    "No",
+    "Tanggal",
+    "Kode Karyawan",
+    "Nama Karyawan",
+    "Divisi",
+    "Lokasi",
+    "Shift",
+    "Jadwal",
+    "Masuk",
+    "Status Masuk",
+    "Pulang",
+    "Status Pulang",
+    "Jam Wajib",
+    "Jam Wajib (Menit)",
+    "Jam Aktual",
+    "Jam Aktual (Menit)",
+    "Telat",
+    "Telat (Menit)",
+    "Pulang Cepat",
+    "Pulang Cepat (Menit)",
+    "Kurang Jam",
+    "Kurang Jam (Menit)",
+    "Lewat Shift",
+    "Lewat Shift (Menit)",
+    "Toleransi Telat",
+    "Toleransi Telat (Menit)",
+    "Toleransi Pulang Cepat",
+    "Toleransi Pulang Cepat (Menit)",
+    "Settlement",
+    "Status Absensi",
+    "GPS",
+    "Face",
+    "Sumber Masuk",
+    "Sumber Pulang",
+    "Check-in ID",
+    "Check-out ID",
+    "Device Check-in",
+    "Device Check-out",
+    "Payroll Cycle",
+    "Last Update",
+    "Catatan",
+  ]
+  const body = rows.map((row, index) => [
+    index + 1,
+    formatWorkDate(row.attendanceDate),
+    row.employeeCode,
+    row.fullName,
+    row.divisionName,
+    row.workLocationName,
+    row.shiftName,
+    getAttendanceShiftScheduleLabel(row),
+    row.checkInAt ? formatAttendanceTime(row.checkInAt) : "",
+    row.checkInStatus,
+    row.checkOutAt ? formatAttendanceTime(row.checkOutAt) : "",
+    row.checkOutStatus,
+    row.expectedWorkMinutes === null ? "" : formatMinutesDuration(row.expectedWorkMinutes),
+    row.expectedWorkMinutes ?? "",
+    row.actualWorkMinutes === null ? "" : formatMinutesDuration(row.actualWorkMinutes),
+    row.actualWorkMinutes ?? "",
+    formatMinutesDuration(row.lateMinutes),
+    row.lateMinutes,
+    formatMinutesDuration(row.earlyLeaveMinutes),
+    row.earlyLeaveMinutes,
+    formatMinutesDuration(row.shortageMinutes),
+    row.shortageMinutes,
+    formatMinutesDuration(row.overtimeMinutes),
+    row.overtimeMinutes,
+    formatMinutesDuration(row.shiftLateToleranceMinutes),
+    row.shiftLateToleranceMinutes,
+    formatMinutesDuration(row.shiftEarlyLeaveToleranceMinutes),
+    row.shiftEarlyLeaveToleranceMinutes,
+    row.settlementLabel,
+    row.attendanceStatus,
+    row.checkOutId ? row.checkOutGpsStatus : row.checkInGpsStatus,
+    row.checkOutId ? row.checkOutFaceStatus : row.checkInFaceStatus,
+    row.checkInId ? formatAttendanceSourceMeta(row.checkInSource, row.checkInMedia) : "",
+    row.checkOutId ? formatAttendanceSourceMeta(row.checkOutSource, row.checkOutMedia) : "",
+    row.checkInId || "",
+    row.checkOutId || "",
+    row.checkInDeviceId || "",
+    row.checkOutDeviceId || "",
+    row.payrollCycleNumber ? `Cycle ${row.payrollCycleNumber} ${row.cycleDays}/${row.targetDays}` : `${row.cycleDays}/${row.targetDays}`,
+    row.lastActivityAt ? `${formatWorkDate(row.attendanceDate)} ${formatAttendanceTime(row.lastActivityAt)}` : "",
+    row.notes,
+  ])
+  const csv = "\uFEFF" + [header, ...body]
+    .map((columns) => columns.map((column) => `"${String(column).replace(/"/g, '""')}"`).join(","))
+    .join("\n")
+  downloadTextFile(`dms-rekap-absensi-${selectedDate}-${mode}.csv`, csv, "text/csv;charset=utf-8")
+}
+
 function getLocalDateKey(date = new Date()) {
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, "0")
@@ -5859,12 +5673,6 @@ function shiftDateKey(value: string, offsetDays: number) {
   return getLocalDateKey(base)
 }
 
-function getAttendanceRecapRangeStart(value: string, range: AttendanceRecapRange) {
-  if (range === "month") return shiftDateKey(value, -29)
-  if (range === "week") return shiftDateKey(value, -6)
-  return value
-}
-
 function getAttendanceDateRange(selectedDate: string, mode: AttendanceDateMode) {
   if (mode === "last7" || mode === "week") return { start: shiftDateKey(selectedDate, -6), end: selectedDate }
   if (mode === "last30" || mode === "month") return { start: shiftDateKey(selectedDate, -29), end: selectedDate }
@@ -5873,34 +5681,74 @@ function getAttendanceDateRange(selectedDate: string, mode: AttendanceDateMode) 
   return { start: selectedDate, end: selectedDate }
 }
 
-function getAttendanceDateFilterLabel(selectedDate: string, mode: AttendanceDateMode) {
-  if (mode === "today") return "Hari ini"
-  if (mode === "yesterday") return "Kemarin"
-  if (mode === "last7") return "7 hari sebelumnya"
-  if (mode === "last30") return "30 hari sebelumnya"
-  if (mode === "day") return `Per hari · ${formatWorkDate(selectedDate)}`
-  if (mode === "week") return `Per minggu · ${formatWorkDate(selectedDate)}`
-  if (mode === "month") return `Per bulan · ${formatWorkDate(selectedDate)}`
-  if (mode === "year") return `Tahun ${selectedDate.slice(0, 4)}`
-  return "Semua waktu"
+function getAttendanceModeLoadRange(selectedDate: string, mode: AttendanceDateMode) {
+  const range = getAttendanceDateRange(selectedDate, mode)
+  return normalizeAttendanceLoadRange(selectedDate, {
+    startDate: range.start || shiftDateKey(range.end || selectedDate, -369),
+    endDate: range.end || selectedDate,
+  })
 }
 
-function getCalendarMonthDays(monthDate: Date) {
-  const year = monthDate.getFullYear()
-  const month = monthDate.getMonth()
-  const firstDate = new Date(year, month, 1)
-  const startOffset = (firstDate.getDay() + 6) % 7
-  const gridStart = new Date(year, month, 1 - startOffset)
+function normalizeAttendanceLoadRange(targetDate: string, options: AttendanceLoadOptions = {}) {
+  const fallbackDate = targetDate || getLocalDateKey()
+  const start = options.startDate || fallbackDate
+  const end = options.endDate || fallbackDate
 
-  return Array.from({ length: 42 }, (_, index) => {
-    const date = new Date(gridStart)
-    date.setDate(gridStart.getDate() + index)
-    return {
-      date,
-      key: getLocalDateKey(date),
-      muted: date.getMonth() !== month,
-    }
-  })
+  return start <= end
+    ? { startDate: start, endDate: end }
+    : { startDate: end, endDate: start }
+}
+
+function getAttendanceDateKeys(startDate: string, endDate: string, maxDays = 370) {
+  const dates: string[] = []
+  let currentDate = startDate
+
+  while (currentDate <= endDate && dates.length < maxDays) {
+    dates.push(currentDate)
+    currentDate = shiftDateKey(currentDate, 1)
+  }
+
+  return dates
+}
+
+const ATTENDANCE_BACKEND_REFRESH_MAX_DAYS = 31
+
+function getAttendanceBackendRefreshRange(startDate: string, endDate: string) {
+  const probeDates = getAttendanceDateKeys(startDate, endDate, ATTENDANCE_BACKEND_REFRESH_MAX_DAYS + 1)
+  const lastProbeDate = probeDates[probeDates.length - 1] || startDate
+
+  if (probeDates.length <= ATTENDANCE_BACKEND_REFRESH_MAX_DAYS && lastProbeDate === endDate) {
+    return { startDate, endDate }
+  }
+
+  return {
+    startDate: shiftDateKey(endDate, -(ATTENDANCE_BACKEND_REFRESH_MAX_DAYS - 1)),
+    endDate,
+  }
+}
+
+type SupabaseRangeQuery<T> = {
+  range: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>
+}
+
+async function fetchSupabaseRangeRows<T>(
+  buildQuery: () => SupabaseRangeQuery<T>,
+  pageSize = 1000,
+  maxRows = 100000,
+) {
+  const rows: T[] = []
+
+  for (let offset = 0; offset < maxRows; offset += pageSize) {
+    const { data, error } = await buildQuery().range(offset, offset + pageSize - 1)
+
+    if (error) throw error
+    const pageRows = data || []
+    rows.push(...pageRows)
+
+    if (pageRows.length < pageSize) return rows
+  }
+
+  throw new Error("Data rekap terlalu besar untuk dimuat sekaligus. Persempit range tanggal lalu coba lagi.")
 }
 
 function formatAttendanceTime(value?: string | null) {
@@ -5941,6 +5789,25 @@ function formatWorkDate(value?: string | null) {
     year: "numeric",
     timeZone: "Asia/Jakarta",
   }).format(new Date(`${value}T00:00:00+07:00`))
+}
+
+function formatAttendanceRangeLabel(selectedDate: string, mode: AttendanceDateMode) {
+  const range = getAttendanceDateRange(selectedDate, mode)
+  if (!range.start) return `Sampai ${formatWorkDate(range.end)}`
+  if (range.start !== range.end) return `${formatWorkDate(range.start)} - ${formatWorkDate(range.end)}`
+  return formatWorkDate(range.end)
+}
+
+function getAttendanceRangeMetricLabel(mode: AttendanceDateMode) {
+  if (mode === "last7" || mode === "week") return "7 Hari"
+  if (mode === "last30" || mode === "month") return "30 Hari"
+  if (mode === "year") return "Tahun"
+  if (mode === "all") return "Semua waktu"
+  return "Tanggal"
+}
+
+function getAttendanceRecapTitle(selectedDate: string, mode: AttendanceDateMode) {
+  return `Rekap ${formatAttendanceRangeLabel(selectedDate, mode)}`
 }
 
 function formatMinutesDuration(minutes: number) {
@@ -6010,6 +5877,14 @@ function isMissingCheckoutShift(checkInAt?: string | null, checkOutAt?: string |
   return isPastAttendanceDate(attendanceDate) || minutes > OPEN_SHIFT_LIMIT_MINUTES
 }
 
+function canCorrectMissingCheckout(row: AttendanceMonitorRow) {
+  return Boolean(row.checkInId && !row.checkOutId)
+}
+
+function canCorrectAttendanceCheckIn(row: AttendanceMonitorRow) {
+  return Boolean(row.employeeId && row.attendanceDate)
+}
+
 function formatAttendanceWorkDuration(checkInAt?: string | null, checkOutAt?: string | null, attendanceDate?: string | null) {
   const minutes = getAttendanceDurationMinutes(checkInAt, checkOutAt)
   if (minutes === null) return "Belum mulai"
@@ -6024,6 +5899,8 @@ function calculateAttendanceSettlement({
   shiftName,
   shiftStartTime,
   shiftEndTime,
+  lateToleranceMinutes = 0,
+  earlyLeaveToleranceMinutes = 0,
   attendanceStatus,
 }: {
   attendanceDate: string
@@ -6032,6 +5909,8 @@ function calculateAttendanceSettlement({
   shiftName: string
   shiftStartTime: string
   shiftEndTime: string
+  lateToleranceMinutes?: number
+  earlyLeaveToleranceMinutes?: number
   attendanceStatus: AttendanceStatus
 }) {
   const schedule = getScheduledShiftWindow(attendanceDate, shiftStartTime, shiftEndTime)
@@ -6040,12 +5919,14 @@ function calculateAttendanceSettlement({
   const checkOutMs = checkOutAt ? new Date(checkOutAt).getTime() : null
   const scheduledStartMs = schedule ? new Date(schedule.startAt).getTime() : null
   const scheduledEndMs = schedule ? new Date(schedule.endAt).getTime() : null
-  const lateMinutes = scheduledStartMs !== null && checkInMs !== null && Number.isFinite(checkInMs)
+  const rawLateMinutes = scheduledStartMs !== null && checkInMs !== null && Number.isFinite(checkInMs)
     ? Math.max(0, Math.floor((checkInMs - scheduledStartMs) / 60000))
     : 0
-  const earlyLeaveMinutes = scheduledEndMs !== null && checkOutMs !== null && Number.isFinite(checkOutMs)
+  const rawEarlyLeaveMinutes = scheduledEndMs !== null && checkOutMs !== null && Number.isFinite(checkOutMs)
     ? Math.max(0, Math.floor((scheduledEndMs - checkOutMs) / 60000))
     : 0
+  const lateMinutes = Math.max(0, rawLateMinutes - Math.max(0, lateToleranceMinutes))
+  const earlyLeaveMinutes = Math.max(0, rawEarlyLeaveMinutes - Math.max(0, earlyLeaveToleranceMinutes))
   const overtimeMinutes = scheduledEndMs !== null && checkOutMs !== null && Number.isFinite(checkOutMs)
     ? Math.max(0, Math.floor((checkOutMs - scheduledEndMs) / 60000))
     : 0
@@ -6084,6 +5965,8 @@ function calculateAttendanceSettlement({
     scheduledEndAt: schedule?.endAt || "",
     expectedWorkMinutes: schedule?.expectedMinutes ?? null,
     actualWorkMinutes,
+    shiftLateToleranceMinutes: Math.max(0, lateToleranceMinutes),
+    shiftEarlyLeaveToleranceMinutes: Math.max(0, earlyLeaveToleranceMinutes),
     lateMinutes,
     earlyLeaveMinutes,
     shortageMinutes,
@@ -6095,6 +5978,43 @@ function calculateAttendanceSettlement({
     shiftScheduleLabel: schedule ? `${formatShiftClock(shiftStartTime)} - ${formatShiftClock(shiftEndTime)}${schedule.isOvernight ? " +1" : ""}` : "Shift belum lengkap",
     shiftName: shiftName || "Belum pilih shift",
   }
+}
+
+function mapDailySummaryAttendanceStatus(value: unknown): AttendanceStatus {
+  if (value === "valid" || value === "pending" || value === "failed" || value === "missing") return value
+  return "missing"
+}
+
+function mapDailySummarySettlementStatus(value: unknown): AttendanceSettlementStatus {
+  if (
+    value === "ready"
+    || value === "running"
+    || value === "short"
+    || value === "missing_checkout"
+    || value === "missing_checkin"
+    || value === "review"
+    || value === "failed"
+    || value === "no_shift"
+  ) return value
+  return "missing_checkin"
+}
+
+function getAttendanceSettlementTone(status: AttendanceSettlementStatus): AttendanceSettlementTone {
+  if (status === "ready") return "valid"
+  if (status === "failed") return "failed"
+  if (status === "missing_checkin" || status === "missing_checkout") return "missing"
+  return "pending"
+}
+
+function getAttendanceSettlementLabel(status: AttendanceSettlementStatus, shortageMinutes = 0) {
+  if (status === "ready") return "Sesuai shift"
+  if (status === "running") return "Sedang berjalan"
+  if (status === "short") return `Kurang ${formatMinutesDuration(shortageMinutes)}`
+  if (status === "missing_checkout") return "Belum checkout"
+  if (status === "missing_checkin") return "Belum masuk"
+  if (status === "review") return "Review HR"
+  if (status === "failed") return "Tidak valid"
+  return "Shift belum lengkap"
 }
 
 function compareAttendanceRowsByLatestActivity(a: AttendanceMonitorRow, b: AttendanceMonitorRow) {
@@ -6124,6 +6044,64 @@ function getAttendanceSettlementDescription(row: AttendanceMonitorRow) {
   if (row.settlementStatus === "review") return "Data absensi validasi GPS/face masih perlu review HR."
   if (row.settlementStatus === "failed") return "Data absensi ditandai tidak valid dan perlu pengecekan."
   return "Shift karyawan belum punya jam mulai dan jam selesai lengkap."
+}
+
+function getAttendanceSearchText(row: AttendanceMonitorRow) {
+  const operationalKeywords = [
+    row.lateMinutes > 0 ? "telat terlambat late" : "",
+    row.earlyLeaveMinutes > 0 ? "pulang cepat early leave" : "",
+    row.shortageMinutes > 0 ? "kurang jam short shortage" : "",
+    row.overtimeMinutes > 0 ? "lembur overtime lewat shift" : "",
+    row.checkInId && !row.checkOutId ? "belum checkout belum pulang" : "",
+    !row.checkInId ? "belum masuk belum absen" : "",
+  ]
+
+  return [
+    row.employeeCode,
+    row.fullName,
+    row.divisionName,
+    row.workLocationName,
+    row.shiftName,
+    getAttendanceShiftScheduleLabel(row),
+    row.attendanceStatus,
+    row.settlementStatus,
+    row.settlementLabel,
+    row.payrollStatus,
+    row.gpsStatus,
+    row.faceStatus,
+    row.checkInStatus,
+    row.checkOutStatus,
+    row.checkInSource,
+    row.checkInMedia,
+    row.checkOutSource,
+    row.checkOutMedia,
+    row.checkInDeviceId,
+    row.checkOutDeviceId,
+    row.checkInBiofingerEventId,
+    row.checkOutBiofingerEventId,
+    row.notes,
+    ...operationalKeywords,
+  ].join(" ").toLowerCase()
+}
+
+function matchesAttendanceRecapStatus(row: AttendanceMonitorRow, statusFilter: string) {
+  if (statusFilter === "all") return true
+  if (statusFilter === "ready") return row.settlementStatus === "ready"
+  if (statusFilter === "short") return row.settlementStatus === "short" || row.shortageMinutes > 0
+  if (statusFilter === "late") return row.lateMinutes > 0
+  if (statusFilter === "early_leave") return row.earlyLeaveMinutes > 0
+  if (statusFilter === "overtime") return row.overtimeMinutes > 0
+  if (statusFilter === "running") return row.settlementStatus === "running"
+  if (statusFilter === "missing_checkout") return row.settlementStatus === "missing_checkout"
+  if (statusFilter === "missing_checkin" || statusFilter === "missing") return row.settlementStatus === "missing_checkin" || row.attendanceStatus === "missing"
+  if (statusFilter === "review" || statusFilter === "pending") return row.settlementStatus === "review" || row.attendanceStatus === "pending"
+  if (statusFilter === "failed") return row.settlementStatus === "failed" || row.attendanceStatus === "failed"
+  if (statusFilter === "no_shift") return row.settlementStatus === "no_shift"
+  return row.attendanceStatus === statusFilter
+    || row.payrollStatus === statusFilter
+    || row.gpsStatus === statusFilter
+    || row.faceStatus === statusFilter
+    || row.settlementStatus === statusFilter
 }
 
 function mapPayrollCycleStatus(status: unknown): PayrollStatus {
@@ -6171,13 +6149,33 @@ function getAttendanceReviewIssue(row: Record<string, unknown>) {
   return "Valid"
 }
 
-async function loadOperationsFoundationData(targetDate = getLocalDateKey()): Promise<OperationsFoundationData> {
-  await supabase.rpc("refresh_all_employee_payroll_cycles")
-  await supabase.rpc("detect_all_overtime_requests")
-  await supabase.rpc("refresh_all_employee_payroll_cycles")
-
+async function loadOperationsFoundationData(targetDate = getLocalDateKey(), options: AttendanceLoadOptions = {}): Promise<OperationsFoundationData> {
   const selectedDate = targetDate || getLocalDateKey()
-  const [employeeResult, divisionResult, locationResult, shiftResult, attendanceResult, payrollResult, overtimeResult, payrollComponentResult, appUserResult, faceProfileResult] = await Promise.all([
+  const { startDate, endDate } = normalizeAttendanceLoadRange(selectedDate, options)
+  const attendanceLogEndDate = shiftDateKey(endDate, 1)
+  const loadScope: AttendanceLoadScope = options.scope || "full"
+  const recapOnly = loadScope === "attendance-recap"
+  const emptyResult = Promise.resolve({ data: [], error: null })
+
+  if (options.refreshBackend) {
+    const backendRange = getAttendanceBackendRefreshRange(startDate, endDate)
+    const summaryRefresh = await supabase.rpc("refresh_attendance_daily_summaries", {
+      target_start_date: backendRange.startDate,
+      target_end_date: backendRange.endDate,
+    })
+    if (summaryRefresh.error) throw summaryRefresh.error
+  }
+
+  if (options.refreshPayroll) {
+    const overtimeDetect = await supabase.rpc("detect_all_overtime_requests")
+    if (overtimeDetect.error) throw overtimeDetect.error
+
+    const payrollRefresh = await supabase.rpc("refresh_all_employee_payroll_cycles")
+    if (payrollRefresh.error) throw payrollRefresh.error
+  }
+
+  const attendanceLogColumns = "id, employee_id, work_location_id, attendance_date, event_type, event_at, latitude, longitude, distance_m, radius_m, gps_status, face_status, face_score, face_snapshot_path, status, workday_counted, source, attendance_media, attendance_device_id, biofinger_event_id, notes"
+  const [employeeResult, divisionResult, locationResult, shiftResult, attendanceRows, dailySummaryRows, reviewAttendanceResult, payrollRows, overtimeResult, payrollComponentResult, appUserResult, faceProfileResult] = await Promise.all([
     supabase
       .from("employees")
       .select("id, employee_code, full_name, photo_path, division_id, work_location_id, shift_id, salary_type, daily_salary, monthly_salary, payroll_cycle_days, status, deleted_at")
@@ -6185,34 +6183,50 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey()): Pro
       .order("employee_code", { ascending: true }),
     supabase.from("divisions").select("id, name"),
     supabase.from("work_locations").select("id, code, name, address, latitude, longitude, radius_m, is_active").order("sort_order", { ascending: true }).order("code", { ascending: true }),
-    supabase.from("shifts").select("id, code, name, start_time, end_time, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
-    supabase
+    supabase.from("shifts").select("id, code, name, start_time, end_time, late_tolerance_minutes, early_leave_tolerance_minutes, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
+    fetchSupabaseRangeRows<Record<string, unknown>>(() => supabase
       .from("attendance_logs")
-      .select("id, employee_id, work_location_id, attendance_date, event_type, event_at, latitude, longitude, distance_m, radius_m, gps_status, face_status, face_score, face_snapshot_path, status, workday_counted, source, attendance_media, attendance_device_id, biofinger_event_id, notes")
+      .select(attendanceLogColumns)
+      .gte("attendance_date", startDate)
+      .lte("attendance_date", attendanceLogEndDate)
       .order("event_at", { ascending: false })
-      .limit(1000),
-    supabase
+      .order("id", { ascending: true })),
+    fetchSupabaseRangeRows<Record<string, unknown>>(() => supabase
+      .from("attendance_daily_summaries")
+      .select("employee_id, attendance_date, work_location_id, shift_id, shift_name, shift_start_time, shift_end_time, shift_late_tolerance_minutes, shift_early_leave_tolerance_minutes, scheduled_start_at, scheduled_end_at, check_in_log_id, check_out_log_id, actual_check_in_at, actual_check_out_at, expected_work_minutes, actual_work_minutes, late_minutes, early_leave_minutes, shortage_minutes, overtime_minutes, attendance_status, settlement_status, workday_counted, notes, calculated_at")
+      .gte("attendance_date", startDate)
+      .lte("attendance_date", endDate)
+      .order("attendance_date", { ascending: false })
+      .order("employee_id", { ascending: true })),
+    recapOnly ? emptyResult : supabase
+      .from("attendance_logs")
+      .select(attendanceLogColumns)
+      .eq("status", "review")
+      .order("event_at", { ascending: false })
+      .limit(200),
+    fetchSupabaseRangeRows<Record<string, unknown>>(() => supabase
       .from("payroll_cycles")
       .select("id, employee_id, cycle_number, period_started_at, period_closed_at, work_days_count, target_work_days, gross_amount, overtime_amount, net_amount, salary_type, status, ready_at, locked_at, paid_at")
-      .order("cycle_number", { ascending: false }),
-    supabase
+      .order("cycle_number", { ascending: false })
+      .order("employee_id", { ascending: true }), 1000, 50000),
+    recapOnly ? emptyResult : supabase
       .from("overtime_requests")
-      .select("id, employee_id, attendance_log_id, payroll_cycle_id, payroll_component_id, overtime_date, shift_start_time, shift_end_time, actual_check_out_at, overtime_minutes, approved_minutes, rate_amount, total_amount, day_type, status, notes, created_at")
+      .select("id, employee_id, attendance_log_id, payroll_cycle_id, payroll_component_id, overtime_date, shift_start_time, shift_end_time, actual_check_out_at, overtime_minutes, approved_minutes, rate_amount, total_amount, day_type, overtime_basis, status, request_source, planned_start_at, planned_end_at, planned_minutes, request_reason, requested_at, matched_attendance, notes, created_at")
       .order("overtime_date", { ascending: false })
       .limit(200),
-    supabase
+    recapOnly ? emptyResult : supabase
       .from("payroll_components")
-      .select("id, name, code, calculation_unit, rate_amount, day_type, auto_detect_overtime"),
-    supabase
+      .select("id, name, code, calculation_unit, rate_amount, day_type, overtime_basis, auto_detect_overtime"),
+    recapOnly ? emptyResult : supabase
       .from("app_users")
       .select("id, user_code, full_name, status, employee_id, app_scope")
       .in("app_scope", ["field", "both"])
       .order("user_code", { ascending: true }),
-    supabase
+    recapOnly ? emptyResult : supabase
       .from("employee_face_profiles")
       .select("employee_id, status, verification_required, face_score_threshold"),
   ])
-  const error = employeeResult.error || divisionResult.error || locationResult.error || shiftResult.error || attendanceResult.error || payrollResult.error || overtimeResult.error || payrollComponentResult.error || appUserResult.error || faceProfileResult.error
+  const error = employeeResult.error || divisionResult.error || locationResult.error || shiftResult.error || reviewAttendanceResult.error || overtimeResult.error || payrollComponentResult.error || appUserResult.error || faceProfileResult.error
 
   if (error) throw error
 
@@ -6228,8 +6242,23 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey()): Pro
     appUserByEmployee.set(employeeId, row)
   })
   const faceProfileMap = new Map(((faceProfileResult.data || []) as Array<Record<string, unknown>>).map((row) => [String(row.employee_id || ""), row]))
-  const logs = (attendanceResult.data || []) as Array<Record<string, unknown>>
-  const payrollRows = (payrollResult.data || []) as Array<Record<string, unknown>>
+  const logsById = new Map<string, Record<string, unknown>>()
+  const logs = [
+    ...attendanceRows,
+    ...((reviewAttendanceResult.data || []) as Array<Record<string, unknown>>),
+  ].filter((row) => {
+    const id = String(row.id || "")
+    if (!id || logsById.has(id)) return false
+    logsById.set(id, row)
+    return true
+  })
+  const dailySummaries = dailySummaryRows
+  const summaryByEmployeeDate = new Map<string, Record<string, unknown>>()
+  dailySummaries.forEach((row) => {
+    const employeeId = String(row.employee_id || "")
+    const attendanceDate = String(row.attendance_date || "")
+    if (employeeId && attendanceDate) summaryByEmployeeDate.set(`${employeeId}:${attendanceDate}`, row)
+  })
   const overtimeRows = (overtimeResult.data || []) as Array<Record<string, unknown>>
   const payrollComponentMap = new Map(((payrollComponentResult.data || []) as Array<Record<string, unknown>>).map((row) => [String(row.id), row]))
   const payrollByEmployee = new Map<string, Record<string, unknown>>()
@@ -6266,12 +6295,13 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey()): Pro
     employee: Record<string, unknown>,
     dateKey: string,
     selectedAttendance?: { checkIn?: Record<string, unknown>; checkOut?: Record<string, unknown> },
+    summary?: Record<string, unknown>,
   ): AttendanceMonitorRow => {
     const employeeId = String(employee.id)
-    const location = locationMap.get(String(employee.work_location_id || ""))
-    const shift = shiftMap.get(String(employee.shift_id || ""))
-    const attendance = selectedAttendance?.checkIn
-    const checkOut = selectedAttendance?.checkOut
+    const attendance = (summary?.check_in_log_id ? logsById.get(String(summary.check_in_log_id)) : undefined) || selectedAttendance?.checkIn
+    const checkOut = (summary?.check_out_log_id ? logsById.get(String(summary.check_out_log_id)) : undefined) || selectedAttendance?.checkOut
+    const location = locationMap.get(String(summary?.work_location_id || employee.work_location_id || ""))
+    const shift = shiftMap.get(String(summary?.shift_id || employee.shift_id || ""))
     const payroll = payrollByEmployee.get(employeeId)
     const cycleDays = Number(payroll?.work_days_count ?? employee.payroll_cycle_days ?? 0)
     const targetDays = Number(payroll?.target_work_days ?? 26)
@@ -6279,22 +6309,51 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey()): Pro
     const basePayrollAmount = Number(payroll?.gross_amount || 0)
     const overtimeAmount = Number(payroll?.overtime_amount || 0)
     const payrollAmount = Number(payroll?.net_amount || 0) || basePayrollAmount + overtimeAmount
-    const attendanceStatus = getDailyAttendanceMonitorStatus(attendance, checkOut)
-    const shiftId = String(employee.shift_id || "")
-    const shiftName = String(shift?.name || "Belum pilih shift")
-    const shiftStartTime = String(shift?.start_time || "")
-    const shiftEndTime = String(shift?.end_time || "")
-    const checkInAt = attendance ? String(attendance.event_at || "") : ""
-    const checkOutAt = checkOut ? String(checkOut.event_at || "") : ""
-    const settlement = calculateAttendanceSettlement({
+    const attendanceStatus = summary
+      ? mapDailySummaryAttendanceStatus(summary.attendance_status)
+      : getDailyAttendanceMonitorStatus(attendance, checkOut)
+    const shiftId = String(summary?.shift_id || employee.shift_id || "")
+    const shiftName = String(summary?.shift_name || shift?.name || "Belum pilih shift")
+    const shiftStartTime = String(summary?.shift_start_time || shift?.start_time || "")
+    const shiftEndTime = String(summary?.shift_end_time || shift?.end_time || "")
+    const shiftLateToleranceMinutes = Number(summary?.shift_late_tolerance_minutes ?? shift?.late_tolerance_minutes ?? 0)
+    const shiftEarlyLeaveToleranceMinutes = Number(summary?.shift_early_leave_tolerance_minutes ?? shift?.early_leave_tolerance_minutes ?? 0)
+    const checkInAt = String(summary?.actual_check_in_at || attendance?.event_at || "")
+    const checkOutAt = String(summary?.actual_check_out_at || checkOut?.event_at || "")
+    const fallbackSettlement = calculateAttendanceSettlement({
       attendanceDate: attendance ? String(attendance.attendance_date || "") : dateKey,
       checkInAt,
       checkOutAt,
       shiftName,
       shiftStartTime,
       shiftEndTime,
+      lateToleranceMinutes: shiftLateToleranceMinutes,
+      earlyLeaveToleranceMinutes: shiftEarlyLeaveToleranceMinutes,
       attendanceStatus,
     })
+    const settlementStatus = summary
+      ? mapDailySummarySettlementStatus(summary.settlement_status)
+      : fallbackSettlement.settlementStatus
+    const expectedWorkMinutes = summary?.expected_work_minutes === null || summary?.expected_work_minutes === undefined
+      ? fallbackSettlement.expectedWorkMinutes
+      : Number(summary.expected_work_minutes)
+    const actualWorkMinutes = summary?.actual_work_minutes === null || summary?.actual_work_minutes === undefined
+      ? fallbackSettlement.actualWorkMinutes
+      : Number(summary.actual_work_minutes)
+    const lateMinutes = Number(summary?.late_minutes ?? fallbackSettlement.lateMinutes)
+    const earlyLeaveMinutes = Number(summary?.early_leave_minutes ?? fallbackSettlement.earlyLeaveMinutes)
+    const shortageMinutes = Number(summary?.shortage_minutes ?? fallbackSettlement.shortageMinutes)
+    const overtimeMinutes = Number(summary?.overtime_minutes ?? fallbackSettlement.overtimeMinutes)
+    const lastActivityAt = [checkOutAt, checkInAt, fallbackSettlement.lastActivityAt]
+      .filter(Boolean)
+      .sort((a, b) => new Date(String(b)).getTime() - new Date(String(a)).getTime())[0] || ""
+    const fallbackLogStatus = attendanceStatus === "failed" ? "rejected" : attendanceStatus === "valid" ? "valid" : "review"
+    const checkInStatus = attendance
+      ? (attendance.status === "valid" || attendance.status === "rejected" ? attendance.status : "review")
+      : checkInAt ? fallbackLogStatus : "missing"
+    const checkOutStatus = checkOut
+      ? (checkOut.status === "valid" || checkOut.status === "rejected" ? checkOut.status : "review")
+      : checkOutAt ? fallbackLogStatus : "missing"
 
     return {
       id: attendance ? String(attendance.id) : `missing-${employeeId}-${dateKey}`,
@@ -6309,11 +6368,13 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey()): Pro
       shiftName,
       shiftStartTime,
       shiftEndTime,
+      shiftLateToleranceMinutes,
+      shiftEarlyLeaveToleranceMinutes,
       attendanceDate: attendance ? String(attendance.attendance_date || "") : dateKey,
       eventAt: attendance ? String(attendance.event_at || "") : "",
       checkInId: attendance ? String(attendance.id || "") : "",
       checkInAt,
-      checkInStatus: attendance ? (attendance.status === "valid" || attendance.status === "rejected" ? attendance.status : "review") : "missing",
+      checkInStatus,
       checkInGpsStatus: attendance ? (attendance.gps_status === "valid" || attendance.gps_status === "out_of_radius" ? attendance.gps_status : "missing") : "missing",
       checkInFaceStatus: attendance ? (attendance.face_status === "verified" || attendance.face_status === "failed" || attendance.face_status === "review" ? attendance.face_status : "not_required") : "not_required",
       checkInFaceScore: attendance?.face_score === null || attendance?.face_score === undefined ? null : Number(attendance.face_score),
@@ -6325,7 +6386,7 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey()): Pro
       checkInNotes: String(attendance?.notes || ""),
       checkOutId: checkOut ? String(checkOut.id || "") : "",
       checkOutAt,
-      checkOutStatus: checkOut ? (checkOut.status === "valid" || checkOut.status === "rejected" ? checkOut.status : "review") : "missing",
+      checkOutStatus,
       checkOutGpsStatus: checkOut ? (checkOut.gps_status === "valid" || checkOut.gps_status === "out_of_radius" ? checkOut.gps_status : "missing") : "missing",
       checkOutFaceStatus: checkOut ? (checkOut.face_status === "verified" || checkOut.face_status === "failed" || checkOut.face_status === "review" ? checkOut.face_status : "not_required") : "not_required",
       checkOutFaceScore: checkOut?.face_score === null || checkOut?.face_score === undefined ? null : Number(checkOut.face_score),
@@ -6336,7 +6397,7 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey()): Pro
       checkOutBiofingerEventId: String(checkOut?.biofinger_event_id || ""),
       checkOutNotes: String(checkOut?.notes || ""),
       attendanceStatus,
-      logStatus: attendance ? (attendance.status === "valid" || attendance.status === "rejected" ? attendance.status : "review") : "missing",
+      logStatus: checkInStatus,
       gpsStatus: attendance ? (attendance.gps_status === "valid" || attendance.gps_status === "out_of_radius" ? attendance.gps_status : "missing") : "missing",
       faceStatus: attendance ? (attendance.face_status === "verified" || attendance.face_status === "failed" || attendance.face_status === "review" ? attendance.face_status : "not_required") : "not_required",
       faceScore: attendance?.face_score === null || attendance?.face_score === undefined ? null : Number(attendance.face_score),
@@ -6356,20 +6417,20 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey()): Pro
       basePayrollAmount,
       overtimeAmount,
       salaryType,
-      workDurationLabel: attendance ? formatAttendanceWorkDuration(checkInAt, checkOutAt || null, dateKey) : "Belum mulai",
-      scheduledStartAt: settlement.scheduledStartAt,
-      scheduledEndAt: settlement.scheduledEndAt,
-      expectedWorkMinutes: settlement.expectedWorkMinutes,
-      actualWorkMinutes: settlement.actualWorkMinutes,
-      lateMinutes: settlement.lateMinutes,
-      earlyLeaveMinutes: settlement.earlyLeaveMinutes,
-      shortageMinutes: settlement.shortageMinutes,
-      overtimeMinutes: settlement.overtimeMinutes,
-      lastActivityAt: settlement.lastActivityAt,
-      settlementStatus: settlement.settlementStatus,
-      settlementLabel: settlement.settlementLabel,
-      settlementTone: settlement.settlementTone,
-      notes: String(attendance?.notes || ""),
+      workDurationLabel: actualWorkMinutes !== null ? formatMinutesDuration(actualWorkMinutes) : checkInAt ? formatAttendanceWorkDuration(checkInAt, checkOutAt || null, dateKey) : "Belum mulai",
+      scheduledStartAt: String(summary?.scheduled_start_at || fallbackSettlement.scheduledStartAt || ""),
+      scheduledEndAt: String(summary?.scheduled_end_at || fallbackSettlement.scheduledEndAt || ""),
+      expectedWorkMinutes,
+      actualWorkMinutes,
+      lateMinutes,
+      earlyLeaveMinutes,
+      shortageMinutes,
+      overtimeMinutes,
+      lastActivityAt,
+      settlementStatus,
+      settlementLabel: getAttendanceSettlementLabel(settlementStatus, shortageMinutes),
+      settlementTone: getAttendanceSettlementTone(settlementStatus),
+      notes: String(summary?.notes || attendance?.notes || ""),
     }
   }
 
@@ -6378,10 +6439,15 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey()): Pro
   const rows: AttendanceMonitorRow[] = activeEmployees
     .map((employee) => {
       const employeeId = String(employee.id)
-      return buildAttendanceMonitorRow(employee, selectedDate, selectedLogsByEmployee.get(employeeId))
+      return buildAttendanceMonitorRow(
+        employee,
+        selectedDate,
+        selectedLogsByEmployee.get(employeeId),
+        summaryByEmployeeDate.get(`${employeeId}:${selectedDate}`),
+      )
     })
 
-  const fieldReadiness: FieldReadinessRow[] = activeEmployees.map((employee) => {
+  const fieldReadiness: FieldReadinessRow[] = recapOnly ? [] : activeEmployees.map((employee) => {
     const employeeId = String(employee.id)
     const location = locationMap.get(String(employee.work_location_id || ""))
     const appUser = appUserByEmployee.get(employeeId)
@@ -6422,21 +6488,21 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey()): Pro
     }
   })
 
-  const allRows: AttendanceMonitorRow[] = []
-  logsByEmployeeDate.forEach((entry, key) => {
-    const [employeeId, attendanceDate] = key.split(":")
-    const employee = activeEmployees.find((item) => String(item.id) === employeeId)
-    if (!employee || !attendanceDate) return
-    allRows.push(buildAttendanceMonitorRow(employee, attendanceDate, entry))
-  })
-  allRows.sort((a, b) => {
-    const dateCompare = b.attendanceDate.localeCompare(a.attendanceDate)
-    if (dateCompare !== 0) return dateCompare
-    return a.employeeCode.localeCompare(b.employeeCode)
-  })
+  const activeEmployeeMap = new Map(activeEmployees.map((employee) => [String(employee.id), employee]))
+  const rangeDateKeys = getAttendanceDateKeys(startDate, endDate)
+  const allRows = rangeDateKeys.flatMap((attendanceDate) => activeEmployees.map((employee) => {
+    const employeeId = String(employee.id)
+    return buildAttendanceMonitorRow(
+      employee,
+      attendanceDate,
+      logsByEmployeeDate.get(`${employeeId}:${attendanceDate}`),
+      summaryByEmployeeDate.get(`${employeeId}:${attendanceDate}`),
+    )
+  }))
+  allRows.sort(compareAttendanceRowsByLatestActivity)
 
-  const employeesById = new Map(activeEmployees.map((employee) => [String(employee.id), employee]))
-  const reviewRows: AttendanceReviewRow[] = logs
+  const employeesById = activeEmployeeMap
+  const reviewRows: AttendanceReviewRow[] = recapOnly ? [] : logs
     .filter((log) => log.status === "review")
     .slice(0, 50)
     .map((log) => {
@@ -6481,11 +6547,13 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey()): Pro
       }
     })
 
-  const overtimeReviewRows: OvertimeReviewRow[] = overtimeRows.map((overtime) => {
+  const overtimeReviewRows: OvertimeReviewRow[] = recapOnly ? [] : overtimeRows.map((overtime) => {
     const employee = employeesById.get(String(overtime.employee_id || ""))
     const component = payrollComponentMap.get(String(overtime.payroll_component_id || ""))
     const overtimeStatus = String(overtime.status || "pending") as OvertimeStatus
     const dayType = String(overtime.day_type || "weekday")
+    const requestSource = String(overtime.request_source || "auto")
+    const overtimeBasis = String(overtime.overtime_basis || component?.overtime_basis || "extra_after_shift")
 
     return {
       id: String(overtime.id),
@@ -6504,7 +6572,15 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey()): Pro
       rateAmount: Number(overtime.rate_amount || component?.rate_amount || 0),
       totalAmount: Number(overtime.total_amount || 0),
       dayType: dayType === "sunday" || dayType === "holiday" ? dayType : "weekday",
+      overtimeBasis: overtimeBasis === "full_duration" ? "full_duration" : "extra_after_shift",
       status: overtimeStatus === "approved" || overtimeStatus === "rejected" || overtimeStatus === "draft" ? overtimeStatus : "pending",
+      requestSource: requestSource === "planned" || requestSource === "manual" ? requestSource : "auto",
+      plannedStartAt: String(overtime.planned_start_at || ""),
+      plannedEndAt: String(overtime.planned_end_at || ""),
+      plannedMinutes: Number(overtime.planned_minutes || 0),
+      requestReason: String(overtime.request_reason || ""),
+      requestedAt: String(overtime.requested_at || overtime.created_at || ""),
+      matchedAttendance: overtime.matched_attendance === true || Boolean(overtime.actual_check_out_at),
       componentName: String(component?.name || "Komponen lembur"),
       notes: String(overtime.notes || ""),
     }
@@ -7033,13 +7109,34 @@ async function resetAttendanceDay(employeeId: string, attendanceDate: string, no
   return data
 }
 
-async function correctMissingCheckout(employeeId: string, attendanceDate: string, checkOutTime: string, notes: string) {
+async function correctMissingCheckIn(employeeId: string, attendanceDate: string, checkInDate: string, checkInTime: string, notes: string) {
+  const { data, error } = await supabase.functions.invoke("attendance-review", {
+    body: {
+      action: "correct_checkin",
+      payload: {
+        employeeId,
+        attendanceDate,
+        checkInDate,
+        checkInTime,
+        notes,
+      },
+    },
+  })
+
+  if (error) throw new Error(await getFunctionInvokeError(error, "Koreksi check-in belum bisa diproses."))
+  if (data?.error) throw new Error(String(data.error))
+
+  return data
+}
+
+async function correctMissingCheckout(employeeId: string, attendanceDate: string, checkOutDate: string, checkOutTime: string, notes: string) {
   const { data, error } = await supabase.functions.invoke("attendance-review", {
     body: {
       action: "correct_checkout",
       payload: {
         employeeId,
         attendanceDate,
+        checkOutDate,
         checkOutTime,
         notes,
       },
@@ -7081,6 +7178,19 @@ async function reviewOvertimeRequest(id: string, decision: "approve" | "reject",
   }
   if (data?.error) throw new Error(String(data.error))
 
+  return data
+}
+
+async function createOvertimeRequest(payload: OvertimeRequestSubmitPayload) {
+  const { data, error } = await supabase.rpc("request_overtime", {
+    target_employee_id: payload.employeeId,
+    target_overtime_date: payload.overtimeDate,
+    planned_start_time: payload.plannedStartTime,
+    planned_end_time: payload.plannedEndTime,
+    request_reason: payload.reason,
+  })
+
+  if (error) throw error
   return data
 }
 
@@ -7149,50 +7259,44 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
   const [faceEnrollmentRow, setFaceEnrollmentRow] = useState<EmployeeDirectoryRow | null>(null)
   const [faceEnrollmentSubmitting, setFaceEnrollmentSubmitting] = useState(false)
   const [dialogInitialValues, setDialogInitialValues] = useState<EmployeeFormValues>(() => createEmptyEmployeeForm())
-  const [rows, setRows] = useState<EmployeeDirectoryRow[]>([])
-  const [divisions, setDivisions] = useState<EmployeeOption[]>([])
-  const [positions, setPositions] = useState<EmployeeOption[]>([])
-  const [locations, setLocations] = useState<EmployeeOption[]>([])
-  const [shifts, setShifts] = useState<EmployeeOption[]>([])
-  const [policies, setPolicies] = useState<AttendancePolicyOption[]>([])
-  const [kioskSchemaReady, setKioskSchemaReady] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
   const [activeTab, setActiveTab] = useState<EmployeeDirectoryTab>("all")
   const [divisionFilter, setDivisionFilter] = useState("all")
   const [statusFilter, setStatusFilter] = useState("all")
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(25)
-  const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [errorMessage, setErrorMessage] = useState("")
   const [toast, setToast] = useState<ToastMessage | null>(null)
+  const {
+    data: employeeData,
+    loading,
+    error: employeeLoadError,
+    reload: reloadEmployeeData,
+  } = useFoundationCachedData<EmployeeDirectoryData>({
+    cacheKey: "employees:directory",
+    createInitialData: createEmptyEmployeeDirectoryData,
+    load: loadEmployeeData,
+    revalidateOnCache: true,
+  })
   const canManage = hasPermission(profile, "employees.manage")
+  const { rows, divisions, positions, locations, shifts, policies, kioskSchemaReady } = employeeData
 
-  const fetchRows = async () => {
-    setLoading(true)
+  const fetchRows = async (options: { silent?: boolean } = {}) => {
     setErrorMessage("")
 
     try {
-      const data = await loadEmployeeData()
-      setRows(data.rows)
-      setDivisions(data.divisions)
-      setPositions(data.positions)
-      setLocations(data.locations)
-      setShifts(data.shifts)
-      setPolicies(data.policies)
-      setKioskSchemaReady(data.kioskSchemaReady)
+      const data = await reloadEmployeeData({ silent: options.silent ?? true })
       return data
     } catch (error) {
       setErrorMessage(getFriendlySupabaseError(error, "Gagal mengambil data karyawan."))
       return null
-    } finally {
-      setLoading(false)
     }
   }
 
   useEffect(() => {
-    void fetchRows()
-  }, [])
+    if (employeeLoadError) setErrorMessage(getFriendlySupabaseError(employeeLoadError, "Gagal mengambil data karyawan."))
+  }, [employeeLoadError])
 
   const liveRows = rows.filter((row) => !row.deletedAt)
   const archivedRows = rows.filter((row) => row.deletedAt)
@@ -7217,13 +7321,23 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
   const averageSalary = activeRows
     ? Math.round(liveRows.filter((row) => row.status === "active").reduce((sum, row) => sum + getEmployeeSalaryAmount(row), 0) / activeRows)
     : 0
-  const employeeDirectoryTabs: Array<{ id: EmployeeDirectoryTab; label: string; icon: LucideIcon; count: number }> = [
-    { id: "all", label: "Semua", icon: UsersRound, count: liveRows.length },
-    { id: "active", label: "Aktif", icon: UserRoundCheck, count: activeRows },
-    { id: "review", label: "Review", icon: AlertTriangle, count: reviewRows },
-    { id: "inactive", label: "Nonaktif", icon: Lock, count: liveRows.filter((row) => row.status === "inactive").length },
-    { id: "archived", label: "Arsip", icon: Archive, count: archivedRows.length },
+  const employeeTabCount = (value: number) => loading ? <FoundationSkeleton className="tabCount" /> : value
+  const employeeDirectoryTabs: Array<{ id: EmployeeDirectoryTab; label: string; icon: LucideIcon; count: ReactNode }> = [
+    { id: "all", label: "Semua", icon: UsersRound, count: employeeTabCount(liveRows.length) },
+    { id: "active", label: "Aktif", icon: UserRoundCheck, count: employeeTabCount(activeRows) },
+    { id: "review", label: "Review", icon: AlertTriangle, count: employeeTabCount(reviewRows) },
+    { id: "inactive", label: "Nonaktif", icon: Lock, count: employeeTabCount(liveRows.filter((row) => row.status === "inactive").length) },
+    { id: "archived", label: "Arsip", icon: Archive, count: employeeTabCount(archivedRows.length) },
   ]
+  const employeeHeaderStats: ReactNode[] = loading
+    ? Array.from({ length: 5 }).map((_, index) => <FoundationSkeleton className={clsx("inline", index === 0 && "wide")} key={index} />)
+    : [
+        `${filteredRows.length} dari ${visibleRows.length} karyawan`,
+        `${activeRows} aktif`,
+        `${reviewRows} review`,
+        `${archivedRows.length} arsip`,
+        `Gaji aktif rata-rata ${formatCurrency(averageSalary)}`,
+      ]
   const divisionFilterOptions = [
     { value: "all", label: "Semua Divisi", searchLabel: "semua divisi" },
     ...divisions.map((division) => ({
@@ -7476,20 +7590,12 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
   const employeeTableDrag = useHorizontalDragScroll<HTMLDivElement>()
 
   return (
-        <OperationalPageShell className="kioskPageShell">
+    <OperationalPageShell>
       <PageHeader
         activeView={activeView}
         subtitle="Direktori karyawan yang terhubung ke divisi, jabatan, shift, lokasi kerja, dan cycle payroll 26 hari."
         meta={
-          <InlinePageStats
-            items={[
-              `${filteredRows.length} dari ${visibleRows.length} karyawan`,
-              `${activeRows} aktif`,
-              `${reviewRows} review`,
-              `${archivedRows.length} arsip`,
-              `Gaji aktif rata-rata ${formatCurrency(averageSalary)}`,
-            ]}
-          />
+          <InlinePageStats items={employeeHeaderStats} />
         }
         actions={
           <>
@@ -7577,13 +7683,7 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
                 </tr>
               </thead>
               <tbody>
-                {loading && (
-                  <tr>
-                    <td className="tableStateCell" colSpan={10}>
-                      <TableState title="Memuat karyawan" description="Mengambil direktori karyawan dari Supabase." icon={UsersRound} />
-                    </td>
-                  </tr>
-                )}
+                {loading && <FoundationTableSkeletonRows colSpan={10} columns={10} rows={6} />}
                 {!loading && errorMessage && rows.length === 0 && (
                   <tr>
                     <td className="tableStateCell" colSpan={10}>
@@ -8110,8 +8210,20 @@ function KioskModePage({ activeView }: { activeView: ViewId }) {
 }
 
 function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewId; profile: AppAccessProfile; onOpenGuide?: (guideId?: string) => void }) {
-  const [data, setData] = useState<BiofingerData>(() => biofingerDataCache ?? createEmptyBiofingerData())
-  const [selectedDeviceId, setSelectedDeviceId] = useState(() => biofingerSelectedDeviceCache || (biofingerDataCache ? biofingerDataCache.devices.length === 1 ? biofingerDataCache.devices[0].id : BIOFINGER_ALL_DEVICES : ""))
+  const {
+    data,
+    loading,
+    refreshing,
+    error: biofingerLoadError,
+    reload: reloadBiofingerData,
+    commit: commitBiofingerData,
+  } = useFoundationCachedData<BiofingerData>({
+    cacheKey: "biofinger:management",
+    createInitialData: createEmptyBiofingerData,
+    load: loadBiofingerData,
+    revalidateOnCache: true,
+  })
+  const [selectedDeviceId, setSelectedDeviceId] = useState(() => biofingerSelectedDeviceCache)
   const [activeBiofingerTab, setActiveBiofingerTab] = useState<BiofingerWorkspaceTab>(() => biofingerActiveTabCache)
   const [statusFilter, setStatusFilter] = useState<"all" | BiofingerLinkStatus>(() => biofingerStatusFilterCache)
   const [searchTerm, setSearchTerm] = useState(() => biofingerSearchTermCache)
@@ -8124,7 +8236,6 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
   const [mappingDetailId, setMappingDetailId] = useState("")
   const [mappingDraftEmployeeId, setMappingDraftEmployeeId] = useState("")
   const [deviceFormValues, setDeviceFormValues] = useState<BiofingerDeviceFormValues>(() => createEmptyBiofingerDeviceForm())
-  const [loading, setLoading] = useState(() => !biofingerDataCache)
   const [converting, setConverting] = useState(false)
   const [syncingUsers, setSyncingUsers] = useState(false)
   const [convertConfirmOpen, setConvertConfirmOpen] = useState(false)
@@ -8134,42 +8245,54 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
   const [toast, setToast] = useState<ToastMessage | null>(null)
   const [, setConnectionClock] = useState(0)
   const canManage = hasPermission(profile, "biofinger.manage") || hasPermission(profile, "attendance.review") || hasPermission(profile, "employees.manage")
+  const rawEventTableDrag = useHorizontalDragScroll<HTMLDivElement>()
 
-  const showToast = (message: Omit<ToastMessage, "id">) => {
+  const showToast = useCallback((message: Omit<ToastMessage, "id">) => {
     setToast({ id: Date.now(), ...message })
-  }
-
-  const commitBiofingerData = useCallback((next: BiofingerDataUpdater) => {
-    setData((current) => {
-      const resolved = typeof next === "function" ? (next as (current: BiofingerData) => BiofingerData)(current) : next
-      biofingerDataCache = resolved
-      return resolved
-    })
   }, [])
 
   const refreshData = useCallback(async () => {
-    setLoading(true)
     setErrorMessage("")
 
     try {
-      const nextData = await loadBiofingerData()
-      commitBiofingerData(nextData)
+      const nextData = await reloadBiofingerData({ silent: !loading })
       setSelectedDeviceId((current) => {
         if (current === BIOFINGER_ALL_DEVICES) return current
         if (current && nextData.devices.some((device) => device.id === current)) return current
         return nextData.devices.length === 1 ? nextData.devices[0].id : BIOFINGER_ALL_DEVICES
       })
     } catch (error) {
-      setErrorMessage(getFriendlySupabaseError(error, "Data Biofinger belum bisa dimuat."))
-    } finally {
-      setLoading(false)
+      const message = getFriendlySupabaseError(error, "Data Biofinger belum bisa dimuat.")
+      const hasVisibleData = data.devices.length > 0 || data.links.length > 0 || data.events.length > 0 || data.eventCount > 0
+      if (hasVisibleData) {
+        showToast({ tone: "error", title: "Refresh Biofinger gagal", description: message })
+      } else {
+        setErrorMessage(message)
+      }
     }
-  }, [commitBiofingerData])
+  }, [data.devices.length, data.eventCount, data.events.length, data.links.length, loading, reloadBiofingerData, showToast])
 
   useEffect(() => {
-    if (biofingerDataCache) return
-    void refreshData()
-  }, [refreshData])
+    if (!biofingerLoadError) return
+
+    const message = getFriendlySupabaseError(biofingerLoadError, "Data Biofinger belum bisa dimuat.")
+    const hasVisibleData = data.devices.length > 0 || data.links.length > 0 || data.events.length > 0 || data.eventCount > 0
+    if (hasVisibleData) {
+      showToast({ tone: "error", title: "Sinkron Biofinger gagal", description: message })
+    } else {
+      setErrorMessage(message)
+    }
+  }, [biofingerLoadError, data.devices.length, data.eventCount, data.events.length, data.links.length, showToast])
+
+  useEffect(() => {
+    if (loading) return
+
+    setSelectedDeviceId((current) => {
+      if (current === BIOFINGER_ALL_DEVICES) return current
+      if (current && data.devices.some((device) => device.id === current)) return current
+      return data.devices.length === 1 ? data.devices[0].id : BIOFINGER_ALL_DEVICES
+    })
+  }, [data.devices, loading])
 
   useEffect(() => {
     const intervalId = window.setInterval(() => setConnectionClock((current) => current + 1), 30_000)
@@ -8204,7 +8327,7 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
     setCurrentPage(1)
   }, [searchTerm, selectedDeviceId, statusFilter, mappingSort, pageSize])
 
-  const biofingerDataLoading = loading && !biofingerDataCache
+  const biofingerDataLoading = loading
   const biofingerDataValue = (value: ReactNode, className?: string) => biofingerDataLoading ? <FoundationSkeleton className={className} /> : value
   const biofingerInlineLoadingStats = (count: number) => Array.from({ length: count }).map((_, index) => <FoundationSkeleton className={clsx("inline", index === 0 && "wide")} key={index} />)
   const normalizedTerm = searchTerm.trim().toLowerCase()
@@ -8667,7 +8790,7 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
         subtitle="Mapping user fingerprint AT-301 ke master karyawan DMS sebelum raw event dikonversi ke absensi payroll."
         actions={
           <>
-            <button className="secondaryButton" type="button" disabled={!canManage || biofingerDataLoading || loading || converting || syncingUsers || !data.schemaReady || data.devices.length === 0} onClick={() => void handleRequestUserSync()}>
+            <button className="secondaryButton" type="button" disabled={!canManage || biofingerDataLoading || refreshing || converting || syncingUsers || !data.schemaReady || data.devices.length === 0} onClick={() => void handleRequestUserSync()}>
               <Download size={17} />
               {syncingUsers ? "Meminta Sync..." : "Sync User Mesin"}
             </button>
@@ -8675,7 +8798,7 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
               <FileCheck2 size={17} />
               {converting ? "Memproses..." : "Proses Absensi"}
             </button>
-            <FoundationRefreshButton loading={loading} disabled={converting || syncingUsers} onClick={() => void refreshData()} />
+            <FoundationRefreshButton loading={loading || refreshing} disabled={converting || syncingUsers} onClick={() => void refreshData()} />
           </>
         }
         meta={
@@ -9035,7 +9158,11 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
                 </div>
                 <InlinePageStats items={biofingerDataLoading ? biofingerInlineLoadingStats(2) : [`${deviceEvents.length} event sample`, selectedDevice?.deviceCode || "Semua device"]} />
               </div>
-              <div className="tableScroller uiDataTableScroller uiDataTableHasColumns">
+              <div
+                className={clsx("tableScroller uiDataTableScroller uiDataTableHasColumns biofingerRawEventTableScroller", rawEventTableDrag.dragging && "dragging")}
+                ref={rawEventTableDrag.ref}
+                {...rawEventTableDrag.handlers}
+              >
                 <table>
                   <colgroup>
                     <col className="tableNumberColumn" />
@@ -9611,7 +9738,7 @@ function BiofingerDeviceGuideDrawer({
     {
       title: "Validasi device online",
       text: "Setelah disimpan dan mesin online, cek Device Registry untuk Last Seen. Raw Event dan Mapping User akan bergerak saat mesin mengirim data.",
-      meta: "Mapping user dulu, lalu Proses Absensi untuk attendance final.",
+      meta: "Mapping user dulu, receiver otomatis kirim ke Live Absensi.",
     },
   ]
 
@@ -12485,10 +12612,13 @@ function MasterDataPage({ activeView }: { activeView: ViewId }) {
       radiusM: String(row.radiusM || 100),
       startTime: row.startTime || "",
       endTime: row.endTime || "",
+      lateToleranceMinutes: String(row.lateToleranceMinutes ?? 0),
+      earlyLeaveToleranceMinutes: String(row.earlyLeaveToleranceMinutes ?? 0),
       componentType: row.componentType === "deduction" ? "deduction" : "earning",
       calculationUnit: row.calculationUnit === "hour" || row.calculationUnit === "day" ? row.calculationUnit : "fixed",
       rateAmount: String(row.rateAmount || 0),
       dayType: row.dayType === "weekday" || row.dayType === "sunday" || row.dayType === "holiday" ? row.dayType : "all",
+      overtimeBasis: row.overtimeBasis === "full_duration" ? "full_duration" : "extra_after_shift",
       autoDetectOvertime: row.autoDetectOvertime === true,
       requiresApproval: row.requiresApproval !== false,
       status: row.status,
@@ -13022,6 +13152,8 @@ function MasterDataDialog({
             <>
               <TextFormField label="Jam Mulai" type="time" value={values.startTime} onChange={(event) => setValues((current) => ({ ...current, startTime: event.target.value }))} required />
               <TextFormField label="Jam Selesai" type="time" value={values.endTime} onChange={(event) => setValues((current) => ({ ...current, endTime: event.target.value }))} required />
+              <TextFormField label="Toleransi Telat (Menit)" type="number" min={0} max={240} value={values.lateToleranceMinutes} onChange={(event) => setValues((current) => ({ ...current, lateToleranceMinutes: event.target.value }))} placeholder="0" required />
+              <TextFormField label="Toleransi Pulang Cepat (Menit)" type="number" min={0} max={240} value={values.earlyLeaveToleranceMinutes} onChange={(event) => setValues((current) => ({ ...current, earlyLeaveToleranceMinutes: event.target.value }))} placeholder="0" required />
               <TextFormField label="Catatan Shift" value={values.description} onChange={(event) => setValues((current) => ({ ...current, description: event.target.value }))} placeholder="Catatan operasional shift" />
             </>
           )}
@@ -13045,7 +13177,23 @@ function MasterDataDialog({
                 <option value="day">Per Hari</option>
               </SelectFormField>
               <TextFormField label={values.calculationUnit === "hour" ? "Rate Per Jam" : "Nominal Rate"} type="number" min={0} value={values.rateAmount} onChange={(event) => setValues((current) => ({ ...current, rateAmount: event.target.value }))} placeholder="20000" required />
-              <SelectFormField label="Tipe Hari" value={values.dayType} onChange={(event) => setValues((current) => ({ ...current, dayType: event.target.value as MasterDataFormValues["dayType"] }))} required>
+              <SelectFormField
+                label="Tipe Hari"
+                value={values.dayType}
+                onChange={(event) => {
+                  const dayType = event.target.value as MasterDataFormValues["dayType"]
+                  setValues((current) => ({
+                    ...current,
+                    dayType,
+                    overtimeBasis: current.autoDetectOvertime && (dayType === "sunday" || dayType === "holiday")
+                      ? "full_duration"
+                      : current.autoDetectOvertime
+                        ? "extra_after_shift"
+                        : current.overtimeBasis,
+                  }))
+                }}
+                required
+              >
                 <option value="all">Semua Hari</option>
                 <option value="weekday">Weekday</option>
                 <option value="sunday">Minggu</option>
@@ -13059,8 +13207,19 @@ function MasterDataDialog({
                   autoDetectOvertime: checked,
                   componentType: checked ? "earning" : current.componentType,
                   calculationUnit: checked ? "hour" : current.calculationUnit,
+                  overtimeBasis: checked && (current.dayType === "sunday" || current.dayType === "holiday") ? "full_duration" : "extra_after_shift",
                 }))}
               />
+              <SelectFormField
+                label="Basis Hitung Lembur"
+                value={values.overtimeBasis}
+                onChange={(event) => setValues((current) => ({ ...current, overtimeBasis: event.target.value as OvertimeCalculationBasis }))}
+                disabled={!values.autoDetectOvertime}
+                required
+              >
+                <option value="extra_after_shift">Setelah Shift</option>
+                <option value="full_duration">Full Durasi Kerja</option>
+              </SelectFormField>
               <SwitchFormField
                 label="Wajib Approval"
                 checked={values.requiresApproval}
@@ -13331,8 +13490,8 @@ function AttendanceMonitorDetailDialog({
       label: "Check-in",
       time: row.checkInAt ? formatAttendanceTime(row.checkInAt) : "Belum masuk",
       status: logStatusLabel[row.checkInStatus],
-      gps: row.checkInDistanceM === null ? gpsLogLabel[row.checkInGpsStatus] : `${gpsLogLabel[row.checkInGpsStatus]} · ${row.checkInDistanceM}m / ${row.radiusM || "-"}m`,
-      face: row.checkInFaceScore === null ? faceLogLabel[row.checkInFaceStatus] : `${row.checkInFaceScore}% · ${faceLogLabel[row.checkInFaceStatus]}`,
+      gps: row.checkInDistanceM === null ? gpsLogLabel[row.checkInGpsStatus] : `${gpsLogLabel[row.checkInGpsStatus]} / ${row.checkInDistanceM}m dari ${row.radiusM || "-"}m`,
+      face: row.checkInFaceScore === null ? faceLogLabel[row.checkInFaceStatus] : `${row.checkInFaceScore}% / ${faceLogLabel[row.checkInFaceStatus]}`,
       source: row.checkInSource,
       media: row.checkInMedia,
       notes: row.checkInNotes,
@@ -13342,8 +13501,8 @@ function AttendanceMonitorDetailDialog({
       label: "Check-out",
       time: row.checkOutAt ? formatAttendanceTime(row.checkOutAt) : "Belum pulang",
       status: logStatusLabel[row.checkOutStatus],
-      gps: row.checkOutDistanceM === null ? gpsLogLabel[row.checkOutGpsStatus] : `${gpsLogLabel[row.checkOutGpsStatus]} · ${row.checkOutDistanceM}m / ${row.radiusM || "-"}m`,
-      face: row.checkOutFaceScore === null ? faceLogLabel[row.checkOutFaceStatus] : `${row.checkOutFaceScore}% · ${faceLogLabel[row.checkOutFaceStatus]}`,
+      gps: row.checkOutDistanceM === null ? gpsLogLabel[row.checkOutGpsStatus] : `${gpsLogLabel[row.checkOutGpsStatus]} / ${row.checkOutDistanceM}m dari ${row.radiusM || "-"}m`,
+      face: row.checkOutFaceScore === null ? faceLogLabel[row.checkOutFaceStatus] : `${row.checkOutFaceScore}% / ${faceLogLabel[row.checkOutFaceStatus]}`,
       source: row.checkOutSource,
       media: row.checkOutMedia,
       notes: row.checkOutNotes,
@@ -13351,21 +13510,22 @@ function AttendanceMonitorDetailDialog({
     },
   ]
   const summaryRows = [
-    { label: "Karyawan", value: `${row.employeeCode} · ${row.divisionName || "-"}` },
-    { label: "Lokasi kerja", value: `${row.workLocationName || "-"} · radius ${row.radiusM || "-"}m` },
+    { label: "Karyawan", value: `${row.employeeCode} / ${row.divisionName || "-"}` },
+    { label: "Lokasi kerja", value: `${row.workLocationName || "-"} / radius ${row.radiusM || "-"}m` },
     { label: "Shift", value: `${row.shiftName} / ${getAttendanceShiftScheduleLabel(row)}` },
+    { label: "Toleransi shift", value: `Telat ${formatMinutesDuration(row.shiftLateToleranceMinutes)} / pulang cepat ${formatMinutesDuration(row.shiftEarlyLeaveToleranceMinutes)}` },
     { label: "Jam kerja real", value: row.workDurationLabel },
     { label: "Settlement", value: row.shortageMinutes > 0 ? `${row.settlementLabel} / wajib ${row.expectedWorkMinutes === null ? "-" : formatMinutesDuration(row.expectedWorkMinutes)}` : row.settlementLabel },
     { label: "Telat / Pulang cepat", value: `${row.lateMinutes ? formatMinutesDuration(row.lateMinutes) : "0m"} / ${row.earlyLeaveMinutes ? formatMinutesDuration(row.earlyLeaveMinutes) : "0m"}` },
     { label: "Sumber check-in", value: row.checkInId ? formatAttendanceSourceMeta(row.checkInSource, row.checkInMedia) : "Belum masuk" },
     { label: "Sumber check-out", value: row.checkOutId ? formatAttendanceSourceMeta(row.checkOutSource, row.checkOutMedia) : "Belum pulang" },
-    { label: "Payroll cycle", value: row.payrollCycleNumber ? `Cycle ${row.payrollCycleNumber} · ${row.cycleDays}/${row.targetDays} hari` : `${row.cycleDays}/${row.targetDays} hari` },
+    { label: "Payroll cycle", value: row.payrollCycleNumber ? `Cycle ${row.payrollCycleNumber} / ${row.cycleDays}/${row.targetDays} hari` : `${row.cycleDays}/${row.targetDays} hari` },
     { label: "Periode", value: formatPayrollPeriod(row) },
-    { label: "Tipe gaji", value: `${employeeSalaryTypeLabel[row.salaryType]} · ${row.basePayrollAmount ? formatCurrency(row.basePayrollAmount) : "-"}` },
-    { label: "Total payroll", value: `${row.payrollAmount ? formatCurrency(row.payrollAmount) : "-"} · ${payrollLabel[row.payrollStatus]}` },
+    { label: "Tipe gaji", value: `${employeeSalaryTypeLabel[row.salaryType]} / ${row.basePayrollAmount ? formatCurrency(row.basePayrollAmount) : "-"}` },
+    { label: "Total payroll", value: `${row.payrollAmount ? formatCurrency(row.payrollAmount) : "-"} / ${payrollLabel[row.payrollStatus]}` },
   ]
   const hasAttendance = Boolean(row.checkInId || row.checkOutId)
-  const canCorrectCheckout = Boolean(row.checkInId && !row.checkOutId && isMissingCheckoutShift(row.checkInAt, row.checkOutAt, row.attendanceDate))
+  const canCorrectCheckout = canCorrectMissingCheckout(row)
 
   return createPortal(
     <div className="dialogBackdrop" role="presentation" onMouseDown={onClose}>
@@ -13473,13 +13633,36 @@ function AttendanceMonitorDetailDialog({
 }
 
 function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "attendance-requests" | "attendance-review" | "field-monitoring" | "payroll" }) {
-  const [data, setData] = useState<OperationsFoundationData>({ rows: [], allRows: [], locations: [], fieldReadiness: [], reviews: [], overtime: [] })
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
   const [selectedDate, setSelectedDate] = useState(getLocalDateKey())
   const [attendanceDateMode, setAttendanceDateMode] = useState<AttendanceDateMode>("today")
-  const [recapRange, setRecapRange] = useState<AttendanceRecapRange>("day")
-  const [loading, setLoading] = useState(true)
+  const dataLoadRange = useMemo(() => {
+    if (activeView === "attendance-live" || activeView === "attendance-requests") return getAttendanceModeLoadRange(selectedDate, attendanceDateMode)
+
+    return normalizeAttendanceLoadRange(selectedDate)
+  }, [activeView, attendanceDateMode, selectedDate])
+  const loadScope: AttendanceLoadScope = activeView === "attendance-requests" ? "attendance-recap" : "full"
+  const operationsCacheKey = useMemo(
+    () => getOperationsFoundationCacheKey(selectedDate, dataLoadRange, loadScope),
+    [dataLoadRange, loadScope, selectedDate],
+  )
+  const loadAttendanceData = useCallback(
+    () => loadOperationsFoundationData(selectedDate, { ...dataLoadRange, scope: loadScope }),
+    [dataLoadRange, loadScope, selectedDate],
+  )
+  const {
+    data,
+    loading,
+    refreshing,
+    error: attendanceLoadError,
+    reload: reloadAttendanceData,
+  } = useFoundationCachedData<OperationsFoundationData>({
+    cacheKey: operationsCacheKey,
+    createInitialData: createEmptyOperationsFoundationData,
+    load: loadAttendanceData,
+    revalidateOnCache: true,
+  })
   const [errorMessage, setErrorMessage] = useState("")
   const [fieldDialogOpen, setFieldDialogOpen] = useState(false)
   const [fieldSubmitting, setFieldSubmitting] = useState(false)
@@ -13487,6 +13670,8 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
   const [faceEnrollmentSubmitting, setFaceEnrollmentSubmitting] = useState(false)
   const [reviewTarget, setReviewTarget] = useState<AttendanceReviewRow | null>(null)
   const [reviewSubmitting, setReviewSubmitting] = useState(false)
+  const [overtimeRequestOpen, setOvertimeRequestOpen] = useState(false)
+  const [overtimeRequestSubmitting, setOvertimeRequestSubmitting] = useState(false)
   const [overtimeTarget, setOvertimeTarget] = useState<OvertimeReviewRow | null>(null)
   const [overtimeSubmitting, setOvertimeSubmitting] = useState(false)
   const [payrollTarget, setPayrollTarget] = useState<AttendanceMonitorRow | null>(null)
@@ -13494,6 +13679,8 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
   const [payrollSubmitting, setPayrollSubmitting] = useState(false)
   const [resetAttendanceRow, setResetAttendanceRow] = useState<AttendanceMonitorRow | null>(null)
   const [resetAttendanceSubmitting, setResetAttendanceSubmitting] = useState(false)
+  const [checkinCorrectionRow, setCheckinCorrectionRow] = useState<AttendanceMonitorRow | null>(null)
+  const [checkinCorrectionSubmitting, setCheckinCorrectionSubmitting] = useState(false)
   const [checkoutCorrectionRow, setCheckoutCorrectionRow] = useState<AttendanceMonitorRow | null>(null)
   const [checkoutCorrectionSubmitting, setCheckoutCorrectionSubmitting] = useState(false)
   const [toast, setToast] = useState<ToastMessage | null>(null)
@@ -13503,39 +13690,30 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
   }
 
   const refreshData = useCallback(async () => {
-    setLoading(true)
     setErrorMessage("")
 
     try {
-      const nextData = await loadOperationsFoundationData(selectedDate)
-      setData(nextData)
+      await reloadAttendanceData({
+        silent: !loading,
+        load: () => loadOperationsFoundationData(selectedDate, {
+          ...dataLoadRange,
+          refreshBackend: true,
+          refreshPayroll: activeView === "payroll",
+          scope: loadScope,
+        }),
+      })
     } catch (error) {
       setErrorMessage(getFriendlySupabaseError(error, "Gagal mengambil foundation absensi dan payroll."))
-    } finally {
-      setLoading(false)
     }
-  }, [selectedDate])
+  }, [activeView, dataLoadRange, loadScope, loading, reloadAttendanceData, selectedDate])
 
   useEffect(() => {
-    let active = true
+    if (attendanceLoadError) setErrorMessage(getFriendlySupabaseError(attendanceLoadError, "Gagal mengambil foundation absensi dan payroll."))
+  }, [attendanceLoadError])
 
-    setLoading(true)
-    setErrorMessage("")
-    void loadOperationsFoundationData(selectedDate)
-      .then((nextData) => {
-        if (active) setData(nextData)
-      })
-      .catch((error) => {
-        if (active) setErrorMessage(getFriendlySupabaseError(error, "Gagal mengambil foundation absensi dan payroll."))
-      })
-      .finally(() => {
-        if (active) setLoading(false)
-      })
-
-    return () => {
-      active = false
-    }
-  }, [selectedDate])
+  useEffect(() => {
+    setStatusFilter("all")
+  }, [activeView])
 
   const handleFieldAttendanceSubmit = async (payload: FieldAttendanceSubmitPayload) => {
     setFieldSubmitting(true)
@@ -13639,6 +13817,29 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
     }
   }
 
+  const handleOvertimeRequestSubmit = async (payload: OvertimeRequestSubmitPayload) => {
+    setOvertimeRequestSubmitting(true)
+    try {
+      const employee = overtimeRequestEmployees.find((row) => row.employeeId === payload.employeeId)
+      await createOvertimeRequest(payload)
+      showToast({
+        tone: "success",
+        title: "Request lembur disimpan",
+        description: `${employee?.fullName || "Karyawan"} menunggu realisasi checkout sebelum payroll approval.`,
+      })
+      setOvertimeRequestOpen(false)
+      await refreshData()
+    } catch (error) {
+      showToast({
+        tone: "error",
+        title: "Gagal membuat request lembur",
+        description: getFriendlySupabaseError(error, "Request lembur belum bisa disimpan."),
+      })
+    } finally {
+      setOvertimeRequestSubmitting(false)
+    }
+  }
+
   const handleOvertimeReviewSubmit = async (decision: "approve" | "reject", approvedMinutes: number, notes: string) => {
     if (!overtimeTarget) return
 
@@ -13708,7 +13909,7 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
       await resetAttendanceDay(
         resetAttendanceRow.employeeId,
         resetAttendanceRow.attendanceDate,
-        "Reset data testing dari Live Absensi management.",
+        "Reset data absensi dari management app.",
       )
       showToast({
         tone: "success",
@@ -13728,7 +13929,37 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
     }
   }
 
-  const handleCheckoutCorrectionSubmit = async (checkOutTime: string, notes: string) => {
+  const handleCheckinCorrectionSubmit = async (checkInDate: string, checkInTime: string, notes: string) => {
+    if (!checkinCorrectionRow) return
+
+    setCheckinCorrectionSubmitting(true)
+    try {
+      await correctMissingCheckIn(
+        checkinCorrectionRow.employeeId,
+        checkinCorrectionRow.attendanceDate,
+        checkInDate,
+        checkInTime,
+        notes || "Koreksi check-in manual oleh HR.",
+      )
+      showToast({
+        tone: "success",
+        title: "Check-in dikoreksi",
+        description: `${checkinCorrectionRow.fullName} dibuka ${formatEmployeeDate(checkInDate)} pukul ${checkInTime}.`,
+      })
+      setCheckinCorrectionRow(null)
+      await refreshData()
+    } catch (error) {
+      showToast({
+        tone: "error",
+        title: "Gagal koreksi check-in",
+        description: getFriendlySupabaseError(error, "Check-in belum bisa dikoreksi."),
+      })
+    } finally {
+      setCheckinCorrectionSubmitting(false)
+    }
+  }
+
+  const handleCheckoutCorrectionSubmit = async (checkOutDate: string, checkOutTime: string, notes: string) => {
     if (!checkoutCorrectionRow) return
 
     setCheckoutCorrectionSubmitting(true)
@@ -13736,13 +13967,14 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
       await correctMissingCheckout(
         checkoutCorrectionRow.employeeId,
         checkoutCorrectionRow.attendanceDate,
+        checkOutDate,
         checkOutTime,
         notes || "Koreksi checkout manual oleh HR.",
       )
       showToast({
         tone: "success",
         title: "Checkout dikoreksi",
-        description: `${checkoutCorrectionRow.fullName} ditutup pukul ${checkOutTime} untuk ${formatEmployeeDate(checkoutCorrectionRow.attendanceDate)}.`,
+        description: `${checkoutCorrectionRow.fullName} ditutup ${formatEmployeeDate(checkOutDate)} pukul ${checkOutTime}.`,
       })
       setCheckoutCorrectionRow(null)
       await refreshData()
@@ -13788,6 +14020,7 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
     const matchesStatus = statusFilter === "all"
       || row.attendanceStatus === statusFilter
       || row.payrollStatus === statusFilter
+      || (activeView === "payroll" && ["approved", "pending_overtime", "weekday", "sunday"].includes(statusFilter))
 
     return matchesDate && matchesSearch && matchesStatus
   })
@@ -13842,35 +14075,96 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
   const faceVerifiedRows = data.rows.filter((row) => row.faceStatus === "verified")
   const payrollPreviewTotal = [...readyPayrollRows, ...lockedPayrollRows].reduce((sum, row) => sum + row.payrollAmount, 0)
   const filteredOvertimeRows = data.overtime.filter((row) => {
+    if (row.status === "draft" && row.requestSource !== "planned") return false
+
     const matchesSearch = normalizedSearch
-      ? [row.employeeCode, row.fullName, row.divisionName, row.componentName, row.status, row.dayType].join(" ").toLowerCase().includes(normalizedSearch)
+      ? [row.employeeCode, row.fullName, row.divisionName, row.componentName, row.status, row.dayType, row.overtimeBasis, row.requestSource].join(" ").toLowerCase().includes(normalizedSearch)
       : true
-    const matchesStatus = statusFilter === "all" || row.status === statusFilter || row.dayType === statusFilter
+    const matchesStatus = statusFilter === "all"
+      || row.status === statusFilter
+      || row.dayType === statusFilter
+      || (statusFilter === "pending_overtime" && row.status === "pending")
 
     return matchesSearch && matchesStatus
   })
   const pendingOvertimeRows = data.overtime.filter((row) => row.status === "pending")
   const approvedOvertimeTotal = data.overtime.reduce((sum, row) => sum + (row.status === "approved" ? row.totalAmount : 0), 0)
+  const overtimeRequestEmployees = useMemo(() => {
+    const employeesById = new Map<string, AttendanceMonitorRow>()
+    data.rows.forEach((row) => {
+      if (!row.employeeId || employeesById.has(row.employeeId)) return
+      employeesById.set(row.employeeId, row)
+    })
+
+    return Array.from(employeesById.values()).sort((a, b) => a.employeeCode.localeCompare(b.employeeCode))
+  }, [data.rows])
   const isDateDrivenView = activeView === "attendance-live" || activeView === "attendance-requests"
-  const rangeStartDate = getAttendanceRecapRangeStart(selectedDate, recapRange)
-  const recapSourceRows = recapRange === "day" ? data.rows : data.allRows
-  const filteredRecapRows = recapSourceRows.filter((row) => {
-    const inRange = recapRange === "day"
-      ? row.attendanceDate === selectedDate
-      : row.attendanceDate >= rangeStartDate && row.attendanceDate <= selectedDate
+  const singleDateMode = ["today", "yesterday", "day"].includes(attendanceDateMode)
+  const recapSourceRows = singleDateMode ? data.rows : data.allRows
+  const filteredRecapRows = [...recapSourceRows.filter((row) => {
+    const inRange = row.attendanceDate >= dataLoadRange.startDate && row.attendanceDate <= dataLoadRange.endDate
     if (!inRange) return false
 
-    const matchesSearch = normalizedSearch
-      ? [row.employeeCode, row.fullName, row.divisionName, row.workLocationName, row.attendanceStatus, row.gpsStatus, row.faceStatus].join(" ").toLowerCase().includes(normalizedSearch)
-      : true
-    const matchesStatus = statusFilter === "all"
-      || row.attendanceStatus === statusFilter
-      || row.payrollStatus === statusFilter
-      || row.gpsStatus === statusFilter
-      || row.faceStatus === statusFilter
+    const matchesSearch = normalizedSearch ? getAttendanceSearchText(row).includes(normalizedSearch) : true
+    const matchesStatus = matchesAttendanceRecapStatus(row, statusFilter)
 
     return matchesSearch && matchesStatus
-  })
+  })].sort(compareAttendanceRowsByLatestActivity)
+  const recapShortRows = filteredRecapRows.filter((row) => row.shortageMinutes > 0)
+  const recapMissingCheckoutRows = filteredRecapRows.filter((row) => row.settlementStatus === "missing_checkout")
+  const recapReviewRows = filteredRecapRows.filter((row) => row.settlementStatus === "review" || row.attendanceStatus === "pending")
+  const attendanceStatusFilterOptions = activeView === "payroll"
+    ? [
+      { value: "all", label: "Semua Status" },
+      { value: "ready", label: "Siap Gajian" },
+      { value: "locked", label: "Locked" },
+      { value: "active", label: "Cycle Aktif" },
+      { value: "paid", label: "Terbayar" },
+      { value: "void", label: "Void" },
+      { value: "approved", label: "Lembur Approved" },
+      { value: "pending_overtime", label: "Lembur Pending" },
+    ]
+    : activeView === "attendance-review"
+      ? [
+        { value: "all", label: "Semua Status" },
+        { value: "review", label: "Perlu Review" },
+        { value: "out_of_radius", label: "Luar Radius" },
+        { value: "failed", label: "Face Failed" },
+        { value: "missing", label: "GPS/Face Kosong" },
+      ]
+      : activeView === "field-monitoring"
+        ? [
+          { value: "all", label: "Semua Status" },
+          { value: "ready", label: "Siap Absen" },
+          { value: "active", label: "User Aktif" },
+          { value: "pending", label: "Perlu Setup" },
+          { value: "missing", label: "Belum Lengkap" },
+        ]
+        : activeView === "attendance-requests"
+          ? [
+            { value: "all", label: "Semua Status" },
+            { value: "ready", label: "Sesuai Shift" },
+            { value: "short", label: "Kurang Jam" },
+            { value: "late", label: "Telat" },
+            { value: "early_leave", label: "Pulang Cepat" },
+            { value: "overtime", label: "Lewat Shift" },
+            { value: "running", label: "Sedang Berjalan" },
+            { value: "missing_checkout", label: "Belum Checkout" },
+            { value: "missing_checkin", label: "Belum Masuk" },
+            { value: "review", label: "Perlu Review" },
+            { value: "failed", label: "Tidak Valid" },
+            { value: "no_shift", label: "Shift Belum Lengkap" },
+          ]
+        : [
+          { value: "all", label: "Semua Status" },
+          { value: "valid", label: "Absensi Valid" },
+          { value: "pending", label: "Pending / Review" },
+          { value: "failed", label: "Failed" },
+          { value: "missing", label: "Belum Absen" },
+          { value: "out_of_radius", label: "Luar Radius" },
+          { value: "verified", label: "Face Valid" },
+          { value: "ready", label: "Siap Gajian" },
+        ]
   const pageSubtitle = activeView === "payroll"
     ? "Preview payroll otomatis dari 26 hari kerja valid, lembur approved, tipe gaji, dan cycle berjalan."
     : activeView === "attendance-review"
@@ -13880,6 +14174,19 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
     : activeView === "field-monitoring"
       ? "Monitoring titik lokasi kerja, radius GPS, kesiapan koordinat, dan aktivitas absensi per lokasi."
       : "Pantau absensi realtime dengan validasi GPS radius, face verification, dan progress payroll cycle."
+  const pageMetaItems = activeView === "attendance-requests"
+    ? [
+      `${filteredRecapRows.length} baris rekap`,
+      `${recapShortRows.length} kurang jam`,
+      `${recapMissingCheckoutRows.length} belum checkout`,
+      `${recapReviewRows.length} perlu review`,
+    ]
+    : [
+      `${latestFirstRows.length} karyawan`,
+      activeView === "attendance-review" ? `${filteredReviewRows.length} antrian review` : `${gpsReadyLocations.length} lokasi GPS siap`,
+      `${faceVerifiedRows.length} face valid`,
+      activeView === "payroll" ? `${readyPayrollRows.length} siap - ${lockedPayrollRows.length} locked - ${paidPayrollRows.length} terbayar - ${voidPayrollRows.length} void` : `${readyPayrollRows.length} cycle siap`,
+    ]
 
   return (
     <OperationalPageShell>
@@ -13888,7 +14195,13 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
         subtitle={pageSubtitle}
         actions={
           <>
-            <FoundationRefreshButton loading={loading} onClick={refreshData} />
+            <FoundationRefreshButton loading={loading || refreshing} onClick={refreshData} />
+            {activeView === "payroll" && (
+              <button className="primaryButton" type="button" onClick={() => setOvertimeRequestOpen(true)}>
+                <ClipboardList size={17} />
+                Request Lembur
+              </button>
+            )}
             {activeView === "attendance-live" && (
               <>
                 <button className="secondaryButton" type="button" onClick={() => setFaceEnrollmentOpen(true)}>
@@ -13904,14 +14217,7 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
           </>
         }
         meta={
-          <InlinePageStats
-            items={[
-              `${latestFirstRows.length} karyawan`,
-              activeView === "attendance-review" ? `${filteredReviewRows.length} antrian review` : `${gpsReadyLocations.length} lokasi GPS siap`,
-              `${faceVerifiedRows.length} face valid`,
-              activeView === "payroll" ? `${readyPayrollRows.length} siap · ${lockedPayrollRows.length} locked · ${paidPayrollRows.length} terbayar · ${voidPayrollRows.length} void` : `${readyPayrollRows.length} cycle siap`,
-            ]}
-          />
+          <InlinePageStats items={pageMetaItems} />
         }
       />
 
@@ -13939,7 +14245,7 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
         {isDateDrivenView && (
           <div className="filterField dateFilterField">
             <label>Tanggal</label>
-            <AttendanceDateFilter
+            <DateModePicker
               value={selectedDate}
               mode={attendanceDateMode}
               onChange={(nextDate, nextMode) => {
@@ -13949,45 +14255,22 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
             />
           </div>
         )}
-        {activeView === "attendance-requests" && (
-          <div className="filterField recapRangeField">
-            <label>Range</label>
-            <div className="recapRangeControl" role="tablist" aria-label="Range rekap absensi">
-              <button className={clsx(recapRange === "day" && "active")} type="button" onClick={() => setRecapRange("day")}>Harian</button>
-              <button className={clsx(recapRange === "week" && "active")} type="button" onClick={() => setRecapRange("week")}>7 Hari</button>
-              <button className={clsx(recapRange === "month" && "active")} type="button" onClick={() => setRecapRange("month")}>30 Hari</button>
-            </div>
-          </div>
-        )}
         <div className="filterField">
           <label>Search</label>
           <div className="uiInput inputWithIcon compact">
             <Search size={16} />
-            <input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Cari karyawan, lokasi, GPS, face..." />
+            <input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder={activeView === "attendance-requests" ? "Cari karyawan, shift, telat, kurang jam..." : "Cari karyawan, lokasi, GPS, face..."} />
           </div>
         </div>
         <div className="filterField">
           <label>Status</label>
-          <select className="uiSelectTrigger" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-            <option value="all">Semua Status</option>
-            <option value="valid">Absensi Valid</option>
-            <option value="pending">Review</option>
-            <option value="review">Perlu Review</option>
-            <option value="rejected">Ditolak</option>
-            <option value="failed">Failed</option>
-            <option value="out_of_radius">Luar Radius</option>
-            <option value="verified">Face Valid</option>
-            <option value="missing">Belum Absen</option>
-            <option value="ready">Siap Gajian</option>
-            <option value="locked">Locked</option>
-            <option value="active">Cycle Aktif</option>
-            <option value="paid">Terbayar</option>
-            <option value="void">Void</option>
-            <option value="pending">Lembur Pending</option>
-            <option value="approved">Lembur Approved</option>
-            <option value="weekday">Lembur Weekday</option>
-            <option value="sunday">Lembur Minggu</option>
-          </select>
+          <FoundationSelect
+            label="Filter status absensi"
+            value={statusFilter}
+            options={attendanceStatusFilterOptions}
+            searchable={false}
+            onChange={setStatusFilter}
+          />
         </div>
         <button className="secondaryButton" type="button" onClick={() => {
           setSearchTerm("")
@@ -14000,7 +14283,7 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
       </OperationalFilterPanel>
 
       {(activeView === "attendance-live" || activeView === "attendance-requests") && (
-        <AttendanceLiveRecap rows={activeView === "attendance-requests" ? filteredRecapRows : latestFirstRows} selectedDate={selectedDate} range={activeView === "attendance-requests" ? recapRange : "day"} />
+        <AttendanceLiveRecap rows={activeView === "attendance-requests" ? filteredRecapRows : latestFirstRows} selectedDate={selectedDate} mode={attendanceDateMode} />
       )}
 
       {activeView === "field-monitoring" ? (
@@ -14011,14 +14294,14 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
       ) : activeView === "attendance-review" ? (
         <AttendanceReviewTable rows={filteredReviewRows} loading={loading || reviewSubmitting} errorMessage={errorMessage} onReview={openReviewDialog} onApproveAll={handleApproveReviewGroup} />
       ) : activeView === "attendance-requests" ? (
-        <AttendanceRecapTable rows={filteredRecapRows} loading={loading} errorMessage={errorMessage} selectedDate={selectedDate} range={recapRange} onResetDay={setResetAttendanceRow} onCorrectCheckout={setCheckoutCorrectionRow} />
+        <AttendanceRecapTable rows={filteredRecapRows} loading={loading} errorMessage={errorMessage} selectedDate={selectedDate} mode={attendanceDateMode} onResetDay={setResetAttendanceRow} onCorrectCheckIn={setCheckinCorrectionRow} onCorrectCheckout={setCheckoutCorrectionRow} />
       ) : activeView === "payroll" ? (
         <>
           <PayrollPreviewTable rows={filteredRows} loading={loading} errorMessage={errorMessage} overtimeTotal={approvedOvertimeTotal} onProcess={openPayrollProcessDialog} />
           <OvertimeReviewTable rows={filteredOvertimeRows} loading={loading} errorMessage={errorMessage} onReview={setOvertimeTarget} />
         </>
       ) : (
-        <LiveAttendanceTable rows={latestFirstRows} loading={loading} errorMessage={errorMessage} selectedDate={selectedDate} onResetDay={setResetAttendanceRow} onCorrectCheckout={setCheckoutCorrectionRow} />
+        <LiveAttendanceTable rows={latestFirstRows} loading={loading} errorMessage={errorMessage} selectedDate={selectedDate} onResetDay={setResetAttendanceRow} onCorrectCheckIn={setCheckinCorrectionRow} onCorrectCheckout={setCheckoutCorrectionRow} />
       )}
 
       <FieldAttendanceDialog
@@ -14038,6 +14321,16 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
         saving={reviewSubmitting}
         onClose={() => setReviewTarget(null)}
         onSubmit={handleReviewSubmit}
+      />
+      <OvertimeRequestDialog
+        open={overtimeRequestOpen}
+        saving={overtimeRequestSubmitting}
+        employees={overtimeRequestEmployees}
+        selectedDate={selectedDate}
+        onClose={() => {
+          if (!overtimeRequestSubmitting) setOvertimeRequestOpen(false)
+        }}
+        onSubmit={handleOvertimeRequestSubmit}
       />
       <OvertimeReviewDialog
         row={overtimeTarget}
@@ -14075,6 +14368,14 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
           </div>
         )}
       </ConfirmDialog>
+      <CheckInCorrectionDialog
+        row={checkinCorrectionRow}
+        saving={checkinCorrectionSubmitting}
+        onClose={() => {
+          if (!checkinCorrectionSubmitting) setCheckinCorrectionRow(null)
+        }}
+        onSubmit={handleCheckinCorrectionSubmit}
+      />
       <CheckoutCorrectionDialog
         row={checkoutCorrectionRow}
         saving={checkoutCorrectionSubmitting}
@@ -14088,6 +14389,109 @@ function AttendanceCyclePage({ activeView }: { activeView: "attendance-live" | "
   )
 }
 
+function CheckInCorrectionDialog({
+  row,
+  saving,
+  onClose,
+  onSubmit,
+}: {
+  row: AttendanceMonitorRow | null
+  saving: boolean
+  onClose: () => void
+  onSubmit: (checkInDate: string, checkInTime: string, notes: string) => void
+}) {
+  const [checkInDate, setCheckInDate] = useState(getLocalDateKey())
+  const [checkInTime, setCheckInTime] = useState("08:00")
+  const [notes, setNotes] = useState("")
+  const [error, setError] = useState("")
+
+  useEffect(() => {
+    if (!row) return
+    const defaultTime = row.scheduledStartAt
+      ? formatAttendanceTimeInput(row.scheduledStartAt, "08:00")
+      : formatShiftClock(row.shiftStartTime) !== "--:--"
+        ? formatShiftClock(row.shiftStartTime)
+        : "08:00"
+
+    setCheckInDate(row.attendanceDate || getLocalDateKey())
+    setCheckInTime(row.checkInAt ? formatAttendanceTimeInput(row.checkInAt, defaultTime) : defaultTime)
+    setNotes("")
+    setError("")
+  }, [row])
+
+  if (!row) return null
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!checkInTime) {
+      setError("Jam masuk wajib diisi untuk membuka hari kerja.")
+      return
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(checkInDate)) {
+      setError("Tanggal masuk wajib format valid.")
+      return
+    }
+
+    onSubmit(checkInDate, checkInTime, notes)
+  }
+
+  return createPortal(
+    <div className="dialogBackdrop" role="presentation" onMouseDown={saving ? undefined : onClose}>
+      <section
+        className="dialogPanel checkoutCorrectionDialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="checkin-correction-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="dialogCompactHeader">
+          <div className="dialogHeaderCopy">
+            <span>Koreksi HR</span>
+            <h2 id="checkin-correction-title">Koreksi check-in {row.fullName}</h2>
+            <p>Dipakai saat karyawan lupa absen masuk atau jam masuk perlu diperbaiki.</p>
+          </div>
+          <button className="iconButton dialogClose" type="button" aria-label="Tutup koreksi check-in" onClick={onClose} disabled={saving}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <form className="checkoutCorrectionBody" onSubmit={handleSubmit}>
+          <div className="checkoutCorrectionSummary">
+            <span className="attendanceMonitorIcon valid"><LogIn size={20} /></span>
+            <div>
+              <small>{row.employeeCode} - {formatEmployeeDate(row.attendanceDate)}</small>
+              <strong>{row.checkOutAt ? `Pulang ${formatAttendanceTime(row.checkOutAt)}` : "Belum ada check-out"}</strong>
+              <p>{row.workLocationName} - {row.divisionName}</p>
+            </div>
+          </div>
+
+          <div className="checkoutCorrectionFields">
+            <DateFormField label="Tanggal Masuk" value={checkInDate} onChange={setCheckInDate} required />
+            <TextFormField label="Jam Masuk" type="time" value={checkInTime} onChange={(event) => setCheckInTime(event.target.value)} required />
+            <TextFormField label="Catatan HR" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Contoh: lupa check-in, dikoreksi sesuai konfirmasi supervisor" />
+          </div>
+
+          <div className="checkoutCorrectionNotice">
+            <AlertCircle size={17} />
+            <span>Check-in manual dibuat sebagai sumber management dan summary harian dihitung ulang otomatis setelah disimpan.</span>
+          </div>
+
+          {error && <p className="formErrorMessage">{error}</p>}
+
+          <div className="attendanceReviewActions">
+            <button className="secondaryButton" type="button" onClick={onClose} disabled={saving}>Batal</button>
+            <button className="primaryButton" type="submit" disabled={saving}>
+              <FileCheck2 size={17} />
+              {saving ? "Menyimpan..." : "Simpan Koreksi"}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>,
+    document.body,
+  )
+}
+
 function CheckoutCorrectionDialog({
   row,
   saving,
@@ -14097,14 +14501,25 @@ function CheckoutCorrectionDialog({
   row: AttendanceMonitorRow | null
   saving: boolean
   onClose: () => void
-  onSubmit: (checkOutTime: string, notes: string) => void
+  onSubmit: (checkOutDate: string, checkOutTime: string, notes: string) => void
 }) {
+  const [checkOutDate, setCheckOutDate] = useState(getLocalDateKey())
   const [checkOutTime, setCheckOutTime] = useState("17:00")
   const [notes, setNotes] = useState("")
   const [error, setError] = useState("")
 
   useEffect(() => {
     if (!row) return
+    let nextCheckOutDate = row.attendanceDate || getLocalDateKey()
+    if (row.scheduledEndAt) {
+      nextCheckOutDate = getLocalDateKey(new Date(row.scheduledEndAt))
+    } else if (row.checkInAt) {
+      const fallbackDate = new Date(row.checkInAt)
+      fallbackDate.setMinutes(fallbackDate.getMinutes() + 8 * 60)
+      nextCheckOutDate = getLocalDateKey(fallbackDate)
+    }
+
+    setCheckOutDate(nextCheckOutDate)
     setCheckOutTime(addMinutesToIsoTimeInput(row.checkInAt, 8 * 60, "17:00"))
     setNotes("")
     setError("")
@@ -14118,8 +14533,12 @@ function CheckoutCorrectionDialog({
       setError("Jam pulang wajib diisi untuk menutup hari kerja.")
       return
     }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(checkOutDate)) {
+      setError("Tanggal pulang wajib format valid.")
+      return
+    }
 
-    onSubmit(checkOutTime, notes)
+    onSubmit(checkOutDate, checkOutTime, notes)
   }
 
   return createPortal(
@@ -14153,13 +14572,14 @@ function CheckoutCorrectionDialog({
           </div>
 
           <div className="checkoutCorrectionFields">
+            <DateFormField label="Tanggal Pulang" value={checkOutDate} onChange={setCheckOutDate} required />
             <TextFormField label="Jam Pulang" type="time" value={checkOutTime} onChange={(event) => setCheckOutTime(event.target.value)} required />
             <TextFormField label="Catatan HR" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Contoh: lupa checkout, dikoreksi sesuai konfirmasi supervisor" />
           </div>
 
           <div className="checkoutCorrectionNotice">
             <AlertCircle size={17} />
-            <span>Log check-in akan diset valid, checkout manual dibuat sebagai sumber management, lalu payroll cycle diperbarui.</span>
+            <span>Checkout manual dibuat sebagai sumber management. Untuk shift malam, tanggal pulang boleh tanggal berikutnya.</span>
           </div>
 
           {error && <p className="formErrorMessage">{error}</p>}
@@ -14184,6 +14604,7 @@ function LiveAttendanceTable({
   errorMessage,
   selectedDate,
   onResetDay,
+  onCorrectCheckIn,
   onCorrectCheckout,
 }: {
   rows: AttendanceMonitorRow[]
@@ -14191,10 +14612,23 @@ function LiveAttendanceTable({
   errorMessage: string
   selectedDate: string
   onResetDay: (row: AttendanceMonitorRow) => void
+  onCorrectCheckIn: (row: AttendanceMonitorRow) => void
   onCorrectCheckout: (row: AttendanceMonitorRow) => void
 }) {
   const [expandedRowId, setExpandedRowId] = useState("")
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
   const liveTableDrag = useHorizontalDragScroll<HTMLDivElement>()
+  const safePageSize = Math.min(pageSize, 100)
+  const pageCount = Math.max(1, Math.ceil(rows.length / safePageSize))
+  const currentPage = Math.min(page, pageCount)
+  const paginatedRows = rows.slice((currentPage - 1) * safePageSize, currentPage * safePageSize)
+
+  useEffect(() => {
+    setPage(1)
+    setExpandedRowId("")
+  }, [rows.length, pageSize])
+
   const toggleExpandedRow = (rowId: string) => {
     setExpandedRowId((current) => current === rowId ? "" : rowId)
   }
@@ -14238,14 +14672,15 @@ function LiveAttendanceTable({
           <tbody>
             {loading && <FoundationTableSkeletonRows colSpan={8} columns={8} />}
             {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={8}><TableState title="Gagal memuat" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
-            {!loading && !errorMessage && rows.map((row, index) => {
+            {!loading && !errorMessage && paginatedRows.map((row, index) => {
               const isExpanded = expandedRowId === row.id
-              const canCorrectCheckout = Boolean(row.checkInId && !row.checkOutId && isMissingCheckoutShift(row.checkInAt, row.checkOutAt, row.attendanceDate))
+              const canCorrectCheckIn = canCorrectAttendanceCheckIn(row)
+              const canCorrectCheckout = canCorrectMissingCheckout(row)
 
               return (
                 <Fragment key={row.id}>
                   <ClickableTableRow className={clsx("liveAttendanceDataRow", isExpanded && "active")} label={`${isExpanded ? "Tutup" : "Lihat"} detail absensi ${row.fullName}`} onOpen={() => toggleExpandedRow(row.id)}>
-                    <td><TableNumberCell value={index + 1} /></td>
+                    <td><TableNumberCell value={(currentPage - 1) * safePageSize + index + 1} /></td>
                     <td><EmployeeIdentityCell fullName={row.fullName} code={row.employeeCode} photoUrl={row.employeePhotoUrl} /></td>
                     <td><AttendanceTimelineCell row={row} /></td>
                     <td><AttendanceSettlementCell row={row} /></td>
@@ -14262,6 +14697,10 @@ function LiveAttendanceTable({
                             <Eye size={15} />
                             {isExpanded ? "Tutup Detail" : "Buka Detail"}
                           </RowActionMenuItem>
+                          <RowActionMenuItem disabled={!canCorrectCheckIn} onClick={() => onCorrectCheckIn(row)}>
+                            <LogIn size={15} />
+                            Koreksi Masuk
+                          </RowActionMenuItem>
                           <RowActionMenuItem disabled={!canCorrectCheckout} onClick={() => onCorrectCheckout(row)}>
                             <CalendarCheck2 size={15} />
                             Koreksi Pulang
@@ -14277,7 +14716,7 @@ function LiveAttendanceTable({
                   {isExpanded && (
                     <tr className="liveAttendanceExpandRow">
                       <td className="liveAttendanceExpandCell" colSpan={8}>
-                        <LiveAttendanceInlineDetail row={row} canCorrectCheckout={canCorrectCheckout} onClose={() => setExpandedRowId("")} onResetDay={onResetDay} onCorrectCheckout={onCorrectCheckout} />
+                        <LiveAttendanceInlineDetail row={row} canCorrectCheckIn={canCorrectCheckIn} canCorrectCheckout={canCorrectCheckout} onClose={() => setExpandedRowId("")} onResetDay={onResetDay} onCorrectCheckIn={onCorrectCheckIn} onCorrectCheckout={onCorrectCheckout} />
                       </td>
                     </tr>
                   )}
@@ -14288,32 +14727,72 @@ function LiveAttendanceTable({
           </tbody>
         </table>
       </div>
+      <DataTablePagination
+        page={currentPage}
+        pageSize={safePageSize}
+        totalRows={rows.length}
+        pageSizeOptions={[25, 50, 100]}
+        onPageChange={setPage}
+        onPageSizeChange={(value) => setPageSize(Math.min(value, 100))}
+      />
     </OperationalTableCard>
   )
 }
 
 function LiveAttendanceInlineDetail({
   row,
+  canCorrectCheckIn,
   canCorrectCheckout,
   onClose,
   onResetDay,
+  onCorrectCheckIn,
   onCorrectCheckout,
 }: {
   row: AttendanceMonitorRow
+  canCorrectCheckIn: boolean
   canCorrectCheckout: boolean
   onClose: () => void
   onResetDay: (row: AttendanceMonitorRow) => void
+  onCorrectCheckIn: (row: AttendanceMonitorRow) => void
   onCorrectCheckout: (row: AttendanceMonitorRow) => void
 }) {
+  const gpsLogLabel: Record<AttendanceGpsStatus | "missing", string> = {
+    valid: "Dalam radius",
+    out_of_radius: "Di luar radius",
+    missing: "GPS kosong",
+  }
+  const faceLogLabel: Record<AttendanceFaceStatus, string> = {
+    verified: "Wajah cocok",
+    review: "Perlu review",
+    failed: "Wajah gagal",
+    not_required: "Tidak wajib",
+  }
+  const formatGpsDetail = (status: AttendanceGpsStatus | "missing", distanceM: number | null) => (
+    distanceM === null || distanceM === undefined
+      ? gpsLogLabel[status]
+      : `${gpsLogLabel[status]} / ${distanceM}m${row.radiusM ? ` dari ${row.radiusM}m` : ""}`
+  )
+  const formatFaceDetail = (status: AttendanceFaceStatus, score: number | null) => (
+    score === null || score === undefined ? faceLogLabel[status] : `${score}% / ${faceLogLabel[status]}`
+  )
   const detailItems = [
     { label: "Tanggal", value: formatEmployeeDate(row.attendanceDate), meta: row.lastActivityAt ? `Update ${formatAttendanceTime(row.lastActivityAt)}` : "Belum ada update" },
     { label: "Shift", value: row.shiftName, meta: getAttendanceShiftScheduleLabel(row) },
+    { label: "Toleransi", value: `Telat ${formatMinutesDuration(row.shiftLateToleranceMinutes)}`, meta: `Pulang cepat ${formatMinutesDuration(row.shiftEarlyLeaveToleranceMinutes)}` },
     { label: "Jam kerja", value: row.workDurationLabel, meta: getAttendanceSettlementDescription(row) },
     { label: "Payroll", value: row.payrollCycleNumber ? `Cycle ${row.payrollCycleNumber}` : "Cycle aktif", meta: `${row.cycleDays}/${row.targetDays} hari / ${payrollLabel[row.payrollStatus]}` },
   ]
   const sourceItems = [
     { label: "Masuk", value: row.checkInAt ? formatAttendanceTime(row.checkInAt) : "Belum", meta: row.checkInId ? formatAttendanceSourceMeta(row.checkInSource, row.checkInMedia) : "Belum ada log" },
+    { label: "Status masuk", value: formatAttendanceLogStatus(row.checkInStatus), meta: `${formatGpsDetail(row.checkInGpsStatus, row.checkInDistanceM)} / ${formatFaceDetail(row.checkInFaceStatus, row.checkInFaceScore)}` },
     { label: "Pulang", value: row.checkOutAt ? formatAttendanceTime(row.checkOutAt) : "Belum", meta: row.checkOutId ? formatAttendanceSourceMeta(row.checkOutSource, row.checkOutMedia) : "Menunggu log pulang" },
+    { label: "Status pulang", value: formatAttendanceLogStatus(row.checkOutStatus), meta: `${formatGpsDetail(row.checkOutGpsStatus, row.checkOutDistanceM)} / ${formatFaceDetail(row.checkOutFaceStatus, row.checkOutFaceScore)}` },
+  ]
+  const validationItems = [
+    { label: "Lokasi", value: row.workLocationName || "-", meta: row.radiusM ? `Radius ${row.radiusM}m` : "Radius belum diatur", tone: row.gpsStatus === "valid" ? "valid" : row.gpsStatus === "out_of_radius" ? "failed" : "missing" },
+    { label: "GPS masuk", value: formatGpsDetail(row.checkInGpsStatus, row.checkInDistanceM), meta: row.checkInId ? formatAttendanceLogStatus(row.checkInStatus) : "Belum ada check-in", tone: row.checkInGpsStatus === "valid" ? "valid" : row.checkInGpsStatus === "out_of_radius" ? "failed" : "missing" },
+    { label: "GPS pulang", value: formatGpsDetail(row.checkOutGpsStatus, row.checkOutDistanceM), meta: row.checkOutId ? formatAttendanceLogStatus(row.checkOutStatus) : "Belum ada check-out", tone: row.checkOutGpsStatus === "valid" ? "valid" : row.checkOutGpsStatus === "out_of_radius" ? "failed" : "missing" },
+    { label: "Face", value: row.faceScore === null ? faceLogLabel[row.faceStatus] : `${row.faceScore}%`, meta: faceLogLabel[row.faceStatus], tone: row.faceStatus === "verified" ? "valid" : row.faceStatus === "review" ? "pending" : row.faceStatus === "failed" ? "failed" : "missing" },
   ]
   const settlementItems = [
     { label: "Wajib", value: row.expectedWorkMinutes === null ? "-" : formatMinutesDuration(row.expectedWorkMinutes), tone: "neutral" },
@@ -14326,31 +14805,21 @@ function LiveAttendanceInlineDetail({
 
   return (
     <div className="liveAttendanceInlineDetail">
-      <div className="liveAttendanceInlineHeader">
-        <EmployeeIdentityCell fullName={row.fullName} code={row.employeeCode} photoUrl={row.employeePhotoUrl} />
-        <span className={clsx("liveAttendanceInlineStatus", `tone-${row.settlementTone}`)}>
-          <span aria-hidden="true" />
-          {row.settlementLabel}
-        </span>
-      </div>
-
       <div className="liveAttendanceInlineGrid">
         <div className="liveAttendanceInlinePanel">
-          <small>Ringkasan kerja</small>
+          <div className="liveAttendanceInlineSectionHeader">
+            <small>Ringkasan kerja</small>
+            <span className={clsx("liveAttendanceInlineStatus", `tone-${row.settlementTone}`)}>
+              <span aria-hidden="true" />
+              {row.settlementLabel}
+            </span>
+          </div>
           <div className="liveAttendanceInlineMetrics">
             {detailItems.map((item) => (
               <span key={item.label}>
                 <small>{item.label}</small>
                 <strong>{item.value}</strong>
                 <em>{item.meta}</em>
-              </span>
-            ))}
-          </div>
-          <div className="liveAttendanceInlineBreakdown" aria-label="Detail perhitungan jam">
-            {settlementItems.map((item) => (
-              <span className={clsx(`tone-${item.tone}`)} key={item.label}>
-                <small>{item.label}</small>
-                <strong>{item.value}</strong>
               </span>
             ))}
           </div>
@@ -14369,28 +14838,54 @@ function LiveAttendanceInlineDetail({
           </div>
         </div>
 
-        <div className="liveAttendanceInlinePanel compact">
+        <div className="liveAttendanceInlinePanel">
           <small>Validasi</small>
-          <AttendanceValidationCell row={row} />
+          <div className="liveAttendanceInlineValidation">
+            {validationItems.map((item) => (
+              <span className={clsx(`tone-${item.tone}`)} key={item.label}>
+                <small>{item.label}</small>
+                <strong>{item.value}</strong>
+                <em>{item.meta}</em>
+              </span>
+            ))}
+          </div>
         </div>
       </div>
 
-      <div className="liveAttendanceInlineActions">
-        <button className="secondaryButton compactButton" type="button" onClick={onClose}>Tutup</button>
-        <button className="secondaryButton compactButton" type="button" onClick={() => onCorrectCheckout(row)} disabled={!canCorrectCheckout}>
-          <CalendarCheck2 size={15} />
-          Koreksi Pulang
-        </button>
-        <button className="secondaryButton dangerSoftButton compactButton" type="button" onClick={() => onResetDay(row)} disabled={!row.checkInId && !row.checkOutId}>
-          <RotateCcw size={15} />
-          Reset Tanggal Ini
-        </button>
+      <div className="liveAttendanceInlineFooter">
+        <div className="liveAttendanceInlineBreakdown" aria-label="Detail perhitungan jam">
+          {settlementItems.map((item) => (
+            <span className={clsx(`tone-${item.tone}`)} key={item.label}>
+              <small>{item.label}</small>
+              <strong>{item.value}</strong>
+            </span>
+          ))}
+        </div>
+        <div
+          className="liveAttendanceInlineActions"
+          onClick={(event) => event.stopPropagation()}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <button className="secondaryButton compactButton" type="button" onClick={onClose}>Tutup</button>
+          <button className="secondaryButton compactButton" type="button" onClick={() => onCorrectCheckIn(row)} disabled={!canCorrectCheckIn}>
+            <LogIn size={15} />
+            Koreksi Masuk
+          </button>
+          <button className="secondaryButton compactButton" type="button" onClick={() => onCorrectCheckout(row)} disabled={!canCorrectCheckout}>
+            <CalendarCheck2 size={15} />
+            Koreksi Pulang
+          </button>
+          <button className="secondaryButton dangerSoftButton compactButton" type="button" onClick={() => onResetDay(row)} disabled={!row.checkInId && !row.checkOutId}>
+            <RotateCcw size={15} />
+            Reset Tanggal Ini
+          </button>
+        </div>
       </div>
     </div>
   )
 }
 
-function AttendanceLiveRecap({ rows, selectedDate, range = "day" }: { rows: AttendanceMonitorRow[]; selectedDate: string; range?: AttendanceRecapRange }) {
+function AttendanceLiveRecap({ rows, selectedDate, mode = "today" }: { rows: AttendanceMonitorRow[]; selectedDate: string; mode?: AttendanceDateMode }) {
   const checkedIn = rows.filter((row) => row.checkInId).length
   const checkedOut = rows.filter((row) => row.checkOutId).length
   const review = rows.filter((row) => row.attendanceStatus === "pending").length
@@ -14400,9 +14895,9 @@ function AttendanceLiveRecap({ rows, selectedDate, range = "day" }: { rows: Atte
   const workdayCounted = rows.filter((row) => row.attendanceStatus === "valid" && row.checkInId).length
   const shortageRows = rows.filter((row) => row.shortageMinutes > 0).length
   const totalShortageMinutes = rows.reduce((sum, row) => sum + row.shortageMinutes, 0)
-  const rangeLabel = range === "month" ? "30 hari" : range === "week" ? "7 hari" : "Tanggal"
+  const rangeLabel = getAttendanceRangeMetricLabel(mode)
   const items = [
-    { label: rangeLabel, value: formatWorkDate(selectedDate), tone: "neutral" },
+    { label: rangeLabel, value: formatAttendanceRangeLabel(selectedDate, mode), tone: "neutral" },
     { label: "Masuk", value: checkedIn, tone: "valid" },
     { label: "Pulang", value: checkedOut, tone: "valid" },
     { label: "Kurang jam", value: shortageRows ? `${shortageRows} / ${formatMinutesDuration(totalShortageMinutes)}` : "0", tone: shortageRows ? "pending" : "neutral" },
@@ -14414,7 +14909,7 @@ function AttendanceLiveRecap({ rows, selectedDate, range = "day" }: { rows: Atte
   ] as const
 
   return (
-    <div className="attendanceLiveRecap" aria-label={`Rekap absensi ${formatWorkDate(selectedDate)}`}>
+    <div className="attendanceLiveRecap" aria-label={`Rekap absensi ${formatAttendanceRangeLabel(selectedDate, mode)}`}>
       {items.map((item) => (
         <span className={clsx("attendanceLiveRecapItem", `tone-${item.tone}`)} key={item.label}>
           <small>{item.label}</small>
@@ -14430,65 +14925,94 @@ function AttendanceRecapTable({
   loading,
   errorMessage,
   selectedDate,
-  range,
+  mode,
   onResetDay,
+  onCorrectCheckIn,
   onCorrectCheckout,
 }: {
   rows: AttendanceMonitorRow[]
   loading: boolean
   errorMessage: string
   selectedDate: string
-  range: AttendanceRecapRange
+  mode: AttendanceDateMode
   onResetDay: (row: AttendanceMonitorRow) => void
+  onCorrectCheckIn: (row: AttendanceMonitorRow) => void
   onCorrectCheckout: (row: AttendanceMonitorRow) => void
 }) {
-  const [detailRow, setDetailRow] = useState<AttendanceMonitorRow | null>(null)
-  const title = range === "day" ? `Rekap ${formatWorkDate(selectedDate)}` : range === "week" ? `Rekap 7 hari sampai ${formatWorkDate(selectedDate)}` : `Rekap 30 hari sampai ${formatWorkDate(selectedDate)}`
+  const [expandedRowKey, setExpandedRowKey] = useState("")
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
+  const recapTableDrag = useHorizontalDragScroll<HTMLDivElement>()
+  const safePageSize = Math.min(pageSize, 100)
+  const pageCount = Math.max(1, Math.ceil(rows.length / safePageSize))
+  const currentPage = Math.min(page, pageCount)
+  const paginatedRows = rows.slice((currentPage - 1) * safePageSize, currentPage * safePageSize)
+  const title = getAttendanceRecapTitle(selectedDate, mode)
+
+  useEffect(() => {
+    setPage(1)
+    setExpandedRowKey("")
+  }, [rows.length, pageSize, mode, selectedDate])
+
+  const toggleExpandedRow = (rowKey: string) => {
+    setExpandedRowKey((current) => current === rowKey ? "" : rowKey)
+  }
 
   return (
-    <>
-      <OperationalTableCard>
-        <div className="tableHeader">
-          <div>
-            <h2>Attendance Recap</h2>
-            <p>{title}. Klik baris untuk melihat detail check-in, check-out, GPS, face, dan payroll cycle.</p>
-          </div>
+    <OperationalTableCard>
+      <div className="tableHeader">
+        <div>
+          <h2>Attendance Recap</h2>
+          <p>{title}. Klik baris untuk membuka detail inline tanpa keluar dari tabel.</p>
         </div>
-        <div className="tableScroller uiDataTableScroller uiDataTableHasColumns attendanceRecapTableScroller">
-          <table>
-            <colgroup>
-              <col className="tableNumberColumn" />
-              <col style={{ width: "250px" }} />
-              <col style={{ width: "150px" }} />
-              <col style={{ width: "150px" }} />
-              <col style={{ width: "150px" }} />
-              <col style={{ width: "170px" }} />
-              <col style={{ width: "260px" }} />
-              <col style={{ width: "130px" }} />
-              <col className="tableActionColumn" />
-            </colgroup>
-            <thead>
-              <tr>
-                <th>No</th>
-                <th>Karyawan</th>
-                <th>Tanggal</th>
-                <th>Masuk</th>
-                <th>Pulang</th>
-                <th>Settlement</th>
-                <th>Validasi</th>
-                <th>Status</th>
-                <th>Aksi</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading && <FoundationTableSkeletonRows colSpan={9} columns={9} />}
-              {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={9}><TableState title="Gagal memuat" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
-              {!loading && !errorMessage && rows.map((row, index) => {
-                const canCorrectCheckout = Boolean(row.checkInId && !row.checkOutId && isMissingCheckoutShift(row.checkInAt, row.checkOutAt, row.attendanceDate))
+        <button className="secondaryButton" type="button" disabled={loading || rows.length === 0} onClick={() => exportAttendanceRecapCsv(rows, selectedDate, mode)}>
+          <Download size={17} />
+          Export Rekap
+        </button>
+      </div>
+      <div
+        className={clsx("tableScroller uiDataTableScroller uiDataTableHasColumns attendanceRecapTableScroller", recapTableDrag.dragging && "dragging")}
+        ref={recapTableDrag.ref}
+        {...recapTableDrag.handlers}
+      >
+        <table>
+          <colgroup>
+            <col className="tableNumberColumn" />
+            <col style={{ width: "250px" }} />
+            <col style={{ width: "150px" }} />
+            <col style={{ width: "150px" }} />
+            <col style={{ width: "150px" }} />
+            <col style={{ width: "170px" }} />
+            <col style={{ width: "260px" }} />
+            <col style={{ width: "130px" }} />
+            <col className="tableActionColumn" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>No</th>
+              <th>Karyawan</th>
+              <th>Tanggal</th>
+              <th>Masuk</th>
+              <th>Pulang</th>
+              <th>Settlement</th>
+              <th>Validasi</th>
+              <th>Status</th>
+              <th>Aksi</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading && <FoundationTableSkeletonRows colSpan={9} columns={9} />}
+            {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={9}><TableState title="Gagal memuat" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
+            {!loading && !errorMessage && paginatedRows.map((row, index) => {
+              const rowKey = `${row.employeeId}-${row.attendanceDate}-${row.checkInId || row.checkOutId || "missing"}`
+              const isExpanded = expandedRowKey === rowKey
+              const canCorrectCheckIn = canCorrectAttendanceCheckIn(row)
+              const canCorrectCheckout = canCorrectMissingCheckout(row)
 
-                return (
-                  <ClickableTableRow key={`${row.employeeId}-${row.attendanceDate}-${row.checkInId || "missing"}`} label={`Lihat rekap absensi ${row.fullName}`} onOpen={() => setDetailRow(row)}>
-                    <td><TableNumberCell value={index + 1} /></td>
+              return (
+                <Fragment key={rowKey}>
+                  <ClickableTableRow className={clsx("attendanceRecapDataRow", isExpanded && "active")} label={`${isExpanded ? "Tutup" : "Buka"} detail rekap absensi ${row.fullName}`} onOpen={() => toggleExpandedRow(rowKey)}>
+                    <td><TableNumberCell value={(currentPage - 1) * safePageSize + index + 1} /></td>
                     <td><EmployeeIdentityCell fullName={row.fullName} code={row.employeeCode} photoUrl={row.employeePhotoUrl} /></td>
                     <td><TableText primary={formatWorkDate(row.attendanceDate)} secondary={row.divisionName} /></td>
                     <td><RecapEventText eventType="check_in" time={row.checkInAt} status={row.checkInStatus} /></td>
@@ -14498,10 +15022,17 @@ function AttendanceRecapTable({
                     <td><StatusBadge status={row.attendanceStatus} /></td>
                     <td className="tableActionCell">
                       <div className="rowActions" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+                        <button className="rowExpandButton" type="button" aria-label={isExpanded ? "Tutup detail rekap" : "Buka detail rekap"} onClick={() => toggleExpandedRow(rowKey)} data-row-action="true">
+                          <ChevronDown size={16} />
+                        </button>
                         <RowActionMenu label={`Aksi rekap ${row.fullName}`}>
-                          <RowActionMenuItem onClick={() => setDetailRow(row)}>
+                          <RowActionMenuItem onClick={() => toggleExpandedRow(rowKey)}>
                             <Eye size={15} />
-                            Detail
+                            {isExpanded ? "Tutup Detail" : "Buka Detail"}
+                          </RowActionMenuItem>
+                          <RowActionMenuItem disabled={!canCorrectCheckIn} onClick={() => onCorrectCheckIn(row)}>
+                            <LogIn size={15} />
+                            Koreksi Masuk
                           </RowActionMenuItem>
                           <RowActionMenuItem disabled={!canCorrectCheckout} onClick={() => onCorrectCheckout(row)}>
                             <CalendarCheck2 size={15} />
@@ -14515,15 +15046,29 @@ function AttendanceRecapTable({
                       </div>
                     </td>
                   </ClickableTableRow>
-                )
-              })}
-              {!loading && !errorMessage && rows.length === 0 && <tr><td className="tableStateCell" colSpan={9}><TableState title="Tidak ada rekap" description="Belum ada data absensi sesuai filter tanggal/range." icon={Search} /></td></tr>}
-            </tbody>
-          </table>
-        </div>
-      </OperationalTableCard>
-      <AttendanceMonitorDetailDialog row={detailRow} onClose={() => setDetailRow(null)} onResetDay={onResetDay} onCorrectCheckout={onCorrectCheckout} />
-    </>
+                  {isExpanded && (
+                    <tr className="liveAttendanceExpandRow attendanceRecapExpandRow">
+                      <td className="liveAttendanceExpandCell" colSpan={9}>
+                        <LiveAttendanceInlineDetail row={row} canCorrectCheckIn={canCorrectCheckIn} canCorrectCheckout={canCorrectCheckout} onClose={() => setExpandedRowKey("")} onResetDay={onResetDay} onCorrectCheckIn={onCorrectCheckIn} onCorrectCheckout={onCorrectCheckout} />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              )
+            })}
+            {!loading && !errorMessage && rows.length === 0 && <tr><td className="tableStateCell" colSpan={9}><TableState title="Tidak ada rekap" description="Belum ada data absensi sesuai filter tanggal/range." icon={Search} /></td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <DataTablePagination
+        page={currentPage}
+        pageSize={safePageSize}
+        totalRows={rows.length}
+        pageSizeOptions={[25, 50, 100]}
+        onPageChange={setPage}
+        onPageSizeChange={(value) => setPageSize(Math.min(value, 100))}
+      />
+    </OperationalTableCard>
   )
 }
 
@@ -15275,11 +15820,222 @@ function PayrollPreviewTable({
   )
 }
 
-function OvertimeStatusBadge({ status }: { status: OvertimeStatus }) {
+function getClockRangeDurationMinutes(startTime: string, endTime: string) {
+  const startMinutes = parseShiftTimeMinutes(startTime)
+  const endMinutes = parseShiftTimeMinutes(endTime)
+
+  if (startMinutes === null || endMinutes === null) return 0
+  const normalizedEndMinutes = endMinutes <= startMinutes ? endMinutes + 24 * 60 : endMinutes
+  return Math.max(0, normalizedEndMinutes - startMinutes)
+}
+
+function addMinutesToClockTime(time: string, minutes: number, fallback = "18:00") {
+  const startMinutes = parseShiftTimeMinutes(time)
+  if (startMinutes === null) return fallback
+  const normalizedMinutes = (startMinutes + minutes + 24 * 60) % (24 * 60)
+  const hours = Math.floor(normalizedMinutes / 60)
+  const minute = normalizedMinutes % 60
+  return `${String(hours).padStart(2, "0")}:${String(minute).padStart(2, "0")}`
+}
+
+function getOvertimePlanRange(row: Pick<OvertimeReviewRow, "plannedStartAt" | "plannedEndAt">) {
+  if (!row.plannedStartAt || !row.plannedEndAt) return "Tanpa request"
+  return `${formatAttendanceTime(row.plannedStartAt)} - ${formatAttendanceTime(row.plannedEndAt)}`
+}
+
+function getOvertimeSourceLabel(source: OvertimeRequestSource) {
+  if (source === "planned") return "Request"
+  if (source === "manual") return "Manual"
+  return "Otomatis"
+}
+
+function getOvertimeDayTypeFromDate(dateKey?: string): "weekday" | "sunday" {
+  if (!dateKey) return "weekday"
+  const parsedDate = new Date(`${dateKey}T00:00:00+07:00`)
+  return parsedDate.getDay() === 0 ? "sunday" : "weekday"
+}
+
+function getOvertimeRequestBasisPreview(dateKey?: string) {
+  return getOvertimeDayTypeFromDate(dateKey) === "sunday" ? "Full durasi kerja" : "Setelah shift"
+}
+
+function getOvertimeRealizationLabel(row: OvertimeReviewRow) {
+  if (!row.actualCheckOutAt) return "Menunggu checkout"
+  if (row.requestSource !== "planned") return "Tanpa request"
+  if (row.plannedMinutes <= 0) return "Request tanpa durasi"
+
+  const diffMinutes = row.overtimeMinutes - row.plannedMinutes
+  if (diffMinutes === 0) return "Sesuai request"
+  if (diffMinutes > 0) return `Lebih ${formatMinutesDuration(diffMinutes)}`
+  return `Kurang ${formatMinutesDuration(Math.abs(diffMinutes))}`
+}
+
+function OvertimeStatusBadge({ status, source }: { status: OvertimeStatus; source?: OvertimeRequestSource }) {
+  if (status === "draft" && source === "planned") return <UiStatusBadge tone="pending">Terencana</UiStatusBadge>
   if (status === "approved") return <UiStatusBadge tone="valid">Approved</UiStatusBadge>
   if (status === "rejected") return <UiStatusBadge tone="failed">Rejected</UiStatusBadge>
   if (status === "draft") return <UiStatusBadge tone="missing">Draft</UiStatusBadge>
   return <UiStatusBadge tone="pending">Pending</UiStatusBadge>
+}
+
+function OvertimeRequestDialog({
+  open,
+  saving,
+  employees,
+  selectedDate,
+  onClose,
+  onSubmit,
+}: {
+  open: boolean
+  saving: boolean
+  employees: AttendanceMonitorRow[]
+  selectedDate: string
+  onClose: () => void
+  onSubmit: (payload: OvertimeRequestSubmitPayload) => void
+}) {
+  const firstEmployee = employees[0]
+  const [employeeId, setEmployeeId] = useState("")
+  const [overtimeDate, setOvertimeDate] = useState(selectedDate || getLocalDateKey())
+  const [plannedStartTime, setPlannedStartTime] = useState("16:00")
+  const [plannedEndTime, setPlannedEndTime] = useState("18:00")
+  const [reason, setReason] = useState("")
+  const [error, setError] = useState("")
+
+  useEffect(() => {
+    if (!open) return
+
+    const fallbackEmployee = firstEmployee
+    const fallbackStart = fallbackEmployee?.shiftEndTime ? fallbackEmployee.shiftEndTime.slice(0, 5) : "16:00"
+    setEmployeeId((current) => current || fallbackEmployee?.employeeId || "")
+    setOvertimeDate(selectedDate || getLocalDateKey())
+    setPlannedStartTime(fallbackStart)
+    setPlannedEndTime(addMinutesToClockTime(fallbackStart, 120, "18:00"))
+    setReason("")
+    setError("")
+  }, [firstEmployee, open, selectedDate])
+
+  const selectedEmployee = employees.find((employee) => employee.employeeId === employeeId)
+  const plannedMinutes = getClockRangeDurationMinutes(plannedStartTime, plannedEndTime)
+  const requestDayType = getOvertimeDayTypeFromDate(overtimeDate)
+  const requestBasisPreview = getOvertimeRequestBasisPreview(overtimeDate)
+  const shiftLabel = selectedEmployee?.shiftStartTime && selectedEmployee?.shiftEndTime
+    ? `${selectedEmployee.shiftStartTime.slice(0, 5)} - ${selectedEmployee.shiftEndTime.slice(0, 5)}`
+    : "Shift belum lengkap"
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const trimmedReason = reason.trim()
+
+    if (!employeeId) {
+      setError("Karyawan wajib dipilih.")
+      return
+    }
+    if (!overtimeDate) {
+      setError("Tanggal lembur wajib diisi.")
+      return
+    }
+    if (!plannedStartTime || !plannedEndTime || plannedMinutes <= 0) {
+      setError("Jam rencana lembur belum valid.")
+      return
+    }
+    if (trimmedReason.length < 4) {
+      setError("Alasan lembur wajib diisi agar approval punya konteks.")
+      return
+    }
+
+    onSubmit({
+      employeeId,
+      overtimeDate,
+      plannedStartTime,
+      plannedEndTime,
+      reason: trimmedReason,
+    })
+  }
+
+  return (
+    <FoundationDialog
+      open={open}
+      labelledBy="overtime-request-title"
+      describedBy="overtime-request-description"
+      className="overtimeRequestDialog"
+      onClose={onClose}
+    >
+      <form className="overtimeRequestShell" onSubmit={submit}>
+        <header className="overtimeRequestHeader">
+          <div>
+            <span><ClipboardList size={14} /> Request Lembur</span>
+            <h2 id="overtime-request-title">Rencana Lembur</h2>
+            <p id="overtime-request-description">Ajukan rencana lembur sebelum realisasi. Payroll tetap menunggu checkout dan approval final.</p>
+          </div>
+          <FoundationDialogCloseButton onClose={onClose} disabled={saving} />
+        </header>
+
+        <div className="overtimeRequestBody">
+          <section className="overtimeRequestFormPanel">
+            <SelectFormField label="Karyawan" value={employeeId} onChange={(event) => setEmployeeId(event.target.value)} required>
+              <option value="">Pilih karyawan</option>
+              {employees.map((employee) => (
+                <option value={employee.employeeId} key={employee.employeeId}>
+                  {employee.employeeCode} - {employee.fullName}
+                </option>
+              ))}
+            </SelectFormField>
+            <div className="overtimeRequestGrid">
+              <DateFormField label="Tanggal Lembur" value={overtimeDate} onChange={setOvertimeDate} required />
+              <TextFormField label="Mulai Lembur" type="time" value={plannedStartTime} onChange={(event) => setPlannedStartTime(event.target.value)} required />
+              <TextFormField label="Selesai Rencana" type="time" value={plannedEndTime} onChange={(event) => setPlannedEndTime(event.target.value)} required />
+            </div>
+            <TextFormField label="Alasan Lembur" value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Contoh: closing order produksi / stock opname gudang" required />
+            {error && <p className="formErrorMessage">{error}</p>}
+          </section>
+
+          <aside className="overtimeRequestPreview">
+            <div className="overtimeRequestPreviewHeader">
+              <span><BadgeDollarSign size={18} /></span>
+              <div>
+                <small>Preview request</small>
+                <strong>{plannedMinutes ? formatMinutesDuration(plannedMinutes) : "-"}</strong>
+              </div>
+            </div>
+            <dl>
+              <div>
+                <dt>Karyawan</dt>
+                <dd>{selectedEmployee ? selectedEmployee.fullName : "Belum dipilih"}</dd>
+              </div>
+              <div>
+                <dt>Shift</dt>
+                <dd>{shiftLabel}</dd>
+              </div>
+              <div>
+                <dt>Rencana</dt>
+                <dd>{plannedStartTime || "--:--"} - {plannedEndTime || "--:--"}</dd>
+              </div>
+              <div>
+                <dt>Status awal</dt>
+                <dd>Terencana, belum payable</dd>
+              </div>
+              <div>
+                <dt>Policy</dt>
+                <dd>{requestDayType === "sunday" ? "Minggu" : "Weekday"} / {requestBasisPreview}</dd>
+              </div>
+            </dl>
+            <div className="overtimeRequestNotice">
+              <AlertCircle size={17} />
+              <span>Request ini menandai rencana lembur. Weekday dihitung setelah kewajiban shift, sedangkan Minggu dihitung dari full durasi kerja aktual.</span>
+            </div>
+          </aside>
+        </div>
+
+        <div className="overtimeRequestActions">
+          <button className="secondaryButton" type="button" onClick={onClose} disabled={saving}>Batal</button>
+          <button className="primaryButton" type="submit" disabled={saving || employees.length === 0}>
+            <ClipboardList size={17} />
+            {saving ? "Menyimpan..." : "Simpan Request"}
+          </button>
+        </div>
+      </form>
+    </FoundationDialog>
+  )
 }
 
 function OvertimeReviewTable({
@@ -15293,19 +16049,52 @@ function OvertimeReviewTable({
   errorMessage: string
   onReview: (row: OvertimeReviewRow) => void
 }) {
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
+  const overtimeTableDrag = useHorizontalDragScroll<HTMLDivElement>()
+  const safePageSize = Math.min(pageSize, 100)
+  const pageCount = Math.max(1, Math.ceil(rows.length / safePageSize))
+  const currentPage = Math.min(page, pageCount)
+  const paginatedRows = rows.slice((currentPage - 1) * safePageSize, currentPage * safePageSize)
+
+  useEffect(() => {
+    setPage(1)
+  }, [rows.length, pageSize])
+
+  const plannedRows = rows.filter((row) => row.status === "draft" && row.requestSource === "planned")
+  const pendingRows = rows.filter((row) => row.status === "pending")
+  const approvedRows = rows.filter((row) => row.status === "approved")
+  const approvedTotal = rows.reduce((sum, row) => sum + (row.status === "approved" ? row.totalAmount : 0), 0)
+
   return (
     <OperationalTableCard>
       <div className="tableHeader">
         <div>
           <h2>Approval Lembur</h2>
-          <p>Data otomatis dari check-out yang melewati jam selesai shift. Klik baris untuk review.</p>
+          <p>Request terencana dan kandidat lembur payable dari settlement absensi. Klik baris untuk review.</p>
         </div>
+        <InlinePageStats items={[`${plannedRows.length} terencana`, `${pendingRows.length} pending`, `${approvedRows.length} approved`, `${formatCurrency(approvedTotal)} approved`]} />
       </div>
-      <div className="tableScroller uiDataTableScroller uiDataTableHasColumns">
+      <div
+        className={clsx("tableScroller uiDataTableScroller uiDataTableHasColumns overtimeReviewTableScroller", overtimeTableDrag.dragging && "dragging")}
+        ref={overtimeTableDrag.ref}
+        {...overtimeTableDrag.handlers}
+      >
         <table>
+          <colgroup>
+            <col className="tableNumberColumn" />
+            <col style={{ width: "270px" }} />
+            <col style={{ width: "160px" }} />
+            <col style={{ width: "180px" }} />
+            <col style={{ width: "170px" }} />
+            <col style={{ width: "190px" }} />
+            <col style={{ width: "150px" }} />
+            <col style={{ width: "130px" }} />
+            <col className="tableActionColumn" />
+          </colgroup>
           <thead>
             <tr>
-              <th>No</th>
+              <th className="tableNumberHeader">No</th>
               <th>Karyawan</th>
               <th>Tanggal</th>
               <th>Jam Kerja</th>
@@ -15317,23 +16106,25 @@ function OvertimeReviewTable({
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td className="tableStateCell" colSpan={9}><TableState title="Memuat lembur" description="Mendeteksi check-out yang melewati jam kerja." icon={BadgeDollarSign} /></td></tr>}
+            {loading && <FoundationTableSkeletonRows colSpan={9} columns={9} />}
             {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={9}><TableState title="Gagal memuat lembur" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
-            {!loading && !errorMessage && rows.map((row, index) => {
-              const previewAmount = row.status === "approved" ? row.totalAmount : Math.round((row.overtimeMinutes / 60) * row.rateAmount)
+            {!loading && !errorMessage && paginatedRows.map((row, index) => {
+              const hasRealization = Boolean(row.actualCheckOutAt)
+              const displayMinutes = row.overtimeMinutes || row.plannedMinutes
+              const previewAmount = row.status === "approved" ? row.totalAmount : row.overtimeMinutes > 0 ? Math.round((row.overtimeMinutes / 60) * row.rateAmount) : 0
 
               return (
                 <ClickableTableRow key={row.id} label={`Review lembur ${row.fullName}`} onOpen={() => onReview(row)}>
-                  <td><TableNumberCell value={index + 1} /></td>
+                  <td className="tableNumberCell"><TableNumberCell value={(currentPage - 1) * safePageSize + index + 1} /></td>
                   <td>
                     <EmployeeIdentityCell fullName={row.fullName} code={row.employeeCode} photoUrl={row.employeePhotoUrl} secondary={`${row.employeeCode} · ${row.divisionName}`} />
                   </td>
-                  <td><TableText primary={formatWorkDate(row.overtimeDate)} secondary={getPayrollDayTypeLabel(row.dayType)} /></td>
-                  <td><TableText primary={`${row.shiftStartTime || "--:--"} - ${row.shiftEndTime || "--:--"}`} secondary={`Checkout ${formatAttendanceTime(row.actualCheckOutAt)}`} /></td>
-                  <td><TableText primary={formatMinutesDuration(row.overtimeMinutes)} secondary={row.status === "approved" ? `${formatMinutesDuration(row.approvedMinutes)} dibayar` : "Menunggu approval"} /></td>
+                  <td><TableText primary={formatWorkDate(row.overtimeDate)} secondary={`${getPayrollDayTypeLabel(row.dayType)} / ${getOvertimeSourceLabel(row.requestSource)}`} /></td>
+                  <td><TableText primary={`${row.shiftStartTime || "--:--"} - ${row.shiftEndTime || "--:--"}`} secondary={hasRealization ? `Checkout ${formatAttendanceTime(row.actualCheckOutAt)}` : `Rencana ${getOvertimePlanRange(row)}`} /></td>
+                  <td><TableText primary={displayMinutes ? formatMinutesDuration(displayMinutes) : "-"} secondary={row.status === "approved" ? `${formatMinutesDuration(row.approvedMinutes)} dibayar` : getOvertimeRealizationLabel(row)} /></td>
                   <td><TableText primary={`${formatCurrency(row.rateAmount)}/jam`} secondary={row.componentName} /></td>
-                  <td><TableText primary={formatCurrency(previewAmount)} /></td>
-                  <td><OvertimeStatusBadge status={row.status} /></td>
+                  <td><TableText primary={previewAmount > 0 ? formatCurrency(previewAmount) : "-"} secondary={getOvertimeBasisLabel(row.overtimeBasis)} /></td>
+                  <td><OvertimeStatusBadge status={row.status} source={row.requestSource} /></td>
                   <td className="tableActionCell">
                     <div className="rowActions">
                       <RowActionButton />
@@ -15342,10 +16133,20 @@ function OvertimeReviewTable({
                 </ClickableTableRow>
               )
             })}
-            {!loading && !errorMessage && rows.length === 0 && <tr><td className="tableStateCell" colSpan={9}><TableState title="Belum ada lembur" description="Kandidat lembur muncul otomatis saat check-out melewati jam selesai shift." icon={Search} /></td></tr>}
+            {!loading && !errorMessage && rows.length === 0 && <tr><td className="tableStateCell" colSpan={9}><TableState title="Belum ada lembur" description="Kandidat lembur muncul otomatis saat jam kerja aktual melebihi kewajiban shift." icon={Search} /></td></tr>}
           </tbody>
         </table>
       </div>
+      {!loading && (
+        <DataTablePagination
+          page={currentPage}
+          pageSize={safePageSize}
+          totalRows={rows.length}
+          pageSizeOptions={[25, 50, 100]}
+          onPageChange={setPage}
+          onPageSizeChange={(value) => setPageSize(Math.min(value, 100))}
+        />
+      )}
     </OperationalTableCard>
   )
 }
@@ -15373,6 +16174,11 @@ function OvertimeReviewDialog({
 
   const minutes = Math.max(0, Math.min(row.overtimeMinutes, Number(approvedMinutes || 0)))
   const previewAmount = Math.round((minutes / 60) * row.rateAmount)
+  const canApprovePayroll = row.overtimeMinutes > 0 && Boolean(row.actualCheckOutAt) && row.status !== "draft"
+  const plannedLabel = getOvertimePlanRange(row)
+  const sourceLabel = getOvertimeSourceLabel(row.requestSource)
+  const displayMinutes = row.overtimeMinutes || row.plannedMinutes
+  const realizationLabel = getOvertimeRealizationLabel(row)
 
   return (
     <div className="dialogBackdrop" role="presentation" onMouseDown={onClose}>
@@ -15389,8 +16195,8 @@ function OvertimeReviewDialog({
           </span>
           <div>
             <span>Overtime Review</span>
-            <h2 id="overtime-review-title">Review lembur {row.fullName}</h2>
-            <p>Approve menit yang dibayar. Lembur approved akan masuk preview payroll.</p>
+            <h2 id="overtime-review-title">{row.requestSource === "planned" && row.status === "draft" ? "Request lembur" : "Review lembur"} {row.fullName}</h2>
+            <p>{canApprovePayroll ? "Approve menit yang dibayar. Lembur approved akan masuk preview payroll." : "Request sudah tercatat, tetapi payroll menunggu realisasi checkout dan kalkulasi payable."}</p>
           </div>
           <button className="iconButton dialogClose" type="button" aria-label="Tutup review lembur" onClick={onClose}>
             <X size={18} />
@@ -15401,9 +16207,9 @@ function OvertimeReviewDialog({
           <div className="overtimeHero">
             <span><BadgeDollarSign size={24} /></span>
             <div>
-              <small>{row.componentName} · {getPayrollDayTypeLabel(row.dayType)}</small>
-              <strong>{formatMinutesDuration(row.overtimeMinutes)}</strong>
-              <p>{formatCurrency(row.rateAmount)}/jam · estimasi {formatCurrency(Math.round((row.overtimeMinutes / 60) * row.rateAmount))}</p>
+              <small>{sourceLabel} / {row.componentName} / {getPayrollDayTypeLabel(row.dayType)}</small>
+              <strong>{displayMinutes ? formatMinutesDuration(displayMinutes) : "-"}</strong>
+              <p>{canApprovePayroll ? `${formatCurrency(row.rateAmount)}/jam / ${getOvertimeBasisLabel(row.overtimeBasis)} / estimasi ${formatCurrency(Math.round((row.overtimeMinutes / 60) * row.rateAmount))}` : "Belum payable sampai checkout dan settlement valid."}</p>
             </div>
           </div>
 
@@ -15421,26 +16227,43 @@ function OvertimeReviewDialog({
             <div>
               <span>Jam Shift</span>
               <strong>{row.shiftStartTime || "--:--"} - {row.shiftEndTime || "--:--"}</strong>
-              <small>Checkout {formatAttendanceTime(row.actualCheckOutAt)}</small>
+              <small>{row.actualCheckOutAt ? `Checkout ${formatAttendanceTime(row.actualCheckOutAt)}` : `Rencana ${plannedLabel}`}</small>
+            </div>
+            <div>
+              <span>Rencana</span>
+              <strong>{plannedLabel}</strong>
+              <small>{row.requestReason || "Tanpa catatan request"}</small>
+            </div>
+            <div>
+              <span>Realisasi</span>
+              <strong>{realizationLabel}</strong>
+              <small>{getOvertimeBasisLabel(row.overtimeBasis)}</small>
             </div>
             <div>
               <span>Dibayar</span>
-              <strong>{formatMinutesDuration(minutes)}</strong>
-              <small>{formatCurrency(previewAmount)}</small>
+              <strong>{canApprovePayroll ? formatMinutesDuration(minutes) : "Menunggu"}</strong>
+              <small>{canApprovePayroll ? formatCurrency(previewAmount) : "Belum masuk payroll"}</small>
             </div>
           </div>
 
+          {canApprovePayroll ? (
+            <TextFormField
+              label="Menit Dibayar"
+              type="number"
+              min={0}
+              max={row.overtimeMinutes}
+              value={approvedMinutes}
+              onChange={(event) => setApprovedMinutes(event.target.value)}
+              required
+            />
+          ) : (
+            <div className="overtimeRequestNotice">
+              <AlertCircle size={17} />
+              <span>Belum bisa approve pembayaran. Tunggu karyawan checkout, lalu klik Refresh Data di Payroll agar request berubah menjadi pending approval.</span>
+            </div>
+          )}
           <TextFormField
-            label="Menit Dibayar"
-            type="number"
-            min={0}
-            max={row.overtimeMinutes}
-            value={approvedMinutes}
-            onChange={(event) => setApprovedMinutes(event.target.value)}
-            required
-          />
-          <TextFormField
-            label="Catatan Finance / HR"
+            label={canApprovePayroll ? "Catatan Finance / HR" : "Catatan Penolakan / Koreksi"}
             value={notes}
             onChange={(event) => setNotes(event.target.value)}
             placeholder="Contoh: lembur produksi disetujui karena closing order."
@@ -15453,12 +16276,19 @@ function OvertimeReviewDialog({
           </button>
           <button className="secondaryButton dangerSoftButton" type="button" onClick={() => onSubmit("reject", 0, notes)} disabled={saving}>
             <X size={16} />
-            Reject
+            {canApprovePayroll ? "Reject" : "Tolak Request"}
           </button>
-          <button className="primaryButton" type="button" onClick={() => onSubmit("approve", minutes, notes)} disabled={saving}>
-            <FileCheck2 size={16} />
-            {saving ? "Memproses..." : "Approve Lembur"}
-          </button>
+          {canApprovePayroll ? (
+            <button className="primaryButton" type="button" onClick={() => onSubmit("approve", minutes, notes)} disabled={saving}>
+              <FileCheck2 size={16} />
+              {saving ? "Memproses..." : "Approve Lembur"}
+            </button>
+          ) : (
+            <button className="primaryButton" type="button" onClick={onClose} disabled={saving}>
+              <CalendarCheck2 size={16} />
+              Menunggu Realisasi
+            </button>
+          )}
         </div>
       </section>
     </div>
@@ -16501,198 +17331,25 @@ function FieldAttendanceDialog({
 }
 
 function ModulePage({ activeView }: { activeView: ModuleViewId }) {
-  const config = moduleConfigs[activeView]
-  const [detailRow, setDetailRow] = useState<{ row: Record<string, string | number>; index: number } | null>(null)
+  const moduleLabel = navItems.find((item) => item.id === activeView)?.label || "Modul"
 
   return (
     <OperationalPageShell>
-      <PageHeader activeView={activeView} subtitle={config.subtitle} />
-
-      <OperationalKpiGrid>
-        {config.kpis.map((kpi) => (
-          <OperationalKpiCard
-            key={kpi.label}
-            label={kpi.label}
-            value={kpi.value}
-            detail={kpi.detail}
-            icon={kpi.icon}
-            tone={kpi.tone}
-          />
-        ))}
-      </OperationalKpiGrid>
-
-      <OperationalFilterPanel>
-        <div className="filterField">
-          <label>Search</label>
-          <div className="uiInput inputWithIcon compact">
-            <Search size={16} />
-            <input placeholder={`Cari data ${navItems.find((item) => item.id === activeView)?.label.toLowerCase()}...`} />
-          </div>
-        </div>
-        <div className="filterField">
-          <label>Filter</label>
-          <select className="uiSelectTrigger" defaultValue={config.filters[0]}>
-            {config.filters.map((filter) => (
-              <option value={filter} key={filter}>{filter}</option>
-            ))}
-          </select>
-        </div>
-        <button className="secondaryButton" type="button">Reset Filter</button>
-      </OperationalFilterPanel>
-
-      <section className="moduleGrid">
-        <section className="surfacePanel moduleFormCard">
-          <div className="tableHeader flushHeader">
-            <div>
-              <h2>{config.formTitle}</h2>
-              <p>{config.formDescription}</p>
-            </div>
-          </div>
-          <form className="moduleForm">
-            {config.formFields.map((field) => (
-              field.type === "date"
-                ? <DateFormField label={field.label} placeholder={field.placeholder} key={field.label} />
-                : <TextFormField label={field.label} type={field.type || "text"} placeholder={field.placeholder} key={field.label} />
-            ))}
-            <div className="formActions">
-              <button className="secondaryButton" type="button">Draft</button>
-              <button className="primaryButton" type="button">
-                <FileCheck2 size={17} />
-                Simpan Draft
-              </button>
-            </div>
-          </form>
-        </section>
-
-        <OperationalTableCard>
-          <div className="tableHeader">
-            <div>
-              <h2>{config.tableTitle}</h2>
-              <p>{config.tableDescription}</p>
-            </div>
-            <button className="secondaryButton" type="button">Export</button>
-          </div>
-          <div className="tableScroller uiDataTableScroller uiDataTableHasColumns">
-            <table>
-              <colgroup>
-                <col className="tableNumberColumn" />
-                {config.columns.map((column) => (
-                  <col key={column} />
-                ))}
-                <col className="tableActionColumn" />
-              </colgroup>
-              <thead>
-                <tr>
-                  <th className="tableNumberHeader">No</th>
-                  {config.columns.map((column) => (
-                    <th key={column}>{column}</th>
-                  ))}
-                  <th className="tableActionHeader">Aksi</th>
-                </tr>
-              </thead>
-              <tbody>
-                {config.rows.map((row, rowIndex) => (
-                  <ClickableTableRow
-                    key={`${activeView}-${rowIndex}`}
-                    label={`Lihat detail ${config.tableTitle} ${rowIndex + 1}`}
-                    onOpen={() => setDetailRow({ row: row as Record<string, string | number>, index: rowIndex })}
-                  >
-                    <td className="tableNumberCell"><TableNumberCell value={rowIndex + 1} /></td>
-                    {config.columns.map((column) => (
-                      <td key={column}>
-                        {column === "Status" ? (
-                          <ModuleStatusBadge value={row[column]} />
-                        ) : (
-                          <TableText
-                            primary={row[column]}
-                            secondary={column === config.columns[0] ? `Draft #${String(rowIndex + 1).padStart(3, "0")}` : undefined}
-                          />
-                        )}
-                      </td>
-                    ))}
-                    <td className="tableActionCell">
-                      <div className="rowActions">
-                        <RowActionButton label={`Lihat detail ${config.tableTitle} ${rowIndex + 1}`} onClick={() => setDetailRow({ row: row as Record<string, string | number>, index: rowIndex })} />
-                      </div>
-                    </td>
-                  </ClickableTableRow>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </OperationalTableCard>
-      </section>
-      <ModuleRowDetailDialog
+      <PageHeader
         activeView={activeView}
-        title={config.tableTitle}
-        columns={config.columns}
-        detailRow={detailRow}
-        onClose={() => setDetailRow(null)}
+        subtitle={`${moduleLabel} belum dibuka untuk production. Menu ini dikunci agar tidak menampilkan data draft saat launch.`}
       />
-    </OperationalPageShell>
-  )
-}
 
-function ModuleRowDetailDialog({
-  activeView,
-  title,
-  columns,
-  detailRow,
-  onClose,
-}: {
-  activeView: ModuleViewId
-  title: string
-  columns: string[]
-  detailRow: { row: Record<string, string | number>; index: number } | null
-  onClose: () => void
-}) {
-  if (!detailRow) return null
-
-  const primaryColumn = columns[0]
-  const primaryValue = detailRow.row[primaryColumn] ?? `${title} ${detailRow.index + 1}`
-
-  return createPortal(
-    <div className="dialogBackdrop" role="presentation" onMouseDown={onClose}>
-      <section
-        className="dialogPanel masterDetailDialog moduleRowDetailDialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="module-row-detail-title"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <div className="dialogCompactHeader masterDetailHeader">
-          <div className="masterDetailTitle">
-            <span className="masterDetailIcon">
-              <FileBarChart size={22} />
-            </span>
-            <div>
-              <span>{navItems.find((item) => item.id === activeView)?.label || "Detail"}</span>
-              <h2 id="module-row-detail-title">{primaryValue}</h2>
-              <p>Detail baris dari modul ini. Struktur data real akan mengikuti integrasi database berikutnya.</p>
-            </div>
-          </div>
-          <button className="iconButton dialogClose" type="button" aria-label="Tutup detail" onClick={onClose}>
-            <X size={18} />
-          </button>
-        </div>
-
-        <div className="masterDetailBody">
-          <div className="masterDetailGrid">
-            {columns.map((column) => (
-              <div className="masterDetailField" key={column}>
-                <span>{column}</span>
-                <strong>{detailRow.row[column] ?? "-"}</strong>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="masterDetailActions">
-          <button className="secondaryButton" type="button" onClick={onClose}>Tutup</button>
+      <section className="surfacePanel launchGuardPanel">
+        <div className="emptyState">
+          <span className="emptyStateIcon">
+            <ShieldCheck size={24} />
+          </span>
+          <h2>Modul Belum Aktif</h2>
+          <p>Halaman ini tidak tersedia di menu production. Gunakan modul yang sudah aktif di sidebar.</p>
         </div>
       </section>
-    </div>,
-    document.body,
+    </OperationalPageShell>
   )
 }
 

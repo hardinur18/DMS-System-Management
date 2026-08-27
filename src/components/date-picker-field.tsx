@@ -1,7 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
-import { CalendarDays, ChevronLeft, ChevronRight, X } from "lucide-react"
+import { CalendarDays, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, X } from "lucide-react"
 import clsx from "clsx"
+
+const weekdayLabels = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"]
 
 function toDateValue(date: Date) {
   const year = date.getFullYear()
@@ -10,10 +12,32 @@ function toDateValue(date: Date) {
   return `${year}-${month}-${day}`
 }
 
+function parseDateValue(value?: string) {
+  if (!value) return null
+  const [year, month, day] = value.split("-").map(Number)
+  if (!year || !month || !day) return null
+
+  const date = new Date(year, month - 1, day)
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null
+  return date
+}
+
+function shiftDate(date: Date, days: number) {
+  const nextDate = new Date(date)
+  nextDate.setDate(nextDate.getDate() + days)
+  return nextDate
+}
+
 function formatDisplayDate(value: string) {
   if (!value) return ""
-  const [year, month, day] = value.split("-")
-  return `${day}/${month}/${year}`
+  const date = parseDateValue(value)
+  if (!date) return value
+
+  return new Intl.DateTimeFormat("id-ID", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(date)
 }
 
 function getMonthLabel(date: Date) {
@@ -48,20 +72,31 @@ export function DatePickerField({
   const popoverRef = useRef<HTMLDivElement>(null)
   const [internalValue, setInternalValue] = useState("")
   const [open, setOpen] = useState(false)
-  const [popoverStyle, setPopoverStyle] = useState({ left: 0, top: 0, width: 328 })
+  const [popoverStyle, setPopoverStyle] = useState({ left: 0, top: 0, width: 476 })
   const selectedValue = controlledValue ?? internalValue
-  const selectedDate = selectedValue ? new Date(`${selectedValue}T00:00:00`) : today
+  const selectedDate = parseDateValue(selectedValue) ?? today
   const [viewDate, setViewDate] = useState(selectedDate)
   const calendarDays = getCalendarDays(viewDate)
   const todayValue = toDateValue(today)
+  const quickPresets = [
+    { label: "Hari ini", value: today },
+    { label: "Kemarin", value: shiftDate(today, -1) },
+    { label: "Awal bulan", value: new Date(today.getFullYear(), today.getMonth(), 1) },
+  ]
 
   const setValue = (value: string) => {
     setInternalValue(value)
     onChange?.(value)
+    const nextDate = parseDateValue(value)
+    if (nextDate) setViewDate(nextDate)
   }
 
   const moveMonth = (offset: number) => {
     setViewDate((current) => new Date(current.getFullYear(), current.getMonth() + offset, 1))
+  }
+
+  const moveYear = (offset: number) => {
+    setViewDate((current) => new Date(current.getFullYear() + offset, current.getMonth(), 1))
   }
 
   const updatePopoverPosition = () => {
@@ -69,9 +104,9 @@ export function DatePickerField({
     if (!button) return
 
     const rect = button.getBoundingClientRect()
-    const viewportPadding = 16
-    const width = Math.min(328, window.innerWidth - viewportPadding * 2)
-    const popoverHeight = popoverRef.current?.offsetHeight || 356
+    const viewportPadding = window.innerWidth < 560 ? 12 : 16
+    const width = Math.min(window.innerWidth < 560 ? 360 : 476, window.innerWidth - viewportPadding * 2)
+    const popoverHeight = popoverRef.current?.offsetHeight || 386
     const left = Math.min(Math.max(rect.left, viewportPadding), window.innerWidth - width - viewportPadding)
     const preferredTop = rect.bottom + 10
     const flippedTop = rect.top - popoverHeight - 10
@@ -81,6 +116,10 @@ export function DatePickerField({
 
     setPopoverStyle({ left, top, width })
   }
+
+  useEffect(() => {
+    if (open) setViewDate(selectedDate)
+  }, [open, selectedValue])
 
   useLayoutEffect(() => {
     if (!open) return
@@ -116,55 +155,94 @@ export function DatePickerField({
 
   const calendarPopover = open ? createPortal(
     <div className="datePickerPopover portal" ref={popoverRef} style={popoverStyle}>
-      <div className="datePickerHeader">
-        <button type="button" aria-label="Bulan sebelumnya" onClick={() => moveMonth(-1)}>
-          <ChevronLeft size={17} />
-        </button>
-        <strong>{getMonthLabel(viewDate)}</strong>
-        <button type="button" aria-label="Bulan berikutnya" onClick={() => moveMonth(1)}>
-          <ChevronRight size={17} />
-        </button>
-      </div>
+      <div className="datePickerShell">
+        <aside className="datePickerSidebar" aria-label="Pilihan tanggal cepat">
+          <small>Pilihan cepat</small>
+          {quickPresets.map((preset) => {
+            const presetValue = toDateValue(preset.value)
+            return (
+              <button
+                className={clsx("datePickerPreset", selectedValue === presetValue && "active")}
+                key={preset.label}
+                type="button"
+                onClick={() => {
+                  setValue(presetValue)
+                  setOpen(false)
+                }}
+              >
+                {preset.label}
+              </button>
+            )
+          })}
+        </aside>
 
-      <div className="datePickerWeekdays">
-        {["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"].map((day) => (
-          <span key={day}>{day}</span>
-        ))}
-      </div>
+        <section className="datePickerCalendarPanel" aria-label="Kalender">
+          <div className="datePickerHeader">
+            <span className="datePickerHeaderNav">
+              <button type="button" aria-label="Tahun sebelumnya" title="Tahun sebelumnya" onClick={() => moveYear(-1)}>
+                <ChevronsLeft size={16} />
+              </button>
+              <button type="button" aria-label="Bulan sebelumnya" title="Bulan sebelumnya" onClick={() => moveMonth(-1)}>
+                <ChevronLeft size={16} />
+              </button>
+            </span>
+            <strong>{getMonthLabel(viewDate)}</strong>
+            <span className="datePickerHeaderNav">
+              <button type="button" aria-label="Bulan berikutnya" title="Bulan berikutnya" onClick={() => moveMonth(1)}>
+                <ChevronRight size={16} />
+              </button>
+              <button type="button" aria-label="Tahun berikutnya" title="Tahun berikutnya" onClick={() => moveYear(1)}>
+                <ChevronsRight size={16} />
+              </button>
+            </span>
+          </div>
 
-      <div className="datePickerGrid">
-        {calendarDays.map((date) => {
-          const dateValue = toDateValue(date)
-          const currentMonth = date.getMonth() === viewDate.getMonth()
-          const active = dateValue === selectedValue
-          return (
+          <div className="datePickerWeekdays">
+            {weekdayLabels.map((day) => (
+              <span key={day}>{day}</span>
+            ))}
+          </div>
+
+          <div className="datePickerGrid">
+            {calendarDays.map((date) => {
+              const dateValue = toDateValue(date)
+              const currentMonth = date.getMonth() === viewDate.getMonth()
+              const active = dateValue === selectedValue
+              return (
+                <button
+                  className={clsx("datePickerDay", !currentMonth && "muted", dateValue === todayValue && "today", active && "active")}
+                  key={dateValue}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => {
+                    setValue(dateValue)
+                    setOpen(false)
+                  }}
+                >
+                  {date.getDate()}
+                </button>
+              )
+            })}
+          </div>
+
+          <div className="datePickerFooter">
+            <span>{selectedValue ? formatDisplayDate(selectedValue) : "Belum pilih tanggal"}</span>
+            <button type="button" onClick={() => setValue("")}>
+              <X size={14} />
+              Hapus
+            </button>
             <button
-              className={clsx("datePickerDay", !currentMonth && "muted", dateValue === todayValue && "today", active && "active")}
-              key={dateValue}
               type="button"
               onClick={() => {
-                setValue(dateValue)
+                setViewDate(today)
+                setValue(todayValue)
                 setOpen(false)
               }}
             >
-              {date.getDate()}
+              Hari ini
             </button>
-          )
-        })}
-      </div>
-
-      <div className="datePickerFooter">
-        <button type="button" onClick={() => setValue("")}>
-          <X size={14} />
-          Clear
-        </button>
-        <button type="button" onClick={() => {
-          setViewDate(today)
-          setValue(todayValue)
-          setOpen(false)
-        }}>
-          Today
-        </button>
+          </div>
+        </section>
       </div>
     </div>,
     document.body,
@@ -172,7 +250,12 @@ export function DatePickerField({
 
   return (
     <div className="datePickerField">
-      <button ref={buttonRef} className={clsx("dateInputButton", open && "active", !selectedValue && "empty")} type="button" onClick={() => setOpen((value) => !value)}>
+      <button
+        ref={buttonRef}
+        className={clsx("dateInputButton", open && "active", !selectedValue && "empty")}
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+      >
         <span>{selectedValue ? formatDisplayDate(selectedValue) : placeholder}</span>
         <CalendarDays size={17} />
       </button>

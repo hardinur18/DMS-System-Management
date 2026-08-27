@@ -19,6 +19,18 @@ Tujuannya bukan menyalin fitur Polesheadlamp, tetapi mengambil pola produk yang 
 - Hindari UI yang terlalu dekoratif, terlalu gelap, atau terlalu penuh gradient.
 - Animasi harus halus dan membantu feedback, bukan membuat app terasa berat.
 
+## Tipografi
+
+- Gunakan Plus Jakarta Sans sebagai font utama untuk app operasional.
+- Body text, deskripsi, helper text, dan metadata memakai weight ringan-menengah, sekitar `400-500`.
+- Teks utama di table/dropdown memakai `500-560`, bukan bold penuh.
+- Label kecil, tab, dan control memakai `560-620` agar tetap jelas saat discan.
+- Heading section/dialog memakai `700-760`; hindari `800-900` kecuali untuk hero/title yang sangat penting.
+- Angka KPI boleh lebih kuat, sekitar `760-780`, karena berfungsi sebagai anchor visual.
+- Tombol utama memakai `600-650`; secondary button lebih ringan.
+- Jangan memakai `<strong>` untuk layout biasa. Pakai class foundation seperti `TableText`, status text, atau component-specific class agar bobot huruf bisa dikontrol global.
+- Hindari semua teks dalam satu card/table terlihat bold bersamaan. Satu blok sebaiknya punya kontras: label ringan, value sedang, angka/status lebih tegas.
+
 ## Prinsip Produk
 
 - DMS adalah operational management app, bukan landing page.
@@ -184,12 +196,13 @@ Komponen operasional reusable:
 - Data table memakai `TableText`, `TableNumberCell`, `RowActionMenu`, dan `RowActionMenuItem` di `src/components/data-table.tsx`.
 - Row table yang membuka detail memakai `ClickableTableRow` di `src/components/data-table.tsx`.
 - Pagination table memakai `DataTablePagination` di `src/components/data-table.tsx`.
-- Loading data memakai `FoundationSkeleton` dan `FoundationTableSkeletonRows` di `src/components/foundation-loading.tsx`.
+- Loading dan cache data memakai `FoundationSkeleton`, `FoundationTableSkeletonRows`, dan `useFoundationCachedData` di `src/components/foundation-loading.tsx`.
 
 Standar tab kategori:
 
 - Desktop memakai compact pill tabs.
 - Mobile memakai horizontal scroll tanpa scrollbar visual.
+- Tab strip wajib mendukung swipe touch dan drag mouse agar item yang overflow tetap bisa dicapai di mobile preview desktop.
 - Active state memakai border, soft gradient layer, shadow kecil, dan count badge aktif.
 - Tab tidak boleh dibungkus card tambahan bila hanya berfungsi sebagai selector ringan.
 
@@ -201,14 +214,18 @@ Komponen foundation:
 
 - `FoundationSkeleton`: placeholder kecil untuk value KPI, inline stats, tab count, dropdown value, text, badge, avatar, dan tombol.
 - `FoundationTableSkeletonRows`: placeholder row table untuk data yang sedang diambil dari Supabase.
+- `useFoundationCachedData`: hook cache/loading standar untuk page yang membaca data dari Supabase/API. First load menampilkan skeleton, data yang sudah pernah dimuat langsung tampil saat user kembali ke page, dan refresh berikutnya berjalan silent.
+- `getFoundationCachedData`, `setFoundationCachedData`, `clearFoundationCachedData`: helper cache bila page perlu membaca, menyimpan, atau menghapus cache data secara eksplisit.
 
 Aturan penggunaan:
 
+- Page data baru wajib memakai `useFoundationCachedData` atau pola yang setara sebelum membuat state loading manual.
 - Skeleton hanya dipakai untuk bagian yang sumbernya dari database/API, bukan untuk mengganti seluruh UI page.
 - Page shell, header, action button, tab, filter, table header, dan struktur layout harus tetap tampil.
 - Saat first load, value data boleh skeleton shimmer, tetapi layout final tidak boleh hilang.
 - Saat user pindah page lalu kembali, pakai cache state terakhir dan jangan menampilkan loading ulang bila data sudah pernah dimuat.
 - Manual `Refresh Data` boleh mengambil data baru, tetapi jangan mengosongkan UI lama kecuali datanya benar-benar belum pernah ada.
+- Pisahkan `loading` untuk first load dan `refreshing` untuk background refresh. Tabel membaca `loading`, sedangkan tombol `Refresh Data` boleh membaca `loading || refreshing`.
 - Jangan memakai text `...` sebagai loading data. Gunakan skeleton shimmer.
 - Jangan memakai progress bar besar untuk table/dashboard data biasa. Progress bar hanya untuk proses panjang yang punya tahapan nyata.
 - Empty state hanya muncul setelah request selesai dan hasil data memang kosong.
@@ -224,6 +241,7 @@ Setiap UI yang menampilkan `attendance_logs` harus mempertahankan sumber data ab
 - Biofinger yang sudah dikonversi ke absensi final tetap bisa ditelusuri dari `biofinger_event_id`.
 - Tabel mapping Biofinger punya kontrol `Urutan`; default-nya `User ID Tertinggi`, dengan opsi `Terbaru dari Mesin` dan `User ID Terendah`.
 - Biofinger punya dua action berbeda: `Sync User Mesin` untuk meminta payload USERINFO dari AT-301, dan `Refresh Data` untuk membaca ulang data Supabase yang sudah masuk.
+- Receiver Biofinger production memakai auto-convert: raw event `mapped` otomatis menjadi `attendance_logs` dan masuk Live Absensi. Tombol `Proses Absensi` hanya fallback manual/debug.
 
 ## Attendance Shift Settlement Pattern
 
@@ -233,14 +251,48 @@ Live Absensi dan Rekap Absensi tidak boleh hanya membaca durasi mentah dari `att
 - Check-in aktual memakai log `check_in`; check-out aktual memakai log `check_out`.
 - Untuk Biofinger, event final tetap mengikuti rule check-in paling awal dan check-out paling akhir per karyawan/tanggal.
 - UI menampilkan `Jadwal & Jam`: nama shift, jam jadwal, jam wajib, jam aktual, telat, pulang cepat, kurang jam, dan lewat shift bila ada.
+- Toleransi telat dan toleransi pulang cepat berasal dari Master Data Shift. Nilainya disimpan sebagai snapshot di `attendance_daily_summaries` agar hasil audit harian tetap stabil walaupun aturan shift diedit setelahnya.
 - Sort default Live Absensi adalah aktivitas terbaru di paling atas. Karyawan tanpa aktivitas hari itu turun setelah baris yang punya update.
-- Detail Live Absensi memakai inline collapse di bawah baris agar HR tetap punya konteks tabel. Modal detail dipakai untuk rekap/review yang butuh ruang baca lebih panjang.
+- Detail Live Absensi dan Rekap Absensi memakai inline collapse di bawah baris agar HR tetap punya konteks tabel. Modal detail hanya dipakai untuk aksi fokus seperti koreksi, approval, atau form yang butuh konfirmasi.
 - Teks dalam table Live Absensi harus medium, bukan bold semua. Gunakan bobot tebal hanya untuk angka ringkasan, judul section, status penting, dan CTA.
 - Row utama Live Absensi maksimal tiga baris informasi per kolom dan rata atas. Keterangan panjang, sumber lengkap, metrik telat, pulang cepat, kurang jam, dan kelebihan jam dipindahkan ke inline collapse.
 - Inline collapse Live Absensi tidak memakai card bertumpuk; gunakan satu panel detail dengan section datar dan divider ringan.
-- `kurang jam` adalah indikator operasional/review. Jangan otomatis memotong payroll sebelum policy payroll disetujui.
-- Settlement backend disiapkan di `attendance_daily_summaries`; payroll jangka panjang harus membaca hasil settlement final, bukan raw log langsung.
+- Summary metrik Live/Rekap Absensi memakai strip datar dengan divider halus. Hindari deretan mini-card berborder karena membuat area monitoring terlihat berat.
+- Shadow halaman monitoring harus subtle. Filter panel dan summary strip memakai border/spacing sebagai hirarki utama; shadow hanya tipis untuk memisahkan surface dari background.
+- Table Live Absensi dan Rekap Absensi wajib memakai pagination foundation dengan pilihan 25, 50, dan 100 baris per halaman. Nomor baris mengikuti offset halaman.
+- Filter tanggal Live Absensi dan Rekap Absensi wajib memakai `DateModePicker` sebagai satu-satunya sumber range. Jangan menambah segmented range lokal terpisah di page Rekap.
+- Rekap Absensi memakai loader khusus yang hanya mengambil summary harian, karyawan, lokasi, shift, payroll cycle, dan log evidence seperlunya. Queue review, overtime, app user, dan face profile tidak ikut dimuat kecuali page lain membutuhkannya.
+- Status filter Rekap Absensi harus mengikuti settlement operasional: sesuai shift, kurang jam, telat, pulang cepat, lewat shift, sedang berjalan, belum checkout, belum masuk, perlu review, tidak valid, dan shift belum lengkap.
+- Detail Rekap Absensi wajib menampilkan toleransi shift yang dipakai saat kalkulasi agar angka telat dan pulang cepat bisa diaudit.
+- Detail Rekap Absensi di desktop tidak memakai dialog potret; informasi panjang seperti sumber event, toleransi, validasi, payroll cycle, dan catatan masuk ke inline collapse.
+- `telat` dan `pulang cepat` dihitung setelah toleransi shift. `kurang jam` tetap indikator operasional/review; jangan otomatis memotong payroll sebelum policy payroll disetujui.
+- Settlement backend di `attendance_daily_summaries` adalah sumber utama Live Absensi/Rekap Absensi untuk status harian, jadwal shift, jam aktual, kurang jam, telat, pulang cepat, overtime, dan workday counted. Raw `attendance_logs` dipakai sebagai sumber detail/evidence.
 - Shift malam boleh melewati tanggal kalender. Backend harus menyimpan `scheduled_end_at` di tanggal berikutnya bila `end_time <= start_time`.
+- Koreksi checkout harus menyediakan tanggal dan jam pulang. Untuk shift reguler tanggal pulang sama dengan tanggal absensi; untuk shift malam boleh tanggal berikutnya.
+- Tombol `Refresh Data` di Live/Rekap menjalankan refresh summary backend untuk tanggal operasional terbaru. Bila range terlalu besar, backend refresh dibatasi ke maksimal 31 hari terakhir agar tidak timeout, sementara UI tetap membaca range yang dipilih.
+- Refresh payroll/overtime yang berat hanya dijalankan dari view payroll, bukan setiap kali HR membuka Live Absensi.
+- Load awal halaman cukup membaca data summary yang sudah ada agar UI tidak terasa berat.
+
+## Overtime Payroll Pattern
+
+Lembur payroll tidak boleh sekadar membaca `pulang lewat jam shift`.
+
+- Live Absensi boleh menampilkan `pulang lewat` sebagai indikator operasional.
+- Kandidat lembur yang masuk payroll memakai menit payable: `min(pulang lewat shift, jam aktual - kewajiban shift)`.
+- Jika karyawan masuk telat dan pulang lewat tetapi total jam aktual masih kurang dari kewajiban shift, lembur payable adalah 0.
+- Komponen lembur wajib punya `overtime_basis`: `extra_after_shift` untuk hari kerja biasa, `full_duration` untuk Minggu/hari libur.
+- Untuk Minggu/hari libur, payable lembur adalah full durasi kerja aktual dari check-in sampai check-out.
+- `full_duration` tidak boleh dipakai untuk `Semua Hari` karena bisa membuat hari kerja normal terhitung full lembur.
+- Kandidat lembur dibuat otomatis dari `attendance_daily_summaries` setelah check-out final.
+- HR/Finance tetap wajib approve/reject menit yang dibayar sebelum masuk payroll amount.
+- Form manual lembur hanya untuk exception atau koreksi khusus; flow utama berasal dari absensi final.
+- Approved overtime memperbarui `payroll_cycles.overtime_amount`; locked/paid payroll tidak boleh berubah tanpa audit.
+- Lembur terencana dibuat dari Payroll > Request Lembur. Status awalnya `Terencana/draft`, tidak payable.
+- Request lembur menyimpan karyawan, tanggal, jam rencana mulai-selesai, alasan, pembuat request, dan waktu request.
+- Setelah checkout real masuk dan settlement menghitung menit payable, request berubah menjadi kandidat `Pending` untuk approval pembayaran.
+- Tabel Approval Lembur wajib memperlihatkan basis hitung dan status realisasi: `Sesuai request`, `Kurang dari request`, `Lebih dari request`, `Tanpa request`, atau `Menunggu checkout`.
+- Approval payroll tidak boleh aktif untuk request yang belum punya checkout real dan `overtime_minutes > 0`.
+- Tabel Approval Lembur boleh menampilkan request terencana, tapi harus jelas membedakan `Terencana`, `Pending`, `Approved`, dan `Rejected`.
 
 ## Master Data Form Mapping
 
@@ -249,9 +301,9 @@ Form Master Data harus mengikuti kategori aktif:
 - Role Management: nama role, kode otomatis, level akses, deskripsi, status.
 - Divisi: nama divisi, kode otomatis, deskripsi divisi, status.
 - Jabatan: nama jabatan, kode otomatis, divisi terkait, deskripsi jabatan, status.
-- Shift: nama shift, kode otomatis, jam mulai, jam selesai, catatan shift, status.
+- Shift: nama shift, kode otomatis, jam mulai, jam selesai, toleransi telat, toleransi pulang cepat, catatan shift, status.
 - Lokasi Kerja: nama lokasi, kode otomatis, alamat, latitude, longitude, radius meter, status.
-- Komponen Gaji: nama komponen, kode otomatis, jenis komponen, deskripsi komponen, status.
+- Komponen Gaji: nama komponen, kode otomatis, jenis komponen, unit hitung, rate, tipe hari, basis lembur, auto detect, approval, deskripsi, status.
 
 Tombol tambah data harus mengikuti tab aktif. Jika tab `Semua` aktif, default form boleh memakai kategori `Divisi`.
 Semua kategori memiliki `Urutan Dropdown` untuk mengatur prioritas tampilan data pilihan.
@@ -282,6 +334,23 @@ Master Data memakai `sort_order` di database. Urutan table/dropdown harus mengik
 Feedback create/update/reorder/status memakai toast sukses/error. Error duplicate dari Supabase wajib diterjemahkan ke bahasa user.
 Audit log ditulis setelah aksi create, update, reorder, aktif, dan nonaktif berhasil.
 RLS production tersedia di migration `20260806000100_master_data_production_rls.sql` dan hanya diterapkan setelah Supabase Auth + bootstrap `app_users` siap.
+
+## Date Picker Foundation
+
+Tanggal punya dua komponen foundation:
+
+- `DatePickerField` di `src/components/date-picker-field.tsx` untuk form tanggal tunggal, seperti tanggal masuk karyawan.
+- `DateModePicker` di `src/components/date-mode-picker.tsx` untuk filter halaman operasional/report yang butuh mode relatif: hari ini, kemarin, 7 hari, 30 hari, per hari, per minggu, per bulan, tahun, dan semua waktu.
+
+- Trigger harus berupa control penuh seperti input foundation: icon kalender di kiri, teks satu baris, chevron di kanan, dan state aktif memakai ring cyan.
+- Popover desktop memakai layout landscape compact: quick preset ramping di kiri dan kalender di kanan. Kontrol tanggal tidak boleh terasa seperti modal besar.
+- Popover mobile berubah menjadi bottom sheet satu kolom yang tidak melebar keluar viewport; quick preset tampil di atas kalender.
+- `DateModePicker` memakai satu kalender compact untuk mode tanggal tunggal dan dua kalender compact untuk mode range/report.
+- Navigasi kalender harus punya tombol bulan sebelum/sesudah dan tahun sebelum/sesudah.
+- Tanggal aktif memakai fill biru/cyan; tanggal hari ini cukup outline ringan.
+- Range aktif wajib diberi warna start, middle, dan end yang halus agar user paham periode yang sedang dibaca.
+- Filter Live Absensi wajib memakai `DateModePicker`, bukan komponen lokal di page.
+- Jangan memakai native `input[type=date]` untuk form utama karena visual browser tidak konsisten.
 
 ## Pengguna & Akses
 

@@ -131,8 +131,9 @@ $values["BIOFINGER_TIMEZONE_OFFSET"] = Read-Value -Label "BIOFINGER_TIMEZONE_OFF
 $values["BIOFINGER_DEVICE_CODE"] = Read-Value -Label "BIOFINGER_DEVICE_CODE" -DefaultValue (Get-ExistingValue -Values $values -Key "BIOFINGER_DEVICE_CODE" -DefaultValue "BIO-AT301-001") -Required
 $values["BIOFINGER_EXPORT_DIR"] = Read-Value -Label "BIOFINGER_EXPORT_DIR" -DefaultValue (Get-ExistingValue -Values $values -Key "BIOFINGER_EXPORT_DIR" -DefaultValue "exports") -Required
 $values["BIOFINGER_LOG_DIR"] = Read-Value -Label "BIOFINGER_LOG_DIR" -DefaultValue (Get-ExistingValue -Values $values -Key "BIOFINGER_LOG_DIR" -DefaultValue "logs/biofinger-sync") -Required
-$values["BIOFINGER_CONVERT_ON_IMPORT"] = Get-ExistingValue -Values $values -Key "BIOFINGER_CONVERT_ON_IMPORT" -DefaultValue "false"
+$values["BIOFINGER_CONVERT_ON_IMPORT"] = Get-ExistingValue -Values $values -Key "BIOFINGER_CONVERT_ON_IMPORT" -DefaultValue "true"
 $values["BIOFINGER_CONVERSION_BATCH_SIZE"] = Get-ExistingValue -Values $values -Key "BIOFINGER_CONVERSION_BATCH_SIZE" -DefaultValue "1000"
+$values["BIOFINGER_AUTO_CONVERT_INTERVAL_MS"] = Get-ExistingValue -Values $values -Key "BIOFINGER_AUTO_CONVERT_INTERVAL_MS" -DefaultValue "60000"
 $values["BIOFINGER_AUTO_USER_SYNC_ENABLED"] = Get-ExistingValue -Values $values -Key "BIOFINGER_AUTO_USER_SYNC_ENABLED" -DefaultValue "false"
 $values["BIOFINGER_AUTO_USER_SYNC_INTERVAL_MS"] = Get-ExistingValue -Values $values -Key "BIOFINGER_AUTO_USER_SYNC_INTERVAL_MS" -DefaultValue "21600000"
 
@@ -158,6 +159,7 @@ $orderedKeys = @(
   "BIOFINGER_NODE",
   "BIOFINGER_CONVERT_ON_IMPORT",
   "BIOFINGER_CONVERSION_BATCH_SIZE",
+  "BIOFINGER_AUTO_CONVERT_INTERVAL_MS",
   "BIOFINGER_AUTO_USER_SYNC_ENABLED",
   "BIOFINGER_AUTO_USER_SYNC_INTERVAL_MS"
 )
