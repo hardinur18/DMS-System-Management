@@ -78,7 +78,7 @@ import {
   OperationalPageShell,
   OperationalTableCard,
 } from "./components/operational-page"
-import { supabase } from "./lib/supabase"
+import { isSupabaseConfigured, supabase, supabaseConfigError } from "./lib/supabase"
 
 type ViewId =
   | "dashboard"
@@ -2154,6 +2154,10 @@ function getFriendlySupabaseError(error: unknown, fallback: string) {
 
   if (!rawMessage && !message.trim()) return fallback
 
+  if (message.includes("jwt issued at future")) {
+    return "Session login tidak sinkron dengan waktu server. Klik Keluar, lalu login ulang."
+  }
+
   if (code === "42501" || message.includes("row-level security") || message.includes("permission denied")) {
     if (message.includes("biofinger")) {
       return "Akses user belum punya izin Kelola Biofinger. Cek Role & Permission untuk permission biofinger.manage."
@@ -2182,6 +2186,14 @@ function getFriendlySupabaseError(error: unknown, fallback: string) {
   }
 
   return rawMessage || fallback
+}
+
+function isJwtIssuedAtFutureError(error: unknown) {
+  const errorObject = error && typeof error === "object" ? error as { message?: unknown; details?: unknown; hint?: unknown } : null
+  const rawMessage = error instanceof Error ? error.message : String(errorObject?.message || "")
+  const rawDetails = String(errorObject?.details || "")
+  const rawHint = String(errorObject?.hint || "")
+  return `${rawMessage} ${rawDetails} ${rawHint}`.toLowerCase().includes("jwt issued at future")
 }
 
 async function countTableRows(tableName: string, columnName: string, value: string) {
@@ -2614,6 +2626,11 @@ function LoginPage({ authError, onLogin }: { authError?: string; onLogin: (sessi
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    if (!isSupabaseConfigured) {
+      setErrorMessage(supabaseConfigError)
+      return
+    }
+
     setLoading(true)
     setMessage("")
     setErrorMessage("")
@@ -2638,6 +2655,11 @@ function LoginPage({ authError, onLogin }: { authError?: string; onLogin: (sessi
   const handleForgotPassword = async () => {
     setMessage("")
     setErrorMessage("")
+
+    if (!isSupabaseConfigured) {
+      setErrorMessage(supabaseConfigError)
+      return
+    }
 
     if (!email.trim()) {
       setErrorMessage("Isi email dulu untuk reset password.")
@@ -3458,6 +3480,19 @@ function writeCachedAccessProfile(profile: AppAccessProfile | null) {
     }))
   } catch {
     // Cache is only for startup UX; failing to write it must not block auth.
+  }
+}
+
+function clearStoredSupabaseAuth() {
+  if (typeof window === "undefined") return
+
+  try {
+    Object.keys(window.localStorage)
+      .filter((key) => key.startsWith("sb-") && key.endsWith("-auth-token"))
+      .forEach((key) => window.localStorage.removeItem(key))
+    window.sessionStorage.clear()
+  } catch {
+    // Storage cleanup is best-effort; Supabase signOut below is the canonical cleanup.
   }
 }
 
@@ -19887,6 +19922,16 @@ export function App() {
       setAccessProfile(profile)
       writeCachedAccessProfile(profile)
     } catch (error) {
+      if (isJwtIssuedAtFutureError(error)) {
+        clearStoredSupabaseAuth()
+        await supabase.auth.signOut().catch(() => {})
+        setSession(null)
+        setAccessProfile(null)
+        writeCachedAccessProfile(null)
+        setAuthError("Session login sudah dibersihkan. Silakan login ulang.")
+        return
+      }
+
       if (!cachedProfile) setAccessProfile(null)
       setAuthError(getFriendlySupabaseError(error, "Gagal memeriksa akses user."))
     } finally {
@@ -19895,6 +19940,12 @@ export function App() {
   }, [])
 
   useEffect(() => {
+    if (!isSupabaseConfigured) {
+      setAuthError(supabaseConfigError)
+      setAuthLoading(false)
+      return
+    }
+
     let mounted = true
 
     const bootstrap = async () => {
@@ -19903,6 +19954,17 @@ export function App() {
 
       if (!mounted) return
       if (error) {
+        if (isJwtIssuedAtFutureError(error)) {
+          clearStoredSupabaseAuth()
+          await supabase.auth.signOut().catch(() => {})
+          setSession(null)
+          setAccessProfile(null)
+          writeCachedAccessProfile(null)
+          setAuthError("Session login sudah dibersihkan. Silakan login ulang.")
+          setAuthLoading(false)
+          return
+        }
+
         setAuthError(getFriendlySupabaseError(error, "Gagal membaca session login."))
         setAuthLoading(false)
         return
@@ -19947,6 +20009,7 @@ export function App() {
 
   const handleLogout = async () => {
     await supabase.auth.signOut().catch(() => {})
+    clearStoredSupabaseAuth()
     setSession(null)
     setPasswordRecoverySession(null)
     setAccessProfile(null)
