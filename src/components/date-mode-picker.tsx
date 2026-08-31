@@ -58,6 +58,22 @@ function formatDateLabel(value?: string | null) {
   }).format(parsed)
 }
 
+function formatMonthLabel(value?: string | null) {
+  const parsed = parseDateKey(value || getLocalDateKey())
+  return new Intl.DateTimeFormat("id-ID", {
+    month: "long",
+    year: "numeric",
+  }).format(parsed)
+}
+
+function getMonthRange(value?: string | null): DateModePickerRange {
+  const parsed = parseDateKey(value || getLocalDateKey())
+  const start = new Date(parsed.getFullYear(), parsed.getMonth(), 1)
+  const end = new Date(parsed.getFullYear(), parsed.getMonth() + 1, 0)
+
+  return { start: getLocalDateKey(start), end: getLocalDateKey(end) }
+}
+
 export function getDateModePickerLabel(selectedDate: string, mode: DateModePickerMode) {
   if (mode === "today") return "Hari ini"
   if (mode === "yesterday") return "Kemarin"
@@ -65,7 +81,7 @@ export function getDateModePickerLabel(selectedDate: string, mode: DateModePicke
   if (mode === "last30") return "30 hari sebelumnya"
   if (mode === "day") return `Per hari - ${formatDateLabel(selectedDate)}`
   if (mode === "week") return `Per minggu - ${formatDateLabel(selectedDate)}`
-  if (mode === "month") return `Per bulan - ${formatDateLabel(selectedDate)}`
+  if (mode === "month") return `Per bulan - ${formatMonthLabel(selectedDate)}`
   if (mode === "year") return `Tahun ${selectedDate.slice(0, 4)}`
   return "Semua waktu"
 }
@@ -77,7 +93,8 @@ function isRangeMode(mode: DateModePickerMode) {
 function getDateModePickerRange(selectedDate: string, mode: DateModePickerMode): DateModePickerRange {
   const end = selectedDate || getLocalDateKey()
   if (mode === "last7" || mode === "week") return { start: shiftDateKey(end, -6), end }
-  if (mode === "last30" || mode === "month") return { start: shiftDateKey(end, -29), end }
+  if (mode === "last30") return { start: shiftDateKey(end, -29), end }
+  if (mode === "month") return getMonthRange(end)
   if (mode === "year") return { start: `${end.slice(0, 4)}-01-01`, end }
   if (mode === "all") return { start: "", end }
   return { start: end, end }

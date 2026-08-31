@@ -100,7 +100,7 @@ type ViewId =
   | "guide"
   | "profile"
 type AttendanceStatus = "valid" | "pending" | "failed" | "missing"
-type AttendanceSettlementStatus = "ready" | "running" | "short" | "missing_checkout" | "missing_checkin" | "review" | "failed" | "no_shift"
+type AttendanceSettlementStatus = "ready" | "running" | "short" | "missing_checkout" | "missing_checkin" | "review" | "failed" | "no_shift" | "excused_paid" | "excused_unpaid" | "field_assignment" | "alpha" | "off_day"
 type AttendanceSettlementTone = "valid" | "pending" | "failed" | "missing"
 type PayrollStatus = "active" | "ready" | "locked" | "paid" | "void"
 type PayrollProcessAction = "lock" | "mark_paid" | "unlock" | "void" | "restore"
@@ -112,6 +112,9 @@ type AttendanceGpsStatus = "valid" | "out_of_radius" | "missing"
 type AttendanceFaceStatus = "verified" | "review" | "failed" | "not_required"
 type EmployeeFaceProfileStatus = "unenrolled" | "pending_review" | "approved" | "rejected" | "disabled"
 type AppScope = "management" | "field" | "both"
+type LeaveRequestType = "permit" | "sick" | "leave" | "field_assignment" | "alpha" | "off"
+type LeaveRequestStatus = "pending" | "approved" | "rejected" | "cancelled"
+type LeavePayPolicy = "paid" | "unpaid" | "not_counted"
 
 interface NavItem {
   id: ViewId
@@ -201,6 +204,12 @@ interface AttendanceMonitorRow {
   overtimeRateAmount: number
   overtimeTotalAmount: number
   overtimeBasis: OvertimeCalculationBasis | ""
+  workdayCounted: boolean
+  leaveRequestId: string
+  leaveRequestType: LeaveRequestType | ""
+  leaveRequestStatus: LeaveRequestStatus | ""
+  leavePayPolicy: LeavePayPolicy | ""
+  leaveReason: string
   lastActivityAt: string
   settlementStatus: AttendanceSettlementStatus
   settlementLabel: string
@@ -350,6 +359,40 @@ interface OvertimeRequestSubmitPayload {
   reason: string
 }
 
+interface LeaveRequestRow {
+  id: string
+  employeeId: string
+  employeeCode: string
+  fullName: string
+  employeePhotoPath: string
+  employeePhotoUrl: string
+  divisionName: string
+  startDate: string
+  endDate: string
+  requestType: LeaveRequestType
+  payPolicy: LeavePayPolicy
+  status: LeaveRequestStatus
+  reason: string
+  attachmentUrl: string
+  requestedBy: string
+  reviewedBy: string
+  reviewedAt: string
+  reviewNotes: string
+  payrollCycleId: string
+  createdAt: string
+  updatedAt: string
+}
+
+interface LeaveRequestSubmitPayload {
+  employeeId: string
+  requestType: LeaveRequestType
+  startDate: string
+  endDate: string
+  payPolicy: LeavePayPolicy
+  reason: string
+  attachmentUrl?: string
+}
+
 interface PayrollPaymentRow {
   id: string
   paymentNo: string
@@ -387,16 +430,18 @@ interface OperationsFoundationData {
   fieldReadiness: FieldReadinessRow[]
   reviews: AttendanceReviewRow[]
   overtime: OvertimeReviewRow[]
+  leaveRequests: LeaveRequestRow[]
   payrollPayments: PayrollPaymentRow[]
 }
 
 function createEmptyOperationsFoundationData(): OperationsFoundationData {
-  return { rows: [], allRows: [], locations: [], fieldReadiness: [], reviews: [], overtime: [], payrollPayments: [] }
+  return { rows: [], allRows: [], locations: [], fieldReadiness: [], reviews: [], overtime: [], leaveRequests: [], payrollPayments: [] }
 }
 
 type AttendanceDateMode = DateModePickerMode
+type AttendanceRecapDisplayTab = "table" | "calendar"
 type AttendanceLoadScope = "full" | "attendance-recap"
-type ApprovalQueueTab = "attendance" | "overtime"
+type ApprovalQueueTab = "attendance" | "overtime" | "leave"
 
 interface AttendanceLoadOptions {
   startDate?: string
@@ -1421,18 +1466,50 @@ const guideArticles: GuideArticle[] = [
     related: ["attendance-live", "attendance-review", "payroll"],
   },
   {
+    id: "attendance-leave",
+    viewId: "attendance-review",
+    title: "Izin, Sakit, Cuti, Alpha",
+    group: "Absensi",
+    summary: "Mencatat ketidakhadiran agar monitoring dan payroll tidak menebak dari absen kosong.",
+    icon: CalendarCheck2,
+    audience: "HR, Supervisor, Finance",
+    frequency: "Saat ada info karyawan tidak masuk atau tugas luar",
+    tags: ["izin", "sakit", "cuti", "alpha", "payroll"],
+    steps: [
+      "Klik Input Izin/Cuti dari Live Absensi, Rekap Absensi, Approval, atau Payroll.",
+      "Pilih karyawan, tanggal mulai, tanggal selesai, jenis ketidakhadiran, dan policy payroll.",
+      "Simpan request. Status awal menjadi Pending dan belum mengubah payroll final.",
+      "Buka Approval > Izin/Cuti untuk setujui, tolak, atau batalkan request.",
+      "Setelah approved, Live Absensi dan Rekap Absensi berubah dari Belum Absen menjadi Izin, Sakit, Cuti, Tugas Luar, Alpha, atau Libur.",
+      "Payroll hanya menghitung request approved dengan policy Dibayar sebagai hari kerja.",
+    ],
+    checks: [
+      "Tanggal request tidak salah range.",
+      "Policy payroll sesuai aturan perusahaan.",
+      "Request rejected/cancelled tetap menjadi history audit dan tidak mengubah payroll.",
+      "Kalender Kehadiran dipakai untuk melihat pola hadir, izin, cuti, alpha, dan belum absen per bulan.",
+    ],
+    pitfalls: [
+      "Jangan menghapus request yang sudah approved dan masuk payroll cycle.",
+      "Jangan mengubah alpha menjadi izin tanpa catatan HR.",
+      "Request tidak menggantikan data check-in/check-out yang sudah valid; jika karyawan tetap absen, settlement mengikuti log absensi.",
+    ],
+    related: ["attendance-live", "attendance-requests", "payroll"],
+  },
+  {
     id: "attendance-review",
     viewId: "attendance-review",
     title: "Approval",
     group: "Absensi",
-    summary: "Menyelesaikan absensi bermasalah dan approval lembur sebelum data masuk payroll.",
+    summary: "Menyelesaikan absensi bermasalah, izin/cuti, dan approval lembur sebelum data masuk payroll.",
     icon: ClipboardList,
     audience: "HR, Supervisor",
     frequency: "Setiap ada antrian review",
     tags: ["approval", "review", "correction"],
     steps: [
-      "Buka Approval, lalu pilih tab Absensi Review atau Lembur.",
+      "Buka Approval, lalu pilih tab Absensi Review, Izin/Cuti, atau Lembur.",
       "Untuk absensi, baca detail bukti GPS, waktu, catatan, dan sumber event.",
+      "Untuk izin/cuti, cek jenis ketidakhadiran, range tanggal, policy payroll, dan catatan HR.",
       "Untuk lembur, cek rencana, realisasi checkout, basis hitung, menit payable, dan estimasi bayar.",
       "Approve hanya jika bukti cukup; reject atau pending jika perlu klarifikasi.",
       "Tambahkan catatan audit agar keputusan bisa ditelusuri.",
@@ -6387,9 +6464,18 @@ function shiftDateKey(value: string, offsetDays: number) {
   return getLocalDateKey(base)
 }
 
+function getMonthDateRange(value: string) {
+  const base = value ? new Date(`${value}T00:00:00+07:00`) : new Date()
+  const start = new Date(base.getFullYear(), base.getMonth(), 1)
+  const end = new Date(base.getFullYear(), base.getMonth() + 1, 0)
+
+  return { start: getLocalDateKey(start), end: getLocalDateKey(end) }
+}
+
 function getAttendanceDateRange(selectedDate: string, mode: AttendanceDateMode) {
   if (mode === "last7" || mode === "week") return { start: shiftDateKey(selectedDate, -6), end: selectedDate }
-  if (mode === "last30" || mode === "month") return { start: shiftDateKey(selectedDate, -29), end: selectedDate }
+  if (mode === "last30") return { start: shiftDateKey(selectedDate, -29), end: selectedDate }
+  if (mode === "month") return getMonthDateRange(selectedDate)
   if (mode === "year") return { start: `${selectedDate.slice(0, 4)}-01-01`, end: selectedDate }
   if (mode === "all") return { start: "", end: selectedDate }
   return { start: selectedDate, end: selectedDate }
@@ -6723,14 +6809,19 @@ function mapDailySummarySettlementStatus(value: unknown): AttendanceSettlementSt
     || value === "review"
     || value === "failed"
     || value === "no_shift"
+    || value === "excused_paid"
+    || value === "excused_unpaid"
+    || value === "field_assignment"
+    || value === "alpha"
+    || value === "off_day"
   ) return value
   return "missing_checkin"
 }
 
 function getAttendanceSettlementTone(status: AttendanceSettlementStatus): AttendanceSettlementTone {
-  if (status === "ready") return "valid"
-  if (status === "failed") return "failed"
-  if (status === "missing_checkin" || status === "missing_checkout") return "missing"
+  if (status === "ready" || status === "excused_paid" || status === "field_assignment") return "valid"
+  if (status === "failed" || status === "alpha") return "failed"
+  if (status === "missing_checkin" || status === "missing_checkout" || status === "off_day") return "missing"
   return "pending"
 }
 
@@ -6742,6 +6833,11 @@ function getAttendanceSettlementLabel(status: AttendanceSettlementStatus, shorta
   if (status === "missing_checkin") return "Belum masuk"
   if (status === "review") return "Review HR"
   if (status === "failed") return "Tidak valid"
+  if (status === "excused_paid") return "Izin dibayar"
+  if (status === "excused_unpaid") return "Izin tidak dibayar"
+  if (status === "field_assignment") return "Tugas luar"
+  if (status === "alpha") return "Alpha"
+  if (status === "off_day") return "Libur"
   return "Shift belum lengkap"
 }
 
@@ -6764,6 +6860,10 @@ function getAttendanceSettlementDescription(row: AttendanceMonitorRow) {
   const expected = row.expectedWorkMinutes === null ? "wajib belum terbaca" : `wajib ${formatMinutesDuration(row.expectedWorkMinutes)}`
   const actual = row.actualWorkMinutes === null ? "aktual belum final" : `aktual ${formatMinutesDuration(row.actualWorkMinutes)}`
 
+  if (row.leaveRequestId) {
+    const reason = row.leaveReason ? ` - ${row.leaveReason}` : ""
+    return `${getLeaveRequestTypeLabel(row.leaveRequestType)} ${getLeaveRequestStatusLabel(row.leaveRequestStatus)}. ${getLeavePayPolicyLabel(row.leavePayPolicy)}${reason}.`
+  }
   if (row.settlementStatus === "ready") return `${actual} sudah memenuhi ${expected}.`
   if (row.settlementStatus === "running") return `Shift sedang berjalan; ${actual} dan akan final setelah check-out.`
   if (row.settlementStatus === "short") return `${actual}, kurang ${formatMinutesDuration(row.shortageMinutes)} dari ${expected}.`
@@ -6812,6 +6912,13 @@ function getAttendanceSearchText(row: AttendanceMonitorRow) {
     row.overtimeRequestSource,
     row.overtimeRequestReason,
     row.overtimeBasis,
+    row.leaveRequestStatus,
+    row.leaveRequestType,
+    row.leavePayPolicy,
+    row.leaveReason,
+    getLeaveRequestTypeLabel(row.leaveRequestType),
+    getLeaveRequestStatusLabel(row.leaveRequestStatus),
+    getLeavePayPolicyLabel(row.leavePayPolicy),
     getAttendanceOvertimeInlineLabel(row),
     ...operationalKeywords,
   ].join(" ").toLowerCase()
@@ -6828,9 +6935,15 @@ function matchesAttendanceRecapStatus(row: AttendanceMonitorRow, statusFilter: s
   if (statusFilter === "overtime_pending") return row.overtimeRequestStatus === "pending"
   if (statusFilter === "overtime_planned") return row.overtimeRequestStatus === "draft" && row.overtimeRequestSource === "planned"
   if (statusFilter === "overtime_approved") return row.overtimeRequestStatus === "approved"
+  if (statusFilter === "leave_request") return Boolean(row.leaveRequestId)
+  if (statusFilter === "excused_paid") return row.settlementStatus === "excused_paid"
+  if (statusFilter === "excused_unpaid") return row.settlementStatus === "excused_unpaid"
+  if (statusFilter === "field_assignment") return row.settlementStatus === "field_assignment"
+  if (statusFilter === "alpha") return row.settlementStatus === "alpha"
+  if (statusFilter === "off_day") return row.settlementStatus === "off_day"
   if (statusFilter === "running") return row.settlementStatus === "running"
   if (statusFilter === "missing_checkout") return row.settlementStatus === "missing_checkout"
-  if (statusFilter === "missing_checkin" || statusFilter === "missing") return row.settlementStatus === "missing_checkin" || row.attendanceStatus === "missing"
+  if (statusFilter === "missing_checkin" || statusFilter === "missing") return row.settlementStatus === "missing_checkin" || (!row.leaveRequestId && row.attendanceStatus === "missing")
   if (statusFilter === "review" || statusFilter === "pending") return row.settlementStatus === "review" || row.attendanceStatus === "pending"
   if (statusFilter === "failed") return row.settlementStatus === "failed" || row.attendanceStatus === "failed"
   if (statusFilter === "no_shift") return row.settlementStatus === "no_shift"
@@ -6934,6 +7047,62 @@ function mapOvertimeBasis(value: unknown): OvertimeCalculationBasis {
   return value === "full_duration" ? "full_duration" : "extra_after_shift"
 }
 
+function mapLeaveRequestType(value: unknown): LeaveRequestType {
+  if (value === "sick" || value === "leave" || value === "field_assignment" || value === "alpha" || value === "off") return value
+  return "permit"
+}
+
+function mapLeaveRequestStatus(value: unknown): LeaveRequestStatus {
+  if (value === "approved" || value === "rejected" || value === "cancelled") return value
+  return "pending"
+}
+
+function mapLeavePayPolicy(value: unknown): LeavePayPolicy {
+  if (value === "paid" || value === "not_counted") return value
+  return "unpaid"
+}
+
+function getLeaveRequestTypeLabel(type?: LeaveRequestType | "") {
+  if (type === "sick") return "Sakit"
+  if (type === "leave") return "Cuti"
+  if (type === "field_assignment") return "Tugas luar"
+  if (type === "alpha") return "Alpha"
+  if (type === "off") return "Libur"
+  return "Izin"
+}
+
+function getLeaveRequestStatusLabel(status?: LeaveRequestStatus | "") {
+  if (status === "approved") return "Disetujui"
+  if (status === "rejected") return "Ditolak"
+  if (status === "cancelled") return "Dibatalkan"
+  return "Pending"
+}
+
+function getLeavePayPolicyLabel(policy?: LeavePayPolicy | "") {
+  if (policy === "paid") return "Dibayar"
+  if (policy === "not_counted") return "Tidak dihitung"
+  return "Tidak dibayar"
+}
+
+function getLeaveRequestStatusTone(status?: LeaveRequestStatus | ""): AttendanceSettlementTone {
+  if (status === "approved") return "valid"
+  if (status === "rejected") return "failed"
+  if (status === "cancelled") return "missing"
+  return "pending"
+}
+
+function getDefaultLeavePayPolicy(type: LeaveRequestType): LeavePayPolicy {
+  if (type === "sick" || type === "leave" || type === "field_assignment") return "paid"
+  if (type === "off") return "not_counted"
+  return "unpaid"
+}
+
+function getLeaveRequestDateLabel(row: LeaveRequestRow) {
+  if (!row.startDate) return "-"
+  if (!row.endDate || row.startDate === row.endDate) return formatWorkDate(row.startDate)
+  return `${formatWorkDate(row.startDate)} - ${formatWorkDate(row.endDate)}`
+}
+
 async function loadOperationsFoundationData(targetDate = getLocalDateKey(), options: AttendanceLoadOptions = {}): Promise<OperationsFoundationData> {
   const selectedDate = targetDate || getLocalDateKey()
   const { startDate, endDate } = normalizeAttendanceLoadRange(selectedDate, options)
@@ -6960,7 +7129,7 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
   }
 
   const attendanceLogColumns = "id, employee_id, work_location_id, attendance_date, event_type, event_at, latitude, longitude, distance_m, radius_m, gps_status, face_status, face_score, face_snapshot_path, status, workday_counted, source, attendance_media, attendance_device_id, biofinger_event_id, notes"
-  const [employeeResult, divisionResult, locationResult, shiftResult, attendanceRows, dailySummaryRows, reviewAttendanceResult, payrollRows, overtimeResult, payrollComponentResult, appUserResult, faceProfileResult, payrollPaymentResult] = await Promise.all([
+  const [employeeResult, divisionResult, locationResult, shiftResult, attendanceRows, dailySummaryRows, reviewAttendanceResult, payrollRows, overtimeResult, payrollComponentResult, appUserResult, faceProfileResult, leaveResult, payrollPaymentResult] = await Promise.all([
     supabase
       .from("employees")
       .select("id, employee_code, full_name, photo_path, division_id, work_location_id, shift_id, salary_type, daily_salary, monthly_salary, payroll_cycle_days, status, deleted_at")
@@ -6978,7 +7147,7 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
       .order("id", { ascending: true })),
     fetchSupabaseRangeRows<Record<string, unknown>>(() => supabase
       .from("attendance_daily_summaries")
-      .select("employee_id, attendance_date, work_location_id, shift_id, shift_name, shift_start_time, shift_end_time, shift_late_tolerance_minutes, shift_early_leave_tolerance_minutes, scheduled_start_at, scheduled_end_at, check_in_log_id, check_out_log_id, actual_check_in_at, actual_check_out_at, expected_work_minutes, actual_work_minutes, late_minutes, early_leave_minutes, shortage_minutes, overtime_minutes, attendance_status, settlement_status, workday_counted, notes, calculated_at")
+      .select("employee_id, attendance_date, work_location_id, shift_id, shift_name, shift_start_time, shift_end_time, shift_late_tolerance_minutes, shift_early_leave_tolerance_minutes, scheduled_start_at, scheduled_end_at, check_in_log_id, check_out_log_id, actual_check_in_at, actual_check_out_at, expected_work_minutes, actual_work_minutes, late_minutes, early_leave_minutes, shortage_minutes, overtime_minutes, attendance_status, settlement_status, workday_counted, leave_request_id, leave_type, leave_status, leave_pay_policy, leave_reason, payroll_cycle_id, notes, calculated_at")
       .gte("attendance_date", startDate)
       .lte("attendance_date", endDate)
       .order("attendance_date", { ascending: false })
@@ -7020,10 +7189,17 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
     recapOnly ? emptyResult : supabase
       .from("employee_face_profiles")
       .select("employee_id, status, verification_required, face_score_threshold"),
+    fetchSupabaseRangeRows<Record<string, unknown>>(() => supabase
+      .from("leave_requests")
+      .select("id, employee_id, request_type, start_date, end_date, pay_policy, status, reason, attachment_url, requested_by, reviewed_by, reviewed_at, review_notes, payroll_cycle_id, created_at, updated_at")
+      .lte("start_date", endDate)
+      .gte("end_date", startDate)
+      .order("start_date", { ascending: false })
+      .order("created_at", { ascending: false }), 500, 10000).then((data) => ({ data, error: null })),
     options.includePayrollPayments ? fetchPayrollPaymentRows() : emptyResult,
   ])
   const payrollPaymentError = payrollPaymentResult.error && !isMissingPayrollLedgerSchema(payrollPaymentResult.error) ? payrollPaymentResult.error : null
-  const error = employeeResult.error || divisionResult.error || locationResult.error || shiftResult.error || reviewAttendanceResult.error || overtimeResult.error || payrollComponentResult.error || appUserResult.error || faceProfileResult.error || payrollPaymentError
+  const error = employeeResult.error || divisionResult.error || locationResult.error || shiftResult.error || reviewAttendanceResult.error || overtimeResult.error || payrollComponentResult.error || appUserResult.error || faceProfileResult.error || leaveResult.error || payrollPaymentError
 
   if (error) throw error
 
@@ -7112,7 +7288,8 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
     const checkOut = (summary?.check_out_log_id ? logsById.get(String(summary.check_out_log_id)) : undefined) || selectedAttendance?.checkOut
     const location = locationMap.get(String(summary?.work_location_id || employee.work_location_id || ""))
     const shift = shiftMap.get(String(summary?.shift_id || employee.shift_id || ""))
-    const payroll = payrollByEmployee.get(employeeId)
+    const summaryPayrollId = String(summary?.payroll_cycle_id || "")
+    const payroll = (summaryPayrollId ? payrollById.get(summaryPayrollId) : undefined) || payrollByEmployee.get(employeeId)
     const cycleDays = Number(payroll?.work_days_count ?? employee.payroll_cycle_days ?? 0)
     const targetDays = Number(payroll?.target_work_days ?? 26)
     const salaryType = mapEmployeeSalaryType(payroll?.salary_type || employee.salary_type)
@@ -7157,7 +7334,13 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
     const overtimeRequestStatus = overtimeRequest ? mapOvertimeStatus(overtimeRequest.status) : ""
     const overtimeRequestSource = overtimeRequest ? mapOvertimeRequestSource(overtimeRequest.request_source) : ""
     const overtimeBasis = overtimeRequest ? mapOvertimeBasis(overtimeRequest.overtime_basis || overtimeComponent?.overtime_basis) : ""
-    const lastActivityAt = [checkOutAt, checkInAt, fallbackSettlement.lastActivityAt]
+    const leaveRequestId = String(summary?.leave_request_id || "")
+    const leaveRequestType = leaveRequestId ? mapLeaveRequestType(summary?.leave_type) : ""
+    const leaveRequestStatus = leaveRequestId ? mapLeaveRequestStatus(summary?.leave_status) : ""
+    const leavePayPolicy = leaveRequestId ? mapLeavePayPolicy(summary?.leave_pay_policy) : ""
+    const leaveReason = String(summary?.leave_reason || "")
+    const workdayCounted = summary ? summary.workday_counted === true : attendance?.workday_counted === true
+    const lastActivityAt = [checkOutAt, checkInAt, String(summary?.calculated_at || ""), fallbackSettlement.lastActivityAt]
       .filter(Boolean)
       .sort((a, b) => new Date(String(b)).getTime() - new Date(String(a)).getTime())[0] || ""
     const fallbackLogStatus = attendanceStatus === "failed" ? "rejected" : attendanceStatus === "valid" ? "valid" : "review"
@@ -7218,7 +7401,7 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
       radiusM: Number(attendance?.radius_m || location?.radius_m || 0) || null,
       cycleDays,
       targetDays,
-      payrollCycleId: String(payroll?.id || ""),
+      payrollCycleId: String(payroll?.id || summaryPayrollId || ""),
       payrollCycleNumber: Number(payroll?.cycle_number || 0),
       periodStartedAt: String(payroll?.period_started_at || ""),
       periodClosedAt: String(payroll?.period_closed_at || ""),
@@ -7230,7 +7413,7 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
       basePayrollAmount,
       overtimeAmount,
       salaryType,
-      workDurationLabel: actualWorkMinutes !== null ? formatMinutesDuration(actualWorkMinutes) : checkInAt ? formatAttendanceWorkDuration(checkInAt, checkOutAt || null, dateKey) : "Belum mulai",
+      workDurationLabel: leaveRequestId && !checkInAt ? getLeaveRequestTypeLabel(leaveRequestType) : actualWorkMinutes !== null ? formatMinutesDuration(actualWorkMinutes) : checkInAt ? formatAttendanceWorkDuration(checkInAt, checkOutAt || null, dateKey) : "Belum mulai",
       scheduledStartAt: String(summary?.scheduled_start_at || fallbackSettlement.scheduledStartAt || ""),
       scheduledEndAt: String(summary?.scheduled_end_at || fallbackSettlement.scheduledEndAt || ""),
       expectedWorkMinutes,
@@ -7249,6 +7432,12 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
       overtimeRateAmount: Number(overtimeRequest?.rate_amount || overtimeComponent?.rate_amount || 0),
       overtimeTotalAmount: Number(overtimeRequest?.total_amount || 0),
       overtimeBasis,
+      workdayCounted,
+      leaveRequestId,
+      leaveRequestType,
+      leaveRequestStatus,
+      leavePayPolicy,
+      leaveReason,
       lastActivityAt,
       settlementStatus,
       settlementLabel: getAttendanceSettlementLabel(settlementStatus, shortageMinutes),
@@ -7312,6 +7501,39 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
   })
 
   const activeEmployeeMap = new Map(activeEmployees.map((employee) => [String(employee.id), employee]))
+  const leaveRequests: LeaveRequestRow[] = ((leaveResult.data || []) as Array<Record<string, unknown>>)
+    .map((leave) => {
+      const employee = activeEmployeeMap.get(String(leave.employee_id || ""))
+
+      return {
+        id: String(leave.id || ""),
+        employeeId: String(leave.employee_id || ""),
+        employeeCode: String(employee?.employee_code || ""),
+        fullName: String(employee?.full_name || "Karyawan tidak ditemukan"),
+        employeePhotoPath: String(employee?.photo_path || ""),
+        employeePhotoUrl: getEmployeePhotoPublicUrl(String(employee?.photo_path || "")),
+        divisionName: divisionMap.get(String(employee?.division_id || "")) || "Belum pilih divisi",
+        startDate: String(leave.start_date || ""),
+        endDate: String(leave.end_date || ""),
+        requestType: mapLeaveRequestType(leave.request_type),
+        payPolicy: mapLeavePayPolicy(leave.pay_policy),
+        status: mapLeaveRequestStatus(leave.status),
+        reason: String(leave.reason || ""),
+        attachmentUrl: String(leave.attachment_url || ""),
+        requestedBy: String(leave.requested_by || ""),
+        reviewedBy: String(leave.reviewed_by || ""),
+        reviewedAt: String(leave.reviewed_at || ""),
+        reviewNotes: String(leave.review_notes || ""),
+        payrollCycleId: String(leave.payroll_cycle_id || ""),
+        createdAt: String(leave.created_at || ""),
+        updatedAt: String(leave.updated_at || ""),
+      }
+    })
+    .sort((a, b) => {
+      const dateCompare = b.startDate.localeCompare(a.startDate)
+      if (dateCompare !== 0) return dateCompare
+      return new Date(b.createdAt || b.updatedAt).getTime() - new Date(a.createdAt || a.updatedAt).getTime()
+    })
   const rangeDateKeys = getAttendanceDateKeys(startDate, endDate)
   const allRows = rangeDateKeys.flatMap((attendanceDate) => activeEmployees.map((employee) => {
     const employeeId = String(employee.id)
@@ -7436,7 +7658,7 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
     }
   })
 
-  return { rows, allRows, locations, fieldReadiness, reviews: reviewRows, overtime: overtimeReviewRows, payrollPayments }
+  return { rows, allRows, locations, fieldReadiness, reviews: reviewRows, overtime: overtimeReviewRows, leaveRequests, payrollPayments }
 }
 
 function getBrowserPosition(): Promise<GeolocationPosition> {
@@ -8026,6 +8248,41 @@ async function createOvertimeRequest(payload: OvertimeRequestSubmitPayload) {
     planned_start_time: payload.plannedStartTime,
     planned_end_time: payload.plannedEndTime,
     request_reason: payload.reason,
+  })
+
+  if (error) throw error
+  return data
+}
+
+async function createLeaveRequest(payload: LeaveRequestSubmitPayload) {
+  const { data, error } = await supabase.rpc("request_leave", {
+    target_employee_id: payload.employeeId,
+    target_request_type: payload.requestType,
+    target_start_date: payload.startDate,
+    target_end_date: payload.endDate,
+    target_pay_policy: payload.payPolicy,
+    request_reason: payload.reason,
+    request_attachment_url: payload.attachmentUrl || null,
+  })
+
+  if (error) throw error
+  return data
+}
+
+async function reviewLeaveRequest(id: string, decision: "approve" | "reject" | "cancel", notes: string) {
+  const { data, error } = await supabase.rpc("review_leave_request", {
+    target_request_id: id,
+    review_decision: decision,
+    review_note: notes,
+  })
+
+  if (error) throw error
+  return data
+}
+
+async function deleteLeaveRequest(id: string) {
+  const { data, error } = await supabase.rpc("delete_leave_request", {
+    target_request_id: id,
   })
 
   if (error) throw error
@@ -15865,6 +16122,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
   const [divisionFilter, setDivisionFilter] = useState("all")
   const [statusFilter, setStatusFilter] = useState("all")
   const [approvalTab, setApprovalTab] = useState<ApprovalQueueTab>("attendance")
+  const [recapDisplayTab, setRecapDisplayTab] = useState<AttendanceRecapDisplayTab>("table")
   const [selectedDate, setSelectedDate] = useState(getLocalDateKey())
   const [attendanceDateMode, setAttendanceDateMode] = useState<AttendanceDateMode>("today")
   const dataLoadRange = useMemo(() => {
@@ -15910,6 +16168,11 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
   const [overtimeRequestSubmitting, setOvertimeRequestSubmitting] = useState(false)
   const [overtimeTarget, setOvertimeTarget] = useState<OvertimeReviewRow | null>(null)
   const [overtimeSubmitting, setOvertimeSubmitting] = useState(false)
+  const [leaveRequestOpen, setLeaveRequestOpen] = useState(false)
+  const [leaveRequestSubmitting, setLeaveRequestSubmitting] = useState(false)
+  const [leaveTarget, setLeaveTarget] = useState<LeaveRequestRow | null>(null)
+  const [leaveSubmitting, setLeaveSubmitting] = useState(false)
+  const [leaveDeleteTarget, setLeaveDeleteTarget] = useState<LeaveRequestRow | null>(null)
   const [payrollTarget, setPayrollTarget] = useState<AttendanceMonitorRow | null>(null)
   const [payrollAction, setPayrollAction] = useState<PayrollProcessAction>("lock")
   const [payrollFocusTab, setPayrollFocusTab] = useState<PayrollLedgerTab | null>(null)
@@ -15923,11 +16186,15 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
   const [toast, setToast] = useState<ToastMessage | null>(null)
   const canReviewAttendance = hasPermission(profile, "attendance.review")
   const canReviewOvertime = hasPermission(profile, "overtime.review")
-  const activeApprovalTab: ApprovalQueueTab = activeView === "attendance-review" && approvalTab === "attendance" && !canReviewAttendance && canReviewOvertime
-    ? "overtime"
-    : activeView === "attendance-review" && approvalTab === "overtime" && !canReviewOvertime && canReviewAttendance
-      ? "attendance"
-      : approvalTab
+  const canManageLeave = canReviewAttendance || hasPermission(profile, "payroll.process")
+  const availableApprovalTabIds = useMemo(() => [
+    canReviewAttendance ? "attendance" : null,
+    canReviewOvertime ? "overtime" : null,
+    canManageLeave ? "leave" : null,
+  ].filter(Boolean) as ApprovalQueueTab[], [canManageLeave, canReviewAttendance, canReviewOvertime])
+  const activeApprovalTab: ApprovalQueueTab = activeView === "attendance-review" && !availableApprovalTabIds.includes(approvalTab)
+    ? (availableApprovalTabIds[0] || "attendance")
+    : approvalTab
 
   const showToast = (message: Omit<ToastMessage, "id">) => {
     setToast({ ...message, id: Date.now() })
@@ -15958,12 +16225,18 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
   }, [attendanceLoadError])
 
   useEffect(() => {
-    if (activeView !== "attendance-review") return
-    if (approvalTab === "attendance" && canReviewAttendance) return
-    if (approvalTab === "overtime" && canReviewOvertime) return
+    if (activeView !== "attendance-requests" || recapDisplayTab !== "calendar") return
+    if (attendanceDateMode === "month") return
 
-    setApprovalTab(canReviewAttendance ? "attendance" : "overtime")
-  }, [activeView, approvalTab, canReviewAttendance, canReviewOvertime])
+    setAttendanceDateMode("month")
+  }, [activeView, attendanceDateMode, recapDisplayTab])
+
+  useEffect(() => {
+    if (activeView !== "attendance-review") return
+    if (availableApprovalTabIds.includes(approvalTab)) return
+
+    setApprovalTab(availableApprovalTabIds[0] || "attendance")
+  }, [activeView, approvalTab, availableApprovalTabIds])
 
   useEffect(() => {
     setStatusFilter("all")
@@ -16121,6 +16394,77 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
     }
   }
 
+  const handleLeaveRequestSubmit = async (payload: LeaveRequestSubmitPayload) => {
+    setLeaveRequestSubmitting(true)
+    try {
+      const employee = leaveRequestEmployees.find((row) => row.employeeId === payload.employeeId)
+      await createLeaveRequest(payload)
+      showToast({
+        tone: "success",
+        title: "Request ketidakhadiran disimpan",
+        description: `${employee?.fullName || "Karyawan"} menunggu approval HR. Rekap akan berubah setelah disetujui.`,
+      })
+      setLeaveRequestOpen(false)
+      await refreshData()
+    } catch (error) {
+      showToast({
+        tone: "error",
+        title: "Gagal menyimpan request",
+        description: getFriendlySupabaseError(error, "Request izin/cuti belum bisa disimpan."),
+      })
+    } finally {
+      setLeaveRequestSubmitting(false)
+    }
+  }
+
+  const handleLeaveReviewSubmit = async (decision: "approve" | "reject" | "cancel", notes: string) => {
+    if (!leaveTarget) return
+
+    setLeaveSubmitting(true)
+    try {
+      await reviewLeaveRequest(leaveTarget.id, decision, notes)
+      showToast({
+        tone: "success",
+        title: decision === "approve" ? "Ketidakhadiran disetujui" : decision === "cancel" ? "Request dibatalkan" : "Request ditolak",
+        description: `${leaveTarget.fullName} - ${getLeaveRequestTypeLabel(leaveTarget.requestType)} ${getLeavePayPolicyLabel(leaveTarget.payPolicy).toLowerCase()}.`,
+      })
+      setLeaveTarget(null)
+      await refreshData()
+    } catch (error) {
+      showToast({
+        tone: "error",
+        title: "Gagal memproses request",
+        description: getFriendlySupabaseError(error, "Approval izin/cuti belum bisa diproses."),
+      })
+    } finally {
+      setLeaveSubmitting(false)
+    }
+  }
+
+  const handleLeaveDeleteSubmit = async () => {
+    if (!leaveDeleteTarget) return
+
+    setLeaveSubmitting(true)
+    try {
+      await deleteLeaveRequest(leaveDeleteTarget.id)
+      showToast({
+        tone: "success",
+        title: "Request dihapus",
+        description: `${leaveDeleteTarget.fullName} - ${getLeaveRequestDateLabel(leaveDeleteTarget)} sudah dihapus dari antrian.`,
+      })
+      setLeaveDeleteTarget(null)
+      await refreshData()
+    } catch (error) {
+      showToast({
+        tone: "error",
+        title: "Gagal hapus request",
+        description: getFriendlySupabaseError(error, "Request belum bisa dihapus."),
+      })
+    } finally {
+      setLeaveSubmitting(false)
+    }
+  }
+
   const openPayrollProcessDialog = (row: AttendanceMonitorRow, action: PayrollProcessAction) => {
     setPayrollTarget(row)
     setPayrollAction(action)
@@ -16273,9 +16617,10 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
     data.rows.forEach((row) => addEmployeeDivision(row.employeeId, row.divisionName))
     data.reviews.forEach((row) => addEmployeeDivision(row.employeeId, row.divisionName))
     data.overtime.forEach((row) => addEmployeeDivision(row.employeeId, row.divisionName))
+    data.leaveRequests.forEach((row) => addEmployeeDivision(row.employeeId, row.divisionName))
 
     return divisions
-  }, [data.allRows, data.overtime, data.reviews, data.rows])
+  }, [data.allRows, data.leaveRequests, data.overtime, data.reviews, data.rows])
   const divisionFilterOptions = useMemo(() => {
     const divisionNames = new Set<string>()
     const addDivision = (divisionName: string) => {
@@ -16287,6 +16632,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
     data.rows.forEach((row) => addDivision(row.divisionName))
     data.reviews.forEach((row) => addDivision(row.divisionName))
     data.overtime.forEach((row) => addDivision(row.divisionName))
+    data.leaveRequests.forEach((row) => addDivision(row.divisionName))
     employeeDivisionById.forEach(addDivision)
 
     return [
@@ -16295,7 +16641,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
         .sort((a, b) => a.localeCompare(b, "id-ID"))
         .map((divisionName) => ({ value: divisionName, label: divisionName })),
     ]
-  }, [data.allRows, data.overtime, data.reviews, data.rows, employeeDivisionById])
+  }, [data.allRows, data.leaveRequests, data.overtime, data.reviews, data.rows, employeeDivisionById])
   const matchesDivisionFilter = (divisionName: string) => {
     return divisionFilter === "all" || divisionName.trim() === divisionFilter
   }
@@ -16322,6 +16668,13 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
           row.overtimeRequestStatus,
           row.overtimeRequestSource,
           row.overtimeRequestReason,
+          row.leaveRequestStatus,
+          row.leaveRequestType,
+          row.leavePayPolicy,
+          row.leaveReason,
+          getLeaveRequestTypeLabel(row.leaveRequestType),
+          getLeaveRequestStatusLabel(row.leaveRequestStatus),
+          getLeavePayPolicyLabel(row.leavePayPolicy),
           getAttendanceOvertimeInlineLabel(row),
         ].join(" ").toLowerCase().includes(normalizedSearch)
       : true
@@ -16331,6 +16684,11 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
       || (statusFilter === "overtime_request" && Boolean(row.overtimeRequestId))
       || (statusFilter === "overtime_pending" && (row.overtimeRequestStatus === "pending" || row.overtimeRequestStatus === "draft"))
       || (statusFilter === "overtime_approved" && row.overtimeRequestStatus === "approved")
+      || (statusFilter === "leave_request" && Boolean(row.leaveRequestId))
+      || row.settlementStatus === statusFilter
+      || row.leaveRequestStatus === statusFilter
+      || row.leaveRequestType === statusFilter
+      || row.leavePayPolicy === statusFilter
 
     return matchesDate && matchesDivision && matchesSearch && matchesStatus
   })
@@ -16427,6 +16785,34 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
   const overtimeMetricRows = activeView === "attendance-review" ? filteredOvertimeRows : data.overtime
   const pendingOvertimeRows = overtimeMetricRows.filter((row) => row.status === "pending")
   const approvedOvertimeTotal = overtimeMetricRows.reduce((sum, row) => sum + (row.status === "approved" ? row.totalAmount : 0), 0)
+  const filteredLeaveRows = data.leaveRequests.filter((row) => {
+    const matchesDate = attendanceDateMode === "all"
+      || (row.startDate <= attendanceDateRange.end && row.endDate >= attendanceDateRange.start)
+    const matchesDivision = matchesDivisionFilter(row.divisionName)
+    const matchesSearch = normalizedSearch
+      ? [
+        row.employeeCode,
+        row.fullName,
+        row.divisionName,
+        row.requestType,
+        row.payPolicy,
+        row.status,
+        row.reason,
+        getLeaveRequestTypeLabel(row.requestType),
+        getLeaveRequestStatusLabel(row.status),
+        getLeavePayPolicyLabel(row.payPolicy),
+      ].join(" ").toLowerCase().includes(normalizedSearch)
+      : true
+    const matchesStatus = (statusFilter === "all" && row.status !== "rejected" && row.status !== "cancelled")
+      || row.status === statusFilter
+      || row.requestType === statusFilter
+      || row.payPolicy === statusFilter
+
+    return matchesDate && matchesDivision && matchesSearch && matchesStatus
+  })
+  const leaveMetricRows = activeView === "attendance-review" ? filteredLeaveRows : data.leaveRequests
+  const pendingLeaveRows = leaveMetricRows.filter((row) => row.status === "pending")
+  const approvedLeaveRows = leaveMetricRows.filter((row) => row.status === "approved")
   const overtimeRequestEmployees = useMemo(() => {
     const employeesById = new Map<string, AttendanceMonitorRow>()
     data.rows.forEach((row) => {
@@ -16436,6 +16822,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
 
     return Array.from(employeesById.values()).sort((a, b) => a.employeeCode.localeCompare(b.employeeCode))
   }, [data.rows])
+  const leaveRequestEmployees = overtimeRequestEmployees
   const isDateDrivenView = activeView === "attendance-live" || activeView === "attendance-requests" || activeView === "attendance-review"
   const singleDateMode = ["today", "yesterday", "day"].includes(attendanceDateMode)
   const recapSourceRows = singleDateMode ? data.rows : data.allRows
@@ -16452,6 +16839,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
   const recapShortRows = filteredRecapRows.filter((row) => row.shortageMinutes > 0)
   const recapMissingCheckoutRows = filteredRecapRows.filter((row) => row.settlementStatus === "missing_checkout")
   const recapReviewRows = filteredRecapRows.filter((row) => row.settlementStatus === "review" || row.attendanceStatus === "pending")
+  const recapLeaveRows = filteredRecapRows.filter((row) => row.leaveRequestId)
   const attendanceStatusFilterOptions = activeView === "payroll"
     ? [
       { value: "all", label: "Semua Status" },
@@ -16476,7 +16864,24 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
           { value: "sunday", label: "Hari Minggu" },
           { value: "weekday", label: "Hari Kerja" },
         ]
-        : [
+        : activeApprovalTab === "leave"
+          ? [
+            { value: "all", label: "Aktif & Disetujui" },
+            { value: "pending", label: "Pending" },
+            { value: "approved", label: "Disetujui" },
+            { value: "rejected", label: "Ditolak" },
+            { value: "cancelled", label: "Dibatalkan" },
+            { value: "permit", label: "Izin" },
+            { value: "sick", label: "Sakit" },
+            { value: "leave", label: "Cuti" },
+            { value: "field_assignment", label: "Tugas Luar" },
+            { value: "alpha", label: "Alpha" },
+            { value: "off", label: "Libur" },
+            { value: "paid", label: "Dibayar" },
+            { value: "unpaid", label: "Tidak Dibayar" },
+            { value: "not_counted", label: "Tidak Dihitung" },
+          ]
+          : [
           { value: "all", label: "Semua Status" },
           { value: "review", label: "Perlu Review" },
           { value: "out_of_radius", label: "Luar Radius" },
@@ -16502,6 +16907,12 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
             { value: "overtime_request", label: "Request Lembur" },
             { value: "overtime_pending", label: "Lembur Pending" },
             { value: "overtime_approved", label: "Lembur Approved" },
+            { value: "leave_request", label: "Izin/Cuti/Sakit" },
+            { value: "excused_paid", label: "Izin Dibayar" },
+            { value: "excused_unpaid", label: "Izin Tidak Dibayar" },
+            { value: "field_assignment", label: "Tugas Luar" },
+            { value: "alpha", label: "Alpha" },
+            { value: "off_day", label: "Libur" },
             { value: "running", label: "Sedang Berjalan" },
             { value: "missing_checkout", label: "Belum Checkout" },
             { value: "missing_checkin", label: "Belum Masuk" },
@@ -16520,6 +16931,12 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
           { value: "overtime_request", label: "Request Lembur" },
           { value: "overtime_pending", label: "Lembur Pending" },
           { value: "overtime_approved", label: "Lembur Approved" },
+          { value: "leave_request", label: "Izin/Cuti/Sakit" },
+          { value: "excused_paid", label: "Izin Dibayar" },
+          { value: "excused_unpaid", label: "Izin Tidak Dibayar" },
+          { value: "field_assignment", label: "Tugas Luar" },
+          { value: "alpha", label: "Alpha" },
+          { value: "off_day", label: "Libur" },
           { value: "ready", label: "Siap Dicek" },
         ]
   const pageSubtitle = activeView === "payroll"
@@ -16534,6 +16951,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
   const approvalQueueTabs = [
     canReviewAttendance ? { id: "attendance" as const, label: "Absensi Review", icon: ClipboardList, count: filteredReviewRows.length } : null,
     canReviewOvertime ? { id: "overtime" as const, label: "Lembur", icon: BadgeDollarSign, count: filteredOvertimeRows.length } : null,
+    canManageLeave ? { id: "leave" as const, label: "Izin/Cuti", icon: CalendarCheck2, count: filteredLeaveRows.length } : null,
   ].filter(Boolean) as Array<{ id: ApprovalQueueTab; label: string; icon: LucideIcon; count: number }>
 
   const pageMetaItems = activeView === "attendance-requests"
@@ -16542,6 +16960,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
       `${recapShortRows.length} kurang jam`,
       `${recapMissingCheckoutRows.length} belum checkout`,
       `${recapReviewRows.length} perlu review`,
+      `${recapLeaveRows.length} izin/cuti`,
     ]
     : activeView === "attendance-review"
       ? [
@@ -16549,6 +16968,8 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
         canReviewOvertime ? `${pendingOvertimeRows.length} lembur pending` : null,
         canReviewOvertime ? `${filteredOvertimeRows.length} request lembur` : null,
         canReviewOvertime ? `${formatCurrency(approvedOvertimeTotal)} disetujui` : null,
+        canManageLeave ? `${pendingLeaveRows.length} izin/cuti pending` : null,
+        canManageLeave ? `${approvedLeaveRows.length} izin/cuti disetujui` : null,
       ].filter(Boolean) as string[]
     : [
       `${latestFirstRows.length} karyawan`,
@@ -16565,6 +16986,12 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
         actions={
           <>
             <FoundationRefreshButton loading={loading || refreshing} onClick={refreshData} />
+            {(activeView === "attendance-live" || activeView === "attendance-requests" || activeView === "attendance-review" || activeView === "payroll") && canManageLeave && (
+              <button className="secondaryButton" type="button" onClick={() => setLeaveRequestOpen(true)}>
+                <CalendarCheck2 size={17} />
+                Input Izin/Cuti
+              </button>
+            )}
             {(activeView === "payroll" || (activeView === "attendance-review" && activeApprovalTab === "overtime" && canReviewOvertime)) && (
               <button className="primaryButton" type="button" onClick={() => setOvertimeRequestOpen(true)}>
                 <ClipboardList size={17} />
@@ -16670,7 +17097,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
           setStatusFilter("all")
           if (isDateDrivenView) {
             setSelectedDate(todayDate)
-            setAttendanceDateMode("today")
+            setAttendanceDateMode(activeView === "attendance-requests" && recapDisplayTab === "calendar" ? "month" : "today")
           }
         }}>Reset Filter</button>
       </OperationalFilterPanel>
@@ -16696,11 +17123,28 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
       ) : activeView === "attendance-review" ? (
         activeApprovalTab === "overtime" ? (
           <OvertimeReviewTable rows={filteredOvertimeRows} loading={loading || overtimeSubmitting} errorMessage={errorMessage} onReview={setOvertimeTarget} />
+        ) : activeApprovalTab === "leave" ? (
+          <LeaveReviewTable rows={filteredLeaveRows} loading={loading || leaveSubmitting} errorMessage={errorMessage} onReview={setLeaveTarget} onDelete={setLeaveDeleteTarget} />
         ) : (
           <AttendanceReviewTable rows={filteredReviewRows} loading={loading || reviewSubmitting} errorMessage={errorMessage} onReview={openReviewDialog} onApproveAll={setBulkReviewRows} />
         )
       ) : activeView === "attendance-requests" ? (
-        <AttendanceRecapTable rows={filteredRecapRows} loading={loading} errorMessage={errorMessage} selectedDate={selectedDate} mode={attendanceDateMode} onResetDay={setResetAttendanceRow} onCorrectCheckIn={setCheckinCorrectionRow} onCorrectCheckout={setCheckoutCorrectionRow} />
+        <>
+          <CategoryTabs
+            ariaLabel="Pilih tampilan rekap absensi"
+            activeId={recapDisplayTab}
+            onChange={(tabId) => setRecapDisplayTab(tabId as AttendanceRecapDisplayTab)}
+            items={[
+              { id: "table", label: "Tabel Rekap", icon: FileBarChart, count: filteredRecapRows.length },
+              { id: "calendar", label: "Kalender Kehadiran", icon: CalendarCheck2, count: recapLeaveRows.length },
+            ]}
+          />
+          {recapDisplayTab === "calendar" ? (
+            <AttendanceCalendarMatrix rows={filteredRecapRows} loading={loading} errorMessage={errorMessage} dateRange={dataLoadRange} />
+          ) : (
+            <AttendanceRecapTable rows={filteredRecapRows} loading={loading} errorMessage={errorMessage} selectedDate={selectedDate} mode={attendanceDateMode} onResetDay={setResetAttendanceRow} onCorrectCheckIn={setCheckinCorrectionRow} onCorrectCheckout={setCheckoutCorrectionRow} />
+          )}
+        </>
       ) : activeView === "payroll" ? (
         <PayrollPreviewTable
           rows={filteredRows}
@@ -16745,12 +17189,48 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
         }}
         onSubmit={handleOvertimeRequestSubmit}
       />
+      <LeaveRequestDialog
+        open={leaveRequestOpen}
+        saving={leaveRequestSubmitting}
+        employees={leaveRequestEmployees}
+        selectedDate={selectedDate}
+        onClose={() => {
+          if (!leaveRequestSubmitting) setLeaveRequestOpen(false)
+        }}
+        onSubmit={handleLeaveRequestSubmit}
+      />
       <OvertimeReviewDialog
         row={overtimeTarget}
         saving={overtimeSubmitting}
         onClose={() => setOvertimeTarget(null)}
         onSubmit={handleOvertimeReviewSubmit}
       />
+      <LeaveReviewDialog
+        row={leaveTarget}
+        saving={leaveSubmitting}
+        onClose={() => setLeaveTarget(null)}
+        onSubmit={handleLeaveReviewSubmit}
+      />
+      <ConfirmDialog
+        open={Boolean(leaveDeleteTarget)}
+        tone="danger"
+        icon={Trash2}
+        eyebrow="Hapus Request"
+        title="Hapus request ketidakhadiran?"
+        description="Data request akan dihapus dari antrian dan rekap harian karyawan akan dihitung ulang. Request yang sudah masuk payroll final tetap dikunci oleh database."
+        confirmLabel="Hapus Request"
+        loading={leaveSubmitting}
+        onClose={() => {
+          if (!leaveSubmitting) setLeaveDeleteTarget(null)
+        }}
+        onConfirm={() => void handleLeaveDeleteSubmit()}
+      >
+        <div className="confirmDialogPreview">
+          <span>Karyawan</span>
+          <strong>{leaveDeleteTarget?.fullName || "-"}</strong>
+          <small>{leaveDeleteTarget ? `${getLeaveRequestTypeLabel(leaveDeleteTarget.requestType)} / ${getLeaveRequestDateLabel(leaveDeleteTarget)}` : "Belum ada request"}</small>
+        </div>
+      </ConfirmDialog>
       <ConfirmDialog
         open={bulkReviewRows.length > 0}
         tone="warning"
@@ -17319,9 +17799,10 @@ function AttendanceLiveRecap({ rows, selectedDate, mode = "today" }: { rows: Att
   const checkedOut = rows.filter((row) => row.checkOutId).length
   const review = rows.filter((row) => row.attendanceStatus === "pending").length
   const failed = rows.filter((row) => row.attendanceStatus === "failed").length
-  const missing = rows.filter((row) => !row.checkInId).length
+  const leaveRows = rows.filter((row) => row.leaveRequestId && row.leaveRequestStatus === "approved")
+  const missing = rows.filter((row) => !row.checkInId && !row.leaveRequestId && row.settlementStatus === "missing_checkin").length
   const missingCheckout = rows.filter((row) => row.checkInId && !row.checkOutId).length
-  const workdayCounted = rows.filter((row) => row.attendanceStatus === "valid" && row.checkInId).length
+  const workdayCounted = rows.filter((row) => row.workdayCounted).length
   const shortageRows = rows.filter((row) => row.shortageMinutes > 0).length
   const overtimeRequestRows = rows.filter((row) => row.overtimeRequestId).length
   const overtimePendingRows = rows.filter((row) => row.overtimeRequestStatus === "pending" || row.overtimeRequestStatus === "draft").length
@@ -17333,6 +17814,7 @@ function AttendanceLiveRecap({ rows, selectedDate, mode = "today" }: { rows: Att
     { label: "Pulang", value: checkedOut, tone: "valid" },
     { label: "Kurang jam", value: shortageRows ? `${shortageRows} / ${formatMinutesDuration(totalShortageMinutes)}` : "0", tone: shortageRows ? "pending" : "neutral" },
     { label: "Lembur", value: overtimeRequestRows ? `${overtimeRequestRows} req` : "0", tone: overtimePendingRows ? "pending" : overtimeRequestRows ? "valid" : "neutral" },
+    { label: "Izin/Cuti", value: leaveRows.length, tone: leaveRows.length ? "valid" : "neutral" },
     { label: "Belum checkout", value: missingCheckout, tone: missingCheckout ? "pending" : "neutral" },
     { label: "Review", value: review, tone: review ? "pending" : "neutral" },
     { label: "Failed", value: failed, tone: failed ? "failed" : "neutral" },
@@ -17500,6 +17982,222 @@ function AttendanceRecapTable({
         onPageChange={setPage}
         onPageSizeChange={(value) => setPageSize(Math.min(value, 100))}
       />
+    </OperationalTableCard>
+  )
+}
+
+function getAttendanceCalendarCellMeta(row?: AttendanceMonitorRow) {
+  if (!row) {
+    return {
+      label: "-",
+      detail: "Tidak ada data",
+      tone: "empty" as const,
+      title: "Tidak ada data absensi",
+    }
+  }
+
+  if (row.leaveRequestId) {
+    return {
+      label: getLeaveRequestTypeLabel(row.leaveRequestType),
+      detail: getLeavePayPolicyLabel(row.leavePayPolicy),
+      tone: row.settlementTone,
+      title: `${row.fullName} - ${getLeaveRequestTypeLabel(row.leaveRequestType)}${row.leaveReason ? ` - ${row.leaveReason}` : ""}`,
+    }
+  }
+
+  if (row.settlementStatus === "ready") {
+    return {
+      label: "Hadir",
+      detail: row.workDurationLabel,
+      tone: "valid" as const,
+      title: `${row.fullName} hadir ${row.workDurationLabel}`,
+    }
+  }
+
+  if (row.settlementStatus === "short") {
+    return {
+      label: "Kurang",
+      detail: formatMinutesDuration(row.shortageMinutes),
+      tone: "pending" as const,
+      title: `${row.fullName} kurang ${formatMinutesDuration(row.shortageMinutes)}`,
+    }
+  }
+
+  if (row.settlementStatus === "missing_checkout") {
+    return {
+      label: "Belum pulang",
+      detail: row.checkInAt ? formatAttendanceTime(row.checkInAt) : "Check-in ada",
+      tone: "pending" as const,
+      title: `${row.fullName} belum checkout`,
+    }
+  }
+
+  if (row.settlementStatus === "running") {
+    return {
+      label: "Berjalan",
+      detail: row.workDurationLabel,
+      tone: "pending" as const,
+      title: `${row.fullName} shift sedang berjalan`,
+    }
+  }
+
+  if (row.settlementStatus === "review" || row.attendanceStatus === "pending") {
+    return {
+      label: "Review",
+      detail: row.settlementLabel,
+      tone: "pending" as const,
+      title: `${row.fullName} perlu review`,
+    }
+  }
+
+  if (row.settlementStatus === "failed" || row.attendanceStatus === "failed") {
+    return {
+      label: "Tidak valid",
+      detail: row.settlementLabel,
+      tone: "failed" as const,
+      title: `${row.fullName} tidak valid`,
+    }
+  }
+
+  if (row.settlementStatus === "missing_checkin") {
+    return {
+      label: "Belum",
+      detail: "Belum masuk",
+      tone: "missing" as const,
+      title: `${row.fullName} belum absen masuk`,
+    }
+  }
+
+  return {
+    label: row.settlementLabel,
+    detail: row.workDurationLabel,
+    tone: row.settlementTone,
+    title: `${row.fullName} - ${row.settlementLabel}`,
+  }
+}
+
+function formatAttendanceCalendarWeekday(dateKey: string) {
+  return new Intl.DateTimeFormat("id-ID", {
+    weekday: "short",
+    timeZone: "Asia/Jakarta",
+  }).format(new Date(`${dateKey}T00:00:00+07:00`))
+}
+
+function formatAttendanceCalendarDay(dateKey: string) {
+  return new Intl.DateTimeFormat("id-ID", {
+    day: "2-digit",
+    timeZone: "Asia/Jakarta",
+  }).format(new Date(`${dateKey}T00:00:00+07:00`))
+}
+
+function AttendanceCalendarMatrix({
+  rows,
+  loading,
+  errorMessage,
+  dateRange,
+}: {
+  rows: AttendanceMonitorRow[]
+  loading: boolean
+  errorMessage: string
+  dateRange: { startDate: string; endDate: string }
+}) {
+  const calendarDrag = useHorizontalDragScroll<HTMLDivElement>()
+  const dateKeys = getAttendanceDateKeys(dateRange.startDate, dateRange.endDate, 62)
+  const rowsByEmployee = new Map<string, { employee: AttendanceMonitorRow; byDate: Map<string, AttendanceMonitorRow> }>()
+
+  rows.forEach((row) => {
+    const current = rowsByEmployee.get(row.employeeId)
+    if (current) {
+      current.byDate.set(row.attendanceDate, row)
+      return
+    }
+
+    rowsByEmployee.set(row.employeeId, {
+      employee: row,
+      byDate: new Map([[row.attendanceDate, row]]),
+    })
+  })
+
+  const employeeRows = Array.from(rowsByEmployee.values()).sort((a, b) => {
+    const divisionCompare = a.employee.divisionName.localeCompare(b.employee.divisionName)
+    if (divisionCompare !== 0) return divisionCompare
+    return a.employee.fullName.localeCompare(b.employee.fullName)
+  })
+  const leaveCount = rows.filter((row) => row.leaveRequestId).length
+  const workdayCounted = rows.filter((row) => row.workdayCounted).length
+  const missingCount = rows.filter((row) => row.settlementStatus === "missing_checkin" && !row.leaveRequestId).length
+  const capped = dateKeys.length === 62 && dateRange.endDate > dateKeys[dateKeys.length - 1]
+
+  return (
+    <OperationalTableCard>
+      <div className="tableHeader attendanceCalendarHeader">
+        <div>
+          <h2>Kalender Kehadiran</h2>
+          <p>Matrix per karyawan untuk melihat hadir, izin/cuti, alpha, dan kosong dalam satu rentang.</p>
+        </div>
+        <InlinePageStats items={[`${employeeRows.length} karyawan`, `${dateKeys.length} tanggal`, `${workdayCounted} hari kerja`, `${leaveCount} izin/cuti`, `${missingCount} belum absen`]} />
+      </div>
+      {capped && (
+        <div className="attendanceCalendarNotice">
+          <AlertCircle size={16} />
+          <span>Kalender dibatasi 62 tanggal agar tetap ringan. Persempit range bila butuh detail lebih panjang.</span>
+        </div>
+      )}
+      <div
+        className={clsx("tableScroller uiDataTableScroller uiDataTableHasColumns attendanceCalendarTableScroller", calendarDrag.dragging && "dragging")}
+        ref={calendarDrag.ref}
+        style={{ "--calendar-days": Math.max(dateKeys.length, 1) } as CSSProperties}
+        {...calendarDrag.handlers}
+      >
+        <table>
+          <colgroup>
+            <col className="attendanceCalendarEmployeeColumn" />
+            {dateKeys.map((dateKey) => <col className="attendanceCalendarDateColumn" key={dateKey} />)}
+          </colgroup>
+          <thead>
+            <tr>
+              <th className="attendanceCalendarEmployeeHeader">Karyawan</th>
+              {dateKeys.map((dateKey) => (
+                <th className="attendanceCalendarDateHeader" key={dateKey}>
+                  <span>{formatAttendanceCalendarWeekday(dateKey)}</span>
+                  <strong>{formatAttendanceCalendarDay(dateKey)}</strong>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {loading && <FoundationTableSkeletonRows colSpan={dateKeys.length + 1} columns={Math.min(dateKeys.length + 1, 8)} rows={6} />}
+            {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={dateKeys.length + 1}><TableState title="Gagal memuat kalender" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
+            {!loading && !errorMessage && employeeRows.map(({ employee, byDate }) => (
+              <tr key={employee.employeeId}>
+                <td className="attendanceCalendarEmployeeCell">
+                  <EmployeeIdentityCell fullName={employee.fullName} code={employee.employeeCode} photoUrl={employee.employeePhotoUrl} secondary={`${employee.divisionName} / ${employee.shiftName || "Default"}`} />
+                </td>
+                {dateKeys.map((dateKey) => {
+                  const row = byDate.get(dateKey)
+                  const cell = getAttendanceCalendarCellMeta(row)
+
+                  return (
+                    <td className="attendanceCalendarDateCell" key={`${employee.employeeId}-${dateKey}`}>
+                      <button className={clsx("attendanceCalendarCell", `tone-${cell.tone}`, row?.workdayCounted && "counted")} type="button" title={cell.title}>
+                        <span>{cell.label}</span>
+                        <small>{cell.detail}</small>
+                      </button>
+                    </td>
+                  )
+                })}
+              </tr>
+            ))}
+            {!loading && !errorMessage && employeeRows.length === 0 && <tr><td className="tableStateCell" colSpan={dateKeys.length + 1}><TableState title="Tidak ada kalender" description="Belum ada data kehadiran sesuai filter tanggal/range." icon={Search} /></td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <div className="attendanceCalendarLegend" aria-label="Legenda kalender kehadiran">
+        <span className="tone-valid">Hadir / dibayar</span>
+        <span className="tone-pending">Perlu dipantau</span>
+        <span className="tone-failed">Tidak valid / alpha</span>
+        <span className="tone-missing">Belum absen / libur</span>
+      </div>
     </OperationalTableCard>
   )
 }
@@ -19132,6 +19830,551 @@ function OvertimeRequestDialog({
           </button>
         </div>
       </form>
+    </FoundationDialog>
+  )
+}
+
+function LeaveRequestTypeBadge({ type }: { type: LeaveRequestType }) {
+  const tone: Record<LeaveRequestType, AttendanceSettlementTone> = {
+    permit: "pending",
+    sick: "valid",
+    leave: "valid",
+    field_assignment: "valid",
+    alpha: "failed",
+    off: "missing",
+  }
+
+  return <UiStatusBadge tone={tone[type]}>{getLeaveRequestTypeLabel(type)}</UiStatusBadge>
+}
+
+function LeaveRequestStatusBadge({ status }: { status: LeaveRequestStatus }) {
+  return <UiStatusBadge tone={getLeaveRequestStatusTone(status)}>{getLeaveRequestStatusLabel(status)}</UiStatusBadge>
+}
+
+function LeaveRequestDialog({
+  open,
+  saving,
+  employees,
+  selectedDate,
+  onClose,
+  onSubmit,
+}: {
+  open: boolean
+  saving: boolean
+  employees: AttendanceMonitorRow[]
+  selectedDate: string
+  onClose: () => void
+  onSubmit: (payload: LeaveRequestSubmitPayload) => void
+}) {
+  const firstEmployee = employees[0]
+  const [employeeId, setEmployeeId] = useState("")
+  const [requestType, setRequestType] = useState<LeaveRequestType>("permit")
+  const [startDate, setStartDate] = useState(selectedDate || getLocalDateKey())
+  const [endDate, setEndDate] = useState(selectedDate || getLocalDateKey())
+  const [payPolicy, setPayPolicy] = useState<LeavePayPolicy>("unpaid")
+  const [reason, setReason] = useState("")
+  const [attachmentUrl, setAttachmentUrl] = useState("")
+  const [error, setError] = useState("")
+
+  useEffect(() => {
+    if (!open) return
+    setEmployeeId((current) => current || firstEmployee?.employeeId || "")
+    setRequestType("permit")
+    setStartDate(selectedDate || getLocalDateKey())
+    setEndDate(selectedDate || getLocalDateKey())
+    setPayPolicy("unpaid")
+    setReason("")
+    setAttachmentUrl("")
+    setError("")
+  }, [firstEmployee?.employeeId, open, selectedDate])
+
+  const selectedEmployee = employees.find((employee) => employee.employeeId === employeeId)
+  const employeeOptions = employees.map((employee) => ({
+    value: employee.employeeId,
+    label: employee.fullName,
+    description: employee.employeeCode,
+    searchLabel: `${employee.fullName} ${employee.employeeCode} ${employee.divisionName} ${employee.workLocationName}`,
+  }))
+  const leaveTypeOptions = [
+    { value: "permit", label: "Izin", description: "Tidak masuk dengan izin, default tidak dibayar." },
+    { value: "sick", label: "Sakit", description: "Sakit disetujui HR, default dibayar." },
+    { value: "leave", label: "Cuti", description: "Cuti resmi, default dibayar." },
+    { value: "field_assignment", label: "Tugas luar", description: "Kerja di luar lokasi, dihitung hari kerja." },
+    { value: "alpha", label: "Alpha", description: "Tidak hadir tanpa izin, tidak dibayar." },
+    { value: "off", label: "Libur", description: "Hari libur/off, tidak dihitung." },
+  ] as Array<{ value: LeaveRequestType; label: string; description: string }>
+  const payPolicyOptions = [
+    { value: "paid", label: "Dibayar", description: "Tetap dihitung sebagai hari kerja payroll." },
+    { value: "unpaid", label: "Tidak dibayar", description: "Tercatat di rekap, tidak menambah hari kerja." },
+    { value: "not_counted", label: "Tidak dihitung", description: "Libur/off, tidak dianggap hari kerja." },
+  ] as Array<{ value: LeavePayPolicy; label: string; description: string }>
+  const selectedTypeOption = leaveTypeOptions.find((option) => option.value === requestType)
+  const selectedPolicyOption = payPolicyOptions.find((option) => option.value === payPolicy)
+
+  const handleTypeChange = (value: LeaveRequestType) => {
+    setRequestType(value)
+    setPayPolicy(getDefaultLeavePayPolicy(value))
+  }
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const trimmedReason = reason.trim()
+
+    if (!employeeId) {
+      setError("Karyawan wajib dipilih.")
+      return
+    }
+    if (!startDate || !endDate || startDate > endDate) {
+      setError("Tanggal mulai dan selesai belum valid.")
+      return
+    }
+    if (trimmedReason.length < 4) {
+      setError("Catatan wajib diisi agar approval punya konteks.")
+      return
+    }
+
+    setError("")
+    onSubmit({
+      employeeId,
+      requestType,
+      startDate,
+      endDate,
+      payPolicy,
+      reason: trimmedReason,
+      attachmentUrl: attachmentUrl.trim(),
+    })
+  }
+
+  return (
+    <FoundationDialog
+      open={open}
+      labelledBy="leave-request-title"
+      describedBy="leave-request-description"
+      className="leaveRequestDialog"
+      onClose={onClose}
+    >
+      <form className="leaveRequestShell" onSubmit={submit}>
+        <header className="overtimeRequestHeader">
+          <div>
+            <span><CalendarCheck2 size={14} /> Ketidakhadiran</span>
+            <h2 id="leave-request-title">Input Izin/Cuti</h2>
+            <p id="leave-request-description">Catat izin, sakit, cuti, tugas luar, alpha, atau libur agar monitoring dan payroll tidak menebak dari absen kosong.</p>
+          </div>
+          <FoundationDialogCloseButton onClose={onClose} disabled={saving} />
+        </header>
+
+        <div className="leaveRequestBody">
+          <section className="leaveRequestFormPanel">
+            <FormField label="Karyawan" required>
+              <FoundationSelect
+                label="Karyawan"
+                value={employeeId}
+                options={employeeOptions}
+                placeholder="Pilih karyawan"
+                searchable
+                disabled={saving || employees.length === 0}
+                renderValue={(option) => option?.label || "Pilih karyawan"}
+                onChange={setEmployeeId}
+              />
+            </FormField>
+            <div className="leaveRequestGrid">
+              <DateFormField label="Tanggal Mulai" value={startDate} onChange={(value) => {
+                setStartDate(value)
+                if (endDate < value) setEndDate(value)
+              }} required />
+              <DateFormField label="Tanggal Selesai" value={endDate} onChange={setEndDate} required />
+            </div>
+            <div className="leaveRequestGrid">
+              <FormField label="Jenis" required>
+                <FoundationSelect
+                  label="Jenis ketidakhadiran"
+                  value={requestType}
+                  options={leaveTypeOptions}
+                  searchable={false}
+                  onChange={(value) => handleTypeChange(value as LeaveRequestType)}
+                />
+              </FormField>
+              <FormField label="Payroll" required>
+                <FoundationSelect
+                  label="Policy payroll"
+                  value={payPolicy}
+                  options={payPolicyOptions}
+                  searchable={false}
+                  onChange={(value) => setPayPolicy(value as LeavePayPolicy)}
+                />
+              </FormField>
+            </div>
+            <FormField label="Catatan HR" required>
+              <textarea value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Contoh: izin keluarga, sakit dengan surat dokter, tugas luar meeting supplier" />
+            </FormField>
+            <TextFormField label="Lampiran" value={attachmentUrl} onChange={(event) => setAttachmentUrl(event.target.value)} placeholder="Opsional: link surat dokter / bukti tugas" />
+            {error && <p className="formErrorMessage">{error}</p>}
+          </section>
+
+          <aside className="leaveRequestPreview">
+            <div className="overtimeRequestPreviewHeader">
+              <span><CalendarCheck2 size={18} /></span>
+              <div>
+                <small>Preview request</small>
+                <strong>{selectedTypeOption?.label || "Izin"}</strong>
+              </div>
+            </div>
+            <dl>
+              <div>
+                <dt>Karyawan</dt>
+                <dd>{selectedEmployee ? selectedEmployee.fullName : "Belum dipilih"}</dd>
+              </div>
+              <div>
+                <dt>Periode</dt>
+                <dd>{startDate && endDate ? `${formatWorkDate(startDate)}${startDate === endDate ? "" : ` - ${formatWorkDate(endDate)}`}` : "-"}</dd>
+              </div>
+              <div>
+                <dt>Default shift</dt>
+                <dd>{selectedEmployee?.shiftName || "-"}</dd>
+              </div>
+              <div>
+                <dt>Payroll</dt>
+                <dd>{selectedPolicyOption?.label || "-"}</dd>
+              </div>
+            </dl>
+            <div className="overtimeRequestNotice">
+              <AlertCircle size={17} />
+              <span>Setelah disetujui, rekap harian berubah dari belum masuk menjadi {selectedTypeOption?.label || "izin"} dan payroll mengikuti policy yang dipilih.</span>
+            </div>
+          </aside>
+        </div>
+
+        <div className="overtimeRequestActions">
+          <button className="secondaryButton" type="button" onClick={onClose} disabled={saving}>Batal</button>
+          <button className="primaryButton" type="submit" disabled={saving || employees.length === 0}>
+            <CalendarCheck2 size={17} />
+            {saving ? "Menyimpan..." : "Simpan Request"}
+          </button>
+        </div>
+      </form>
+    </FoundationDialog>
+  )
+}
+
+function LeaveReviewTable({
+  rows,
+  loading,
+  errorMessage,
+  onReview,
+  onDelete,
+}: {
+  rows: LeaveRequestRow[]
+  loading: boolean
+  errorMessage: string
+  onReview: (row: LeaveRequestRow) => void
+  onDelete: (row: LeaveRequestRow) => void
+}) {
+  const [openLeaveId, setOpenLeaveId] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
+  const leaveTableDrag = useHorizontalDragScroll<HTMLDivElement>()
+  const safePageSize = Math.min(pageSize, 100)
+  const pageCount = Math.max(1, Math.ceil(rows.length / safePageSize))
+  const currentPage = Math.min(page, pageCount)
+  const paginatedRows = rows.slice((currentPage - 1) * safePageSize, currentPage * safePageSize)
+  const pendingRows = rows.filter((row) => row.status === "pending")
+  const approvedRows = rows.filter((row) => row.status === "approved")
+  const paidRows = rows.filter((row) => row.status === "approved" && row.payPolicy === "paid")
+
+  useEffect(() => {
+    setPage(1)
+  }, [rows.length, pageSize])
+
+  useEffect(() => {
+    if (openLeaveId && !rows.some((row) => row.id === openLeaveId)) setOpenLeaveId(null)
+  }, [openLeaveId, rows])
+
+  return (
+    <OperationalTableCard>
+      <div className="tableHeader">
+        <div>
+          <h2>Approval Izin/Cuti</h2>
+          <p>Request ketidakhadiran yang mengubah status rekap harian dan sumber payroll. Klik baris untuk detail.</p>
+        </div>
+        <InlinePageStats items={[`${pendingRows.length} pending`, `${approvedRows.length} disetujui`, `${paidRows.length} dibayar`]} />
+      </div>
+      <div
+        className={clsx("tableScroller uiDataTableScroller uiDataTableHasColumns leaveReviewTableScroller", leaveTableDrag.dragging && "dragging")}
+        ref={leaveTableDrag.ref}
+        {...leaveTableDrag.handlers}
+      >
+        <table>
+          <colgroup>
+            <col className="tableNumberColumn" />
+            <col style={{ width: "270px" }} />
+            <col style={{ width: "190px" }} />
+            <col style={{ width: "150px" }} />
+            <col style={{ width: "170px" }} />
+            <col style={{ width: "280px" }} />
+            <col style={{ width: "140px" }} />
+            <col className="tableActionColumn" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>No</th>
+              <th>Karyawan</th>
+              <th>Periode</th>
+              <th>Jenis</th>
+              <th>Payroll</th>
+              <th>Catatan</th>
+              <th>Status</th>
+              <th>Aksi</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading && <FoundationTableSkeletonRows colSpan={8} columns={8} />}
+            {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={8}><TableState title="Gagal memuat izin/cuti" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
+            {!loading && !errorMessage && paginatedRows.map((row, index) => {
+              const isOpen = openLeaveId === row.id
+              const canDelete = row.status !== "approved" || !row.payrollCycleId
+
+              return (
+                <Fragment key={row.id}>
+                  <tr
+                    className={clsx("clickableTableRow leaveReviewRow", isOpen && "active")}
+                    tabIndex={0}
+                    onClick={() => setOpenLeaveId(isOpen ? null : row.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault()
+                        setOpenLeaveId(isOpen ? null : row.id)
+                      }
+                    }}
+                  >
+                    <td><TableNumberCell value={(currentPage - 1) * safePageSize + index + 1} /></td>
+                    <td><EmployeeIdentityCell fullName={row.fullName} code={row.employeeCode} photoUrl={row.employeePhotoUrl} secondary={`${row.employeeCode || "-"} / ${row.divisionName}`} /></td>
+                    <td><TableText primary={getLeaveRequestDateLabel(row)} secondary={row.startDate === row.endDate ? "1 hari" : "Multi hari"} /></td>
+                    <td><LeaveRequestTypeBadge type={row.requestType} /></td>
+                    <td><TableText primary={getLeavePayPolicyLabel(row.payPolicy)} secondary={row.payPolicy === "paid" ? "Masuk payroll" : row.payPolicy === "not_counted" ? "Tidak masuk cycle" : "Tidak dibayar"} /></td>
+                    <td><TableText primary={row.reason || "Tanpa catatan"} secondary={row.attachmentUrl ? "Ada lampiran" : ""} /></td>
+                    <td><LeaveRequestStatusBadge status={row.status} /></td>
+                    <td className="tableActionCell">
+                      <div className="rowActions" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+                        <button className="rowExpandButton" type="button" aria-label={isOpen ? "Tutup detail izin/cuti" : "Buka detail izin/cuti"} onClick={() => setOpenLeaveId(isOpen ? null : row.id)}>
+                          <ChevronDown size={18} />
+                        </button>
+                        <RowActionMenu label={`Aksi izin/cuti ${row.fullName}`}>
+                          <RowActionMenuItem onClick={() => setOpenLeaveId(isOpen ? null : row.id)}>
+                            <Eye size={15} />
+                            {isOpen ? "Tutup Detail" : "Lihat Detail"}
+                          </RowActionMenuItem>
+                          <RowActionMenuItem onClick={() => onReview(row)}>
+                            <FileCheck2 size={15} />
+                            {row.status === "pending" ? "Review Request" : "Ubah Status"}
+                          </RowActionMenuItem>
+                          <RowActionMenuItem danger disabled={!canDelete} onClick={() => onDelete(row)}>
+                            <Trash2 size={15} />
+                            Hapus Request
+                          </RowActionMenuItem>
+                        </RowActionMenu>
+                      </div>
+                    </td>
+                  </tr>
+                  {isOpen && (
+                    <tr className="leaveReviewExpandRow">
+                      <td colSpan={8}>
+                        <LeaveReviewExpandPanel row={row} onReview={onReview} />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              )
+            })}
+            {!loading && !errorMessage && rows.length === 0 && <tr><td className="tableStateCell" colSpan={8}><TableState title="Tidak ada request" description="Izin, sakit, cuti, tugas luar, alpha, dan libur akan tampil di sini setelah dibuat." icon={Search} /></td></tr>}
+          </tbody>
+        </table>
+      </div>
+      {!loading && (
+        <DataTablePagination
+          page={currentPage}
+          pageSize={safePageSize}
+          totalRows={rows.length}
+          pageSizeOptions={[25, 50, 100]}
+          onPageChange={setPage}
+          onPageSizeChange={(value) => setPageSize(Math.min(value, 100))}
+        />
+      )}
+    </OperationalTableCard>
+  )
+}
+
+function LeaveReviewExpandPanel({ row, onReview }: { row: LeaveRequestRow; onReview: (row: LeaveRequestRow) => void }) {
+  const payrollText = row.payPolicy === "paid"
+    ? "Dihitung sebagai hari kerja payroll setelah approved."
+    : row.payPolicy === "not_counted"
+      ? "Tidak dihitung sebagai hari kerja."
+      : "Tercatat di monitoring, tidak menambah hari kerja payroll."
+
+  return (
+    <div className="leaveReviewExpandPanel">
+      <div className="leaveReviewFacts">
+        <section>
+          <span>Karyawan</span>
+          <strong>{row.fullName}</strong>
+          <small>{row.employeeCode || "-"} / {row.divisionName}</small>
+        </section>
+        <section>
+          <span>Periode</span>
+          <strong>{getLeaveRequestDateLabel(row)}</strong>
+          <small>{row.startDate === row.endDate ? "1 hari" : "Banyak hari"}</small>
+        </section>
+        <section>
+          <span>Jenis</span>
+          <strong>{getLeaveRequestTypeLabel(row.requestType)}</strong>
+          <small>{payrollText}</small>
+        </section>
+        <section>
+          <span>Status</span>
+          <strong>{getLeaveRequestStatusLabel(row.status)}</strong>
+          <small>{row.reviewedAt ? `Review ${formatAttendanceTime(row.reviewedAt)}` : "Belum direview"}</small>
+        </section>
+      </div>
+      <div className="leaveReviewNoteBlock">
+        <span>Catatan</span>
+        <p>{row.reason || "Belum ada catatan."}</p>
+        {row.reviewNotes && <small>Review HR: {row.reviewNotes}</small>}
+        {row.attachmentUrl && <a href={row.attachmentUrl} target="_blank" rel="noreferrer">Buka lampiran</a>}
+      </div>
+      <div className="leaveReviewExpandFooter">
+        <p>{payrollText}</p>
+        <button className="primaryButton compactButton" type="button" onClick={() => onReview(row)}>
+          <FileCheck2 size={16} />
+          {row.status === "pending" ? "Review Request" : "Ubah Status"}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function LeaveReviewDialog({
+  row,
+  saving,
+  onClose,
+  onSubmit,
+}: {
+  row: LeaveRequestRow | null
+  saving: boolean
+  onClose: () => void
+  onSubmit: (decision: "approve" | "reject" | "cancel", notes: string) => void
+}) {
+  const [notes, setNotes] = useState("")
+  const [noteError, setNoteError] = useState("")
+
+  useEffect(() => {
+    setNotes("")
+    setNoteError("")
+  }, [row])
+
+  if (!row) return null
+
+  const submitDecision = (decision: "approve" | "reject" | "cancel") => {
+    const trimmedNotes = notes.trim()
+    if ((decision === "reject" || decision === "cancel") && trimmedNotes.length < 5) {
+      setNoteError(decision === "reject" ? "Catatan wajib diisi untuk menolak request." : "Catatan wajib diisi untuk membatalkan request.")
+      return
+    }
+
+    setNoteError("")
+    onSubmit(decision, trimmedNotes)
+  }
+
+  const canApprove = row.status === "pending"
+  const canReject = row.status === "pending"
+  const canCancel = row.status === "approved"
+
+  return (
+    <FoundationDialog
+      open={Boolean(row)}
+      labelledBy="leave-review-title"
+      describedBy="leave-review-description"
+      className="leaveReviewDialog"
+      closeOnBackdrop={!saving}
+      onClose={onClose}
+    >
+      <div className="leaveReviewDialogShell">
+        <header className="attendanceReviewHeader">
+          <span className="attendanceReviewHeaderAvatar">
+            {row.employeePhotoUrl ? <img src={row.employeePhotoUrl} alt="" /> : getProfileInitials(row.fullName || row.employeeCode)}
+          </span>
+          <div>
+            <span>Approval Ketidakhadiran</span>
+            <h2 id="leave-review-title">{getLeaveRequestTypeLabel(row.requestType)} {row.fullName}</h2>
+            <p id="leave-review-description">{row.employeeCode || "-"} - {getLeaveRequestDateLabel(row)} - {getLeavePayPolicyLabel(row.payPolicy)}</p>
+          </div>
+          <LeaveRequestStatusBadge status={row.status} />
+          <FoundationDialogCloseButton label="Tutup detail izin/cuti" onClose={onClose} disabled={saving} />
+        </header>
+
+        <div className="leaveReviewDialogBody">
+          <div className="attendanceReviewStory">
+            <span className="attendanceReviewStoryIcon checkin">
+              <CalendarCheck2 size={18} />
+            </span>
+            <div className="attendanceReviewStoryCopy">
+              <p>{row.fullName} mengajukan {getLeaveRequestTypeLabel(row.requestType).toLowerCase()} untuk {getLeaveRequestDateLabel(row)}. Policy payroll: {getLeavePayPolicyLabel(row.payPolicy).toLowerCase()}.</p>
+              <div className="attendanceReviewSourceRow">
+                <LeaveRequestTypeBadge type={row.requestType} />
+                <small>{row.status === "approved" ? "Sudah mengubah rekap harian." : row.status === "pending" ? "Menunggu keputusan HR." : "Tidak aktif di rekap payroll."}</small>
+              </div>
+            </div>
+          </div>
+
+          <div className="leaveReviewDialogGrid">
+            <section>
+              <span>Karyawan</span>
+              <strong>{row.fullName}</strong>
+              <small>{row.employeeCode || "-"} / {row.divisionName}</small>
+            </section>
+            <section>
+              <span>Periode</span>
+              <strong>{getLeaveRequestDateLabel(row)}</strong>
+              <small>{row.startDate === row.endDate ? "1 hari" : "Multi hari"}</small>
+            </section>
+            <section>
+              <span>Payroll</span>
+              <strong>{getLeavePayPolicyLabel(row.payPolicy)}</strong>
+              <small>{row.payPolicy === "paid" ? "Menambah hari kerja" : row.payPolicy === "not_counted" ? "Libur/off" : "Tidak dibayar"}</small>
+            </section>
+            <section>
+              <span>Status</span>
+              <strong>{getLeaveRequestStatusLabel(row.status)}</strong>
+              <small>{row.payrollCycleId ? "Sudah tersambung cycle" : "Belum masuk cycle final"}</small>
+            </section>
+          </div>
+
+          <div className="leaveReviewNoteBlock">
+            <span>Catatan request</span>
+            <p>{row.reason || "Belum ada catatan."}</p>
+            {row.reviewNotes && <small>Catatan review: {row.reviewNotes}</small>}
+          </div>
+
+          <FormField label="Catatan HR">
+            <textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Contoh: disetujui sesuai info supervisor / ditolak karena bukti belum lengkap" />
+          </FormField>
+          {noteError && <p className="formErrorMessage">{noteError}</p>}
+        </div>
+
+        <div className="attendanceReviewActions">
+          <button className="secondaryButton" type="button" onClick={onClose} disabled={saving}>Batal</button>
+          <button className="secondaryButton dangerSoftButton" type="button" disabled={saving || !canReject} onClick={() => submitDecision("reject")}>
+            <X size={17} />
+            Tolak
+          </button>
+          <button className="secondaryButton dangerSoftButton" type="button" disabled={saving || !canCancel} onClick={() => submitDecision("cancel")}>
+            <RotateCcw size={17} />
+            Batalkan
+          </button>
+          <button className="primaryButton" type="button" disabled={saving || !canApprove} onClick={() => submitDecision("approve")}>
+            <FileCheck2 size={17} />
+            {saving ? "Memproses..." : "Setujui"}
+          </button>
+        </div>
+      </div>
     </FoundationDialog>
   )
 }
