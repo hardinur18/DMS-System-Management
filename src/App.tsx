@@ -86,6 +86,7 @@ type ViewId =
   | "kiosk-mode"
   | "biofinger"
   | "employees"
+  | "shift-schedules"
   | "attendance-requests"
   | "attendance-review"
   | "field-monitoring"
@@ -532,7 +533,7 @@ interface EmployeePortalData {
   recentLogs: EmployeePortalAttendanceLog[]
 }
 
-type ModuleViewId = Exclude<ViewId, "dashboard" | "kiosk-mode" | "biofinger" | "master-data" | "users" | "role-permission" | "audit-log" | "guide" | "profile">
+type ModuleViewId = Exclude<ViewId, "dashboard" | "kiosk-mode" | "biofinger" | "employees" | "shift-schedules" | "master-data" | "users" | "role-permission" | "audit-log" | "guide" | "profile">
 
 type UserStatus = "active" | "invited" | "locked"
 
@@ -653,6 +654,63 @@ interface EmployeeDirectoryData {
 
 function createEmptyEmployeeDirectoryData(): EmployeeDirectoryData {
   return { rows: [], divisions: [], positions: [], locations: [], shifts: [], policies: [], kioskSchemaReady: true, payrollOpeningSchemaReady: true }
+}
+
+type ShiftScheduleStatus = "active" | "cancelled"
+
+interface ShiftScheduleShiftOption extends EmployeeOption {
+  startTime: string
+  endTime: string
+  lateToleranceMinutes: number
+  earlyLeaveToleranceMinutes: number
+}
+
+interface ShiftScheduleRow {
+  id: string
+  employeeId: string
+  employeeCode: string
+  fullName: string
+  photoUrl: string
+  divisionId: string
+  divisionName: string
+  defaultShiftId: string
+  defaultShiftName: string
+  defaultShiftStartTime: string
+  defaultShiftEndTime: string
+  defaultWorkLocationId: string
+  defaultWorkLocationName: string
+  scheduleId: string
+  scheduleDate: string
+  scheduleShiftId: string
+  scheduleShiftName: string
+  scheduleShiftStartTime: string
+  scheduleShiftEndTime: string
+  scheduleWorkLocationId: string
+  scheduleWorkLocationName: string
+  scheduleStatus: ShiftScheduleStatus
+  scheduleNotes: string
+  source: "daily_schedule" | "employee_default" | "no_shift"
+  updatedAt: string
+}
+
+interface ShiftScheduleData {
+  rows: ShiftScheduleRow[]
+  divisions: EmployeeOption[]
+  locations: EmployeeOption[]
+  shifts: ShiftScheduleShiftOption[]
+  schemaReady: boolean
+}
+
+interface ShiftScheduleFormValues {
+  employeeId: string
+  scheduleDate: string
+  shiftId: string
+  workLocationId: string
+  notes: string
+}
+
+function createEmptyShiftScheduleData(): ShiftScheduleData {
+  return { rows: [], divisions: [], locations: [], shifts: [], schemaReady: true }
 }
 
 interface AttendanceKioskOption {
@@ -1098,6 +1156,7 @@ const navItems: NavItem[] = [
   { id: "kiosk-mode", label: "Kiosk Mode", icon: ScanLine, group: "Operasional" },
   { id: "biofinger", label: "Biofinger", icon: Fingerprint, group: "Operasional" },
   { id: "employees", label: "Karyawan", icon: UserPlus, group: "Operasional" },
+  { id: "shift-schedules", label: "Jadwal Shift", icon: CalendarCheck2, group: "Operasional" },
   { id: "attendance-requests", label: "Rekap Absensi", icon: CalendarCheck2, group: "Operasional" },
   { id: "attendance-review", label: "Approval", icon: ClipboardList, group: "Operasional" },
   { id: "field-monitoring", label: "Lapangan", icon: CalendarCheck2, group: "Operasional" },
@@ -1118,6 +1177,7 @@ const productionReadyViews = new Set<ViewId>([
   "kiosk-mode",
   "biofinger",
   "employees",
+  "shift-schedules",
   "attendance-requests",
   "attendance-review",
   "field-monitoring",
@@ -1286,6 +1346,37 @@ const guideArticles: GuideArticle[] = [
       "Jangan isi Saldo Awal Cycle dari jumlah hari kalender atau metode Bulanan Kalender; pakai hari kerja valid yang sudah berjalan.",
     ],
     related: ["master-data", "biofinger-device", "payroll"],
+  },
+  {
+    id: "shift-schedules",
+    viewId: "shift-schedules",
+    title: "Jadwal Shift Harian",
+    group: "Absensi",
+    summary: "Mengatur perubahan shift karyawan per tanggal tanpa mengubah default shift di master karyawan.",
+    icon: CalendarCheck2,
+    audience: "HR, Supervisor",
+    frequency: "Saat ada rotasi shift mingguan atau jadwal khusus",
+    tags: ["shift", "jadwal", "snapshot", "payroll"],
+    steps: [
+      "Buka Jadwal Shift dari sidebar Operasional.",
+      "Pilih tanggal kerja yang ingin diatur.",
+      "Cari karyawan atau filter divisi agar daftar lebih fokus.",
+      "Klik Atur Jadwal, lalu pilih shift dan lokasi kerja untuk tanggal tersebut.",
+      "Simpan jadwal harian. DMS akan refresh summary absensi tanggal itu dan payroll cycle terkait.",
+      "Jika jadwal khusus dibatalkan, DMS kembali memakai default shift dari data karyawan.",
+    ],
+    checks: [
+      "Default shift karyawan tetap di modul Karyawan sebagai fallback.",
+      "Jadwal harian hanya dibuat untuk tanggal yang benar-benar berubah.",
+      "Absensi yang sudah masuk menyimpan snapshot shift agar history tidak berubah saat master karyawan diedit.",
+      "Setiap perubahan jadwal punya catatan yang mudah diaudit.",
+    ],
+    pitfalls: [
+      "Jangan mengganti default shift karyawan untuk rotasi satu hari atau satu minggu pendek.",
+      "Jangan membuat jadwal harian tanpa memilih shift aktif.",
+      "Setelah mengubah jadwal untuk tanggal yang sudah ada absensi, cek ulang Live/Rekap agar settlement sesuai.",
+    ],
+    related: ["employees", "attendance-live", "attendance-requests", "payroll"],
   },
   {
     id: "attendance-requests",
@@ -1612,6 +1703,7 @@ const viewPermissionMap: Partial<Record<ViewId, ViewPermissionRequirement>> = {
   "kiosk-mode": "attendance.view",
   biofinger: "biofinger.view",
   employees: "employees.view",
+  "shift-schedules": "attendance.view",
   "attendance-requests": "attendance.review",
   "attendance-review": ["attendance.review", "overtime.review"],
   "field-monitoring": "attendance.view",
@@ -4567,6 +4659,16 @@ function isMissingPayrollOpeningSchema(error: unknown) {
     || message.includes("schema cache")
 }
 
+function isMissingShiftScheduleSchema(error: unknown) {
+  const errorObject = error && typeof error === "object" ? error as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown } : null
+  const message = `${String(errorObject?.code || "")} ${String(errorObject?.message || "")} ${String(errorObject?.details || "")} ${String(errorObject?.hint || "")}`.toLowerCase()
+
+  return message.includes("employee_shift_schedules")
+    || message.includes("resolve_employee_shift_for_date")
+    || message.includes("schema cache")
+    || message.includes("relation")
+}
+
 function isMissingBiofingerMappingRpc(error: unknown) {
   const errorObject = error && typeof error === "object" ? error as { code?: unknown; message?: unknown; details?: unknown; hint?: unknown } : null
   const message = `${String(errorObject?.message || "")} ${String(errorObject?.details || "")} ${String(errorObject?.hint || "")}`.toLowerCase()
@@ -5517,6 +5619,230 @@ async function loadEmployeeData(): Promise<EmployeeDirectoryData> {
     kioskSchemaReady,
     payrollOpeningSchemaReady,
   }
+}
+
+function mapShiftScheduleStatus(value: unknown): ShiftScheduleStatus {
+  return value === "cancelled" ? "cancelled" : "active"
+}
+
+function createShiftScheduleOption(row: Record<string, unknown>): ShiftScheduleShiftOption {
+  return {
+    id: String(row.id || ""),
+    code: String(row.code || ""),
+    name: String(row.name || ""),
+    isActive: row.is_active !== false,
+    startTime: String(row.start_time || ""),
+    endTime: String(row.end_time || ""),
+    lateToleranceMinutes: Number(row.late_tolerance_minutes || 0),
+    earlyLeaveToleranceMinutes: Number(row.early_leave_tolerance_minutes || 0),
+  }
+}
+
+function getShiftScheduleTimeLabel(shift?: Pick<ShiftScheduleShiftOption, "startTime" | "endTime"> | null) {
+  if (!shift?.startTime || !shift?.endTime) return "Jam belum lengkap"
+  return `${formatShiftClock(shift.startTime)} - ${formatShiftClock(shift.endTime)}`
+}
+
+function getShiftScheduleSourceLabel(row: ShiftScheduleRow) {
+  if (row.scheduleId && row.scheduleStatus === "cancelled") return "Jadwal dibatalkan"
+  if (row.source === "daily_schedule") return "Jadwal harian"
+  if (row.source === "no_shift") return "Belum ada shift"
+  return "Default karyawan"
+}
+
+function getShiftScheduleStatusLabel(row: ShiftScheduleRow) {
+  if (row.scheduleId && row.scheduleStatus === "cancelled") return "Dibatalkan"
+  if (row.source === "daily_schedule") return "Terjadwal"
+  if (row.source === "no_shift") return "Belum siap"
+  return "Fallback"
+}
+
+function getShiftScheduleResolvedShiftName(row: ShiftScheduleRow) {
+  return row.source === "daily_schedule" ? row.scheduleShiftName || "Belum pilih shift" : row.defaultShiftName
+}
+
+function getShiftScheduleResolvedLocationName(row: ShiftScheduleRow) {
+  return row.source === "daily_schedule" ? row.scheduleWorkLocationName || row.defaultWorkLocationName : row.defaultWorkLocationName
+}
+
+function createShiftScheduleFormValues(row: ShiftScheduleRow | null, fallbackDate = getLocalDateKey(), fallbackEmployeeId = ""): ShiftScheduleFormValues {
+  return {
+    employeeId: row?.employeeId || fallbackEmployeeId,
+    scheduleDate: row?.scheduleDate || fallbackDate,
+    shiftId: row?.scheduleShiftId || row?.defaultShiftId || "",
+    workLocationId: row?.scheduleWorkLocationId || row?.defaultWorkLocationId || "",
+    notes: row?.scheduleNotes || "",
+  }
+}
+
+function getShiftScheduleSearchText(row: ShiftScheduleRow) {
+  return [
+    row.employeeCode,
+    row.fullName,
+    row.divisionName,
+    row.defaultShiftName,
+    row.scheduleShiftName,
+    row.defaultWorkLocationName,
+    row.scheduleWorkLocationName,
+    row.scheduleNotes,
+    getShiftScheduleSourceLabel(row),
+  ].join(" ").toLowerCase()
+}
+
+async function loadShiftScheduleData(targetDate = getLocalDateKey()): Promise<ShiftScheduleData> {
+  const [employeeResult, divisionResult, locationResult, shiftResult, scheduleResult] = await Promise.all([
+    supabase
+      .from("employees")
+      .select("id, employee_code, full_name, photo_path, division_id, work_location_id, shift_id, status, deleted_at")
+      .is("deleted_at", null)
+      .order("employee_code", { ascending: true }),
+    supabase.from("divisions").select("id, code, name, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
+    supabase.from("work_locations").select("id, code, name, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
+    supabase.from("shifts").select("id, code, name, start_time, end_time, late_tolerance_minutes, early_leave_tolerance_minutes, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
+    supabase
+      .from("employee_shift_schedules")
+      .select("id, employee_id, schedule_date, shift_id, work_location_id, status, notes, updated_at")
+      .eq("schedule_date", targetDate)
+      .order("updated_at", { ascending: false }),
+  ])
+  const scheduleSchemaReady = !(scheduleResult.error && isMissingShiftScheduleSchema(scheduleResult.error))
+  const error = employeeResult.error || divisionResult.error || locationResult.error || shiftResult.error || (scheduleSchemaReady ? scheduleResult.error : null)
+
+  if (error) throw error
+
+  const divisions = (divisionResult.data || []).map((row) => ({
+    id: String(row.id),
+    code: String(row.code || ""),
+    name: String(row.name || ""),
+    isActive: row.is_active !== false,
+  }))
+  const locations = (locationResult.data || []).map((row) => ({
+    id: String(row.id),
+    code: String(row.code || ""),
+    name: String(row.name || ""),
+    isActive: row.is_active !== false,
+  }))
+  const shifts = ((shiftResult.data || []) as Array<Record<string, unknown>>).map(createShiftScheduleOption)
+  const divisionMap = new Map(divisions.map((item) => [item.id, item]))
+  const locationMap = new Map(locations.map((item) => [item.id, item]))
+  const shiftMap = new Map(shifts.map((item) => [item.id, item]))
+  const scheduleMap = new Map(((scheduleSchemaReady ? scheduleResult.data || [] : []) as Array<Record<string, unknown>>).map((row) => [String(row.employee_id || ""), row]))
+
+  const rows = ((employeeResult.data || []) as Array<Record<string, unknown>>)
+    .filter((employee) => String(employee.status || "active") === "active")
+    .map((employee) => {
+      const employeeId = String(employee.id || "")
+      const defaultShiftId = String(employee.shift_id || "")
+      const defaultLocationId = String(employee.work_location_id || "")
+      const dailySchedule = scheduleMap.get(employeeId)
+      const scheduleStatus = mapShiftScheduleStatus(dailySchedule?.status)
+      const hasActiveSchedule = Boolean(dailySchedule?.id && scheduleStatus === "active")
+      const defaultShift = shiftMap.get(defaultShiftId)
+      const scheduleShiftId = hasActiveSchedule ? String(dailySchedule?.shift_id || "") : ""
+      const scheduleShift = hasActiveSchedule ? shiftMap.get(scheduleShiftId) : undefined
+      const scheduleLocationId = hasActiveSchedule ? String(dailySchedule?.work_location_id || "") : ""
+      const scheduleLocation = hasActiveSchedule ? locationMap.get(scheduleLocationId) : undefined
+      const resolvedShift = scheduleShift || defaultShift
+      const resolvedLocation = scheduleLocation || locationMap.get(defaultLocationId)
+
+      return {
+        id: `${employeeId}:${targetDate}`,
+        employeeId,
+        employeeCode: String(employee.employee_code || ""),
+        fullName: String(employee.full_name || ""),
+        photoUrl: getEmployeePhotoPublicUrl(String(employee.photo_path || "")),
+        divisionId: String(employee.division_id || ""),
+        divisionName: divisionMap.get(String(employee.division_id || ""))?.name || "Belum pilih divisi",
+        defaultShiftId,
+        defaultShiftName: defaultShift?.name || "Belum pilih shift",
+        defaultShiftStartTime: defaultShift?.startTime || "",
+        defaultShiftEndTime: defaultShift?.endTime || "",
+        defaultWorkLocationId: defaultLocationId,
+        defaultWorkLocationName: locationMap.get(defaultLocationId)?.name || "Belum pilih lokasi",
+        scheduleId: String(dailySchedule?.id || ""),
+        scheduleDate: String(dailySchedule?.schedule_date || targetDate),
+        scheduleShiftId,
+        scheduleShiftName: scheduleShift?.name || "",
+        scheduleShiftStartTime: scheduleShift?.startTime || "",
+        scheduleShiftEndTime: scheduleShift?.endTime || "",
+        scheduleWorkLocationId: scheduleLocationId,
+        scheduleWorkLocationName: scheduleLocation?.name || "",
+        scheduleStatus,
+        scheduleNotes: String(dailySchedule?.notes || ""),
+        source: hasActiveSchedule ? "daily_schedule" : resolvedShift ? "employee_default" : "no_shift",
+        updatedAt: String(dailySchedule?.updated_at || ""),
+        resolvedShift,
+        resolvedLocation,
+      } as ShiftScheduleRow
+    })
+
+  return { rows, divisions, locations, shifts, schemaReady: scheduleSchemaReady }
+}
+
+function validateShiftScheduleForm(values: ShiftScheduleFormValues) {
+  const errors: string[] = []
+
+  if (!values.employeeId) errors.push("Karyawan wajib dipilih.")
+  if (!values.scheduleDate || !/^\d{4}-\d{2}-\d{2}$/.test(values.scheduleDate)) errors.push("Tanggal jadwal wajib valid.")
+  if (!values.shiftId) errors.push("Shift wajib dipilih.")
+
+  return errors
+}
+
+async function saveEmployeeShiftSchedule(values: ShiftScheduleFormValues, editingRow?: ShiftScheduleRow | null) {
+  const errors = validateShiftScheduleForm(values)
+  if (errors.length) throw new Error(errors[0])
+
+  const payload = {
+    employee_id: values.employeeId,
+    schedule_date: values.scheduleDate,
+    shift_id: values.shiftId,
+    work_location_id: values.workLocationId || null,
+    status: "active",
+    notes: values.notes.trim() || null,
+  }
+  const { error } = await supabase
+    .from("employee_shift_schedules")
+    .upsert(payload, { onConflict: "employee_id,schedule_date" })
+
+  if (error) throw error
+
+  await supabase.rpc("refresh_attendance_daily_summary", {
+    target_employee_id: values.employeeId,
+    target_attendance_date: values.scheduleDate,
+  }).then(({ error: refreshError }) => {
+    if (refreshError) throw refreshError
+  })
+  await refreshEmployeePayrollCyclesSilently(values.employeeId)
+  await writeAuditLog(editingRow?.scheduleId ? "Update employee shift schedule" : "Create employee shift schedule", "employee_shift_schedules", editingRow?.scheduleId || values.employeeId, {
+    employee_id: values.employeeId,
+    schedule_date: values.scheduleDate,
+    shift_id: values.shiftId,
+    work_location_id: values.workLocationId || null,
+  }).catch(() => {})
+}
+
+async function cancelEmployeeShiftSchedule(row: ShiftScheduleRow) {
+  if (!row.scheduleId) return
+
+  const { error } = await supabase
+    .from("employee_shift_schedules")
+    .update({ status: "cancelled" })
+    .eq("id", row.scheduleId)
+
+  if (error) throw error
+
+  await supabase.rpc("refresh_attendance_daily_summary", {
+    target_employee_id: row.employeeId,
+    target_attendance_date: row.scheduleDate,
+  }).then(({ error: refreshError }) => {
+    if (refreshError) throw refreshError
+  })
+  await refreshEmployeePayrollCyclesSilently(row.employeeId)
+  await writeAuditLog("Cancel employee shift schedule", "employee_shift_schedules", row.scheduleId, {
+    employee_id: row.employeeId,
+    schedule_date: row.scheduleDate,
+  }).catch(() => {})
 }
 
 function createEmployeePayload(values: EmployeeFormValues, photoPath = values.photoPath) {
@@ -7618,7 +7944,15 @@ const passwordActionCopy: Record<PasswordActionType, { action: string; confirm: 
   },
 }
 
-function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: AppAccessProfile }) {
+function EmployeesPage({
+  activeView,
+  profile,
+  onOpenShiftSchedule,
+}: {
+  activeView: ViewId
+  profile: AppAccessProfile
+  onOpenShiftSchedule?: (employeeId: string) => void
+}) {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingRow, setEditingRow] = useState<EmployeeDirectoryRow | null>(null)
   const [detailRow, setDetailRow] = useState<EmployeeDirectoryRow | null>(null)
@@ -8117,6 +8451,10 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
                                 <CreditCard size={14} />
                                 Cetak Nametag
                               </RowActionMenuItem>
+                              <RowActionMenuItem disabled={!onOpenShiftSchedule || saving} onClick={() => onOpenShiftSchedule?.(row.id)}>
+                                <CalendarCheck2 size={14} />
+                                Jadwal Shift
+                              </RowActionMenuItem>
                               <RowActionMenuItem disabled={!canManage || saving || row.status === "active"} onClick={() => openStatusDialog(row, "active")}>
                                 <FileCheck2 size={14} />
                                 Aktifkan
@@ -8175,6 +8513,7 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
         onEdit={(row) => openEditDialog(row)}
         onRestore={(row) => setRestoreRow(row)}
         onNametag={(row) => setNametagRow(row)}
+        onShiftSchedule={onOpenShiftSchedule}
         onFaceEnroll={(row) => setFaceEnrollmentRow(row)}
         onFaceAction={handleFaceProfileAction}
         canManage={canManage}
@@ -8274,6 +8613,622 @@ function EmployeesPage({ activeView, profile }: { activeView: ViewId; profile: A
       </ConfirmDialog>
       <ToastViewport toast={toast} onClose={() => setToast(null)} />
     </OperationalPageShell>
+  )
+}
+
+type ShiftScheduleTab = "all" | "daily" | "default" | "missing" | "cancelled"
+
+function ShiftScheduleStatusBadge({ row }: { row: ShiftScheduleRow }) {
+  if (row.scheduleId && row.scheduleStatus === "cancelled") return <UiStatusBadge tone="failed">Dibatalkan</UiStatusBadge>
+  if (row.source === "daily_schedule") return <UiStatusBadge tone="valid">Jadwal Khusus</UiStatusBadge>
+  if (row.source === "no_shift") return <UiStatusBadge tone="failed">Belum Ada Shift</UiStatusBadge>
+  return <UiStatusBadge tone="missing">Default</UiStatusBadge>
+}
+
+function ShiftSchedulesPage({
+  activeView,
+  profile,
+  focusEmployeeId,
+  onFocusHandled,
+  onOpenGuide,
+}: {
+  activeView: ViewId
+  profile: AppAccessProfile
+  focusEmployeeId?: string
+  onFocusHandled?: () => void
+  onOpenGuide?: (guideId?: string) => void
+}) {
+  const [selectedDate, setSelectedDate] = useState(getLocalDateKey())
+  const [dateMode, setDateMode] = useState<AttendanceDateMode>("today")
+  const [searchTerm, setSearchTerm] = useState("")
+  const [divisionFilter, setDivisionFilter] = useState("all")
+  const [sourceFilter, setSourceFilter] = useState<ShiftScheduleTab>("all")
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [editingRow, setEditingRow] = useState<ShiftScheduleRow | null>(null)
+  const [cancelRow, setCancelRow] = useState<ShiftScheduleRow | null>(null)
+  const [formValues, setFormValues] = useState<ShiftScheduleFormValues>(() => createShiftScheduleFormValues(null))
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
+  const [saving, setSaving] = useState(false)
+  const [errorMessage, setErrorMessage] = useState("")
+  const [toast, setToast] = useState<ToastMessage | null>(null)
+  const scheduleCacheKey = useMemo(() => `shift-schedules:${selectedDate}`, [selectedDate])
+  const loadScheduleData = useCallback(() => loadShiftScheduleData(selectedDate), [selectedDate])
+  const {
+    data,
+    loading,
+    refreshing,
+    error: scheduleLoadError,
+    reload: reloadScheduleData,
+  } = useFoundationCachedData<ShiftScheduleData>({
+    cacheKey: scheduleCacheKey,
+    createInitialData: createEmptyShiftScheduleData,
+    load: loadScheduleData,
+    revalidateOnCache: true,
+  })
+  const canManage = hasPermission(profile, "attendance.review") || hasPermission(profile, "employees.manage") || hasPermission(profile, "master_data.manage")
+  const tableDrag = useHorizontalDragScroll<HTMLDivElement>()
+
+  const refreshData = useCallback(async () => {
+    setErrorMessage("")
+
+    try {
+      await reloadScheduleData({ silent: !loading, load: loadScheduleData })
+    } catch (error) {
+      setErrorMessage(getFriendlySupabaseError(error, "Gagal mengambil jadwal shift."))
+    }
+  }, [loadScheduleData, loading, reloadScheduleData])
+
+  useEffect(() => {
+    if (scheduleLoadError) setErrorMessage(getFriendlySupabaseError(scheduleLoadError, "Gagal mengambil jadwal shift."))
+  }, [scheduleLoadError])
+
+  useEffect(() => {
+    setPage(1)
+  }, [searchTerm, divisionFilter, sourceFilter, selectedDate, pageSize])
+
+  useEffect(() => {
+    if (!focusEmployeeId) return
+    if (loading) return
+
+    const focusedRow = data.rows.find((row) => row.employeeId === focusEmployeeId)
+    if (focusedRow) {
+      setSearchTerm(`${focusedRow.employeeCode} ${focusedRow.fullName}`)
+      setEditingRow(focusedRow)
+      setFormValues(createShiftScheduleFormValues(focusedRow, selectedDate))
+      setDialogOpen(true)
+    } else {
+      setSearchTerm(focusEmployeeId)
+    }
+    onFocusHandled?.()
+  }, [data.rows, focusEmployeeId, loading, onFocusHandled, selectedDate])
+
+  const showToast = (message: Omit<ToastMessage, "id">) => {
+    setToast({ ...message, id: Date.now() })
+  }
+
+  const openCreateDialog = (row?: ShiftScheduleRow) => {
+    const nextRow = row || null
+    setEditingRow(nextRow)
+    setFormValues(createShiftScheduleFormValues(nextRow, selectedDate))
+    setDialogOpen(true)
+  }
+
+  const closeDialog = () => {
+    if (saving) return
+    setDialogOpen(false)
+    setEditingRow(null)
+  }
+
+  const handleDateChange = (nextDate: string, nextMode: AttendanceDateMode) => {
+    setSelectedDate(nextDate)
+    setDateMode(nextMode === "today" || nextMode === "yesterday" ? nextMode : "day")
+  }
+
+  const handleSubmitSchedule = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setSaving(true)
+    setErrorMessage("")
+
+    try {
+      await saveEmployeeShiftSchedule(formValues, editingRow)
+      setDialogOpen(false)
+      setEditingRow(null)
+      if (formValues.scheduleDate !== selectedDate) setSelectedDate(formValues.scheduleDate)
+      await reloadScheduleData({
+        cacheKey: `shift-schedules:${formValues.scheduleDate}`,
+        silent: true,
+        load: () => loadShiftScheduleData(formValues.scheduleDate),
+      })
+      showToast({
+        tone: "success",
+        title: "Jadwal shift tersimpan",
+        description: "Summary absensi tanggal ini sudah dihitung ulang.",
+      })
+    } catch (error) {
+      const message = getFriendlySupabaseError(error, "Jadwal shift belum bisa disimpan.")
+      setErrorMessage(message)
+      showToast({ tone: "error", title: "Gagal menyimpan jadwal", description: message })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleCancelSchedule = async () => {
+    if (!cancelRow) return
+    setSaving(true)
+    setErrorMessage("")
+
+    try {
+      await cancelEmployeeShiftSchedule(cancelRow)
+      setCancelRow(null)
+      await refreshData()
+      showToast({
+        tone: "success",
+        title: "Jadwal khusus dibatalkan",
+        description: `${cancelRow.fullName} kembali memakai default shift untuk ${formatEmployeeDate(cancelRow.scheduleDate)}.`,
+      })
+    } catch (error) {
+      const message = getFriendlySupabaseError(error, "Jadwal khusus belum bisa dibatalkan.")
+      setErrorMessage(message)
+      showToast({ tone: "error", title: "Gagal membatalkan jadwal", description: message })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const normalizedSearch = searchTerm.trim().toLowerCase()
+  const filteredRows = data.rows.filter((row) => {
+    const matchesSearch = normalizedSearch ? getShiftScheduleSearchText(row).includes(normalizedSearch) : true
+    const matchesDivision = divisionFilter === "all" || row.divisionId === divisionFilter
+    const matchesSource = sourceFilter === "all"
+      || (sourceFilter === "daily" && row.source === "daily_schedule")
+      || (sourceFilter === "default" && row.source === "employee_default" && row.scheduleStatus !== "cancelled")
+      || (sourceFilter === "missing" && row.source === "no_shift")
+      || (sourceFilter === "cancelled" && Boolean(row.scheduleId && row.scheduleStatus === "cancelled"))
+
+    return matchesSearch && matchesDivision && matchesSource
+  })
+  const pageCount = Math.max(1, Math.ceil(filteredRows.length / Math.min(pageSize, 50)))
+  const currentPage = Math.min(page, pageCount)
+  const paginatedRows = filteredRows.slice((currentPage - 1) * Math.min(pageSize, 50), currentPage * Math.min(pageSize, 50))
+  const dailyRows = data.rows.filter((row) => row.source === "daily_schedule").length
+  const defaultRows = data.rows.filter((row) => row.source === "employee_default" && row.scheduleStatus !== "cancelled").length
+  const missingRows = data.rows.filter((row) => row.source === "no_shift").length
+  const cancelledRows = data.rows.filter((row) => row.scheduleId && row.scheduleStatus === "cancelled").length
+  const activeShiftCount = data.shifts.filter((shift) => shift.isActive).length
+  const activeLocationCount = data.locations.filter((location) => location.isActive).length
+  const renderCount = (value: number) => loading ? <FoundationSkeleton className="tabCount" /> : value
+  const shiftScheduleTabs = [
+    { id: "all", label: "Semua", icon: CalendarCheck2, count: renderCount(data.rows.length) },
+    { id: "daily", label: "Jadwal Khusus", icon: FileCheck2, count: renderCount(dailyRows) },
+    { id: "default", label: "Default", icon: UsersRound, count: renderCount(defaultRows) },
+    { id: "missing", label: "Belum Shift", icon: AlertTriangle, count: renderCount(missingRows) },
+    { id: "cancelled", label: "Dibatalkan", icon: RotateCcw, count: renderCount(cancelledRows) },
+  ]
+  const divisionOptions = [
+    { value: "all", label: "Semua Divisi", searchLabel: "semua divisi" },
+    ...data.divisions.map((division) => ({
+      value: division.id,
+      label: division.name,
+      searchLabel: `${division.name} ${division.code}`,
+      description: division.code,
+    })),
+  ]
+  const sourceOptions = [
+    { value: "all", label: "Semua Jadwal", searchLabel: "semua jadwal" },
+    { value: "daily", label: "Jadwal Khusus", searchLabel: "jadwal khusus harian" },
+    { value: "default", label: "Default Karyawan", searchLabel: "default karyawan" },
+    { value: "missing", label: "Belum Ada Shift", searchLabel: "belum ada shift" },
+    { value: "cancelled", label: "Dibatalkan", searchLabel: "dibatalkan cancelled" },
+  ]
+  const headerStats: ReactNode[] = loading
+    ? Array.from({ length: 5 }).map((_, index) => <FoundationSkeleton className={clsx("inline", index === 0 && "wide")} key={index} />)
+    : [
+        `${data.rows.length} karyawan aktif`,
+        `${dailyRows} jadwal khusus`,
+        `${defaultRows} pakai default`,
+        `${missingRows} belum ada shift`,
+        `${formatEmployeeDate(selectedDate)}`,
+      ]
+
+  return (
+    <OperationalPageShell>
+      <PageHeader
+        activeView={activeView}
+        subtitle="Atur rotasi shift per tanggal tanpa mengubah default shift karyawan. Summary absensi menyimpan snapshot shift yang dipakai hari itu."
+        meta={<InlinePageStats items={headerStats} />}
+        actions={
+          <>
+            <button className="secondaryButton" type="button" onClick={() => onOpenGuide?.("shift-schedules")}>
+              <ClipboardList size={17} />
+              Panduan Jadwal
+            </button>
+            <FoundationRefreshButton loading={refreshing} onClick={refreshData} />
+            <button className="primaryButton" type="button" onClick={() => openCreateDialog()} disabled={!canManage || !data.schemaReady}>
+              <CalendarCheck2 size={17} />
+              Tambah Jadwal
+            </button>
+          </>
+        }
+      />
+
+      <section className="moduleGrid shiftSchedulePage">
+        {errorMessage && <div className="inlineAlert">{errorMessage}</div>}
+        {!data.schemaReady && (
+          <div className="inlineAlert">
+            Migration jadwal shift belum aktif di database. Terapkan migration terbaru agar jadwal harian bisa disimpan.
+          </div>
+        )}
+
+        <OperationalKpiGrid>
+          <OperationalKpiCard label="Jadwal Khusus" value={loading ? <FoundationSkeleton className="kpiValue" /> : dailyRows} detail={formatEmployeeDate(selectedDate)} icon={CalendarCheck2} tone="blue" />
+          <OperationalKpiCard label="Pakai Default" value={loading ? <FoundationSkeleton className="kpiValue" /> : defaultRows} detail="Fallback dari data karyawan" icon={UsersRound} tone="green" />
+          <OperationalKpiCard label="Belum Ada Shift" value={loading ? <FoundationSkeleton className="kpiValue" /> : missingRows} detail="Perlu lengkapi master karyawan" icon={AlertTriangle} tone="amber" />
+          <OperationalKpiCard label="Referensi Aktif" value={loading ? <FoundationSkeleton className="kpiValue" /> : `${activeShiftCount}/${activeLocationCount}`} detail="Shift / lokasi kerja" icon={MapPin} tone="violet" />
+        </OperationalKpiGrid>
+
+        <OperationalFilterPanel className="shiftScheduleFilterPanel">
+          <div className="filterField shiftScheduleDateField">
+            <label>Tanggal</label>
+            <DateModePicker value={selectedDate} mode={dateMode} onChange={handleDateChange} />
+          </div>
+          <div className="filterField">
+            <label>Search</label>
+            <div className="uiInput inputWithIcon compact">
+              <Search size={16} />
+              <input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Cari karyawan, shift, lokasi..." />
+            </div>
+          </div>
+          <div className="filterField">
+            <label>Divisi</label>
+            <FoundationSelect label="Filter divisi jadwal shift" value={divisionFilter} options={divisionOptions} searchable={divisionOptions.length > 8} onChange={setDivisionFilter} />
+          </div>
+          <div className="filterField">
+            <label>Status Jadwal</label>
+            <FoundationSelect label="Filter status jadwal shift" value={sourceFilter} options={sourceOptions} onChange={(value) => setSourceFilter(value as ShiftScheduleTab)} />
+          </div>
+          <button className="secondaryButton" type="button" onClick={() => {
+            setSearchTerm("")
+            setDivisionFilter("all")
+            setSourceFilter("all")
+          }}>
+            Reset Filter
+          </button>
+        </OperationalFilterPanel>
+
+        <CategoryTabs
+          activeId={sourceFilter}
+          ariaLabel="Filter sumber jadwal shift"
+          items={shiftScheduleTabs}
+          onChange={(id) => setSourceFilter(id as ShiftScheduleTab)}
+        />
+
+        <OperationalTableCard>
+          <div className="tableHeader">
+            <div>
+              <h2>Jadwal Shift Karyawan</h2>
+              <p>Satu baris adalah jadwal karyawan untuk tanggal terpilih. Jadwal khusus menimpa default karyawan hanya pada tanggal itu.</p>
+            </div>
+            <InlinePageStats items={loading ? [<FoundationSkeleton className="inline wide" key="loading" />] : [`${filteredRows.length} tampil`, `${dailyRows} khusus`, `${missingRows} perlu setup`]} />
+          </div>
+          <div
+            ref={tableDrag.ref}
+            className={clsx("tableScroller uiDataTableScroller uiDataTableHasColumns shiftScheduleTableScroller", tableDrag.dragging && "dragging")}
+            {...tableDrag.handlers}
+          >
+            <table>
+              <colgroup>
+                <col className="tableNumberColumn" />
+                <col style={{ width: "20%" }} />
+                <col style={{ width: "13%" }} />
+                <col style={{ width: "16%" }} />
+                <col style={{ width: "16%" }} />
+                <col style={{ width: "15%" }} />
+                <col style={{ width: "12%" }} />
+                <col style={{ width: "10%" }} />
+                <col className="tableActionColumn" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th className="tableNumberHeader">No</th>
+                  <th>Karyawan</th>
+                  <th>Divisi</th>
+                  <th>Default Shift</th>
+                  <th>Jadwal Tanggal Ini</th>
+                  <th>Lokasi Kerja</th>
+                  <th>Sumber</th>
+                  <th>Status</th>
+                  <th className="tableActionHeader">Aksi</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading && <FoundationTableSkeletonRows colSpan={9} columns={9} rows={6} />}
+                {!loading && errorMessage && data.rows.length === 0 && (
+                  <tr>
+                    <td className="tableStateCell" colSpan={9}>
+                      <TableState title="Gagal memuat jadwal" description={errorMessage} icon={AlertTriangle} tone="danger" />
+                    </td>
+                  </tr>
+                )}
+                {!loading && !errorMessage && filteredRows.length === 0 && (
+                  <tr>
+                    <td className="tableStateCell" colSpan={9}>
+                      <TableState title="Jadwal tidak ditemukan" description="Ubah filter atau buat jadwal khusus untuk tanggal ini." icon={Search} />
+                    </td>
+                  </tr>
+                )}
+                {!loading && paginatedRows.map((row, index) => {
+                  const resolvedShiftName = getShiftScheduleResolvedShiftName(row)
+                  const resolvedLocationName = getShiftScheduleResolvedLocationName(row)
+                  const resolvedTimeLabel = row.source === "daily_schedule"
+                    ? getShiftScheduleTimeLabel({ startTime: row.scheduleShiftStartTime, endTime: row.scheduleShiftEndTime })
+                    : getShiftScheduleTimeLabel({ startTime: row.defaultShiftStartTime, endTime: row.defaultShiftEndTime })
+
+                  return (
+                    <ClickableTableRow key={row.id} label={`Atur jadwal ${row.fullName}`} onOpen={() => openCreateDialog(row)}>
+                      <td className="tableNumberCell"><TableNumberCell value={(currentPage - 1) * Math.min(pageSize, 50) + index + 1} /></td>
+                      <td><EmployeeIdentityCell fullName={row.fullName} code={row.employeeCode} photoUrl={row.photoUrl} onOpen={() => openCreateDialog(row)} /></td>
+                      <td><TableText primary={row.divisionName} secondary={row.divisionId ? "Aktif" : "Belum dipilih"} /></td>
+                      <td><TableText primary={row.defaultShiftName} secondary={getShiftScheduleTimeLabel({ startTime: row.defaultShiftStartTime, endTime: row.defaultShiftEndTime })} /></td>
+                      <td><TableText primary={resolvedShiftName} secondary={resolvedTimeLabel} /></td>
+                      <td><TableText primary={resolvedLocationName} secondary={row.source === "daily_schedule" && row.scheduleWorkLocationId ? "Override lokasi" : "Lokasi default"} /></td>
+                      <td><TableText primary={getShiftScheduleSourceLabel(row)} secondary={row.updatedAt ? `Update ${formatUserDateTime(row.updatedAt, "-")}` : "Belum ada override"} /></td>
+                      <td><ShiftScheduleStatusBadge row={row} /></td>
+                      <td className="tableActionCell">
+                        <div className="rowActions">
+                          <RowActionMenu label={`Aksi jadwal ${row.fullName}`}>
+                            <RowActionMenuItem disabled={!canManage || !data.schemaReady || saving} onClick={() => openCreateDialog(row)}>
+                              <CalendarCheck2 size={14} />
+                              Atur Jadwal
+                            </RowActionMenuItem>
+                            <RowActionMenuItem danger disabled={!canManage || !row.scheduleId || row.scheduleStatus === "cancelled" || saving} onClick={() => setCancelRow(row)}>
+                              <RotateCcw size={14} />
+                              Batalkan Khusus
+                            </RowActionMenuItem>
+                          </RowActionMenu>
+                        </div>
+                      </td>
+                    </ClickableTableRow>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+          <DataTablePagination
+            page={currentPage}
+            pageSize={pageSize}
+            totalRows={filteredRows.length}
+            onPageChange={setPage}
+            onPageSizeChange={(value) => setPageSize(Math.min(value, 50))}
+          />
+        </OperationalTableCard>
+      </section>
+
+      <ShiftScheduleDialog
+        open={dialogOpen}
+        row={editingRow}
+        values={formValues}
+        rows={data.rows}
+        shifts={data.shifts}
+        locations={data.locations}
+        saving={saving}
+        schemaReady={data.schemaReady}
+        onChange={setFormValues}
+        onClose={closeDialog}
+        onSubmit={handleSubmitSchedule}
+      />
+      <ConfirmDialog
+        open={Boolean(cancelRow)}
+        tone="warning"
+        icon={RotateCcw}
+        eyebrow="Batalkan Jadwal Khusus"
+        title={cancelRow ? `Kembalikan ${cancelRow.fullName} ke default shift?` : "Batalkan jadwal khusus?"}
+        description="Jadwal khusus tanggal ini akan dibatalkan, lalu summary absensi dan payroll cycle dihitung ulang memakai default karyawan."
+        confirmLabel="Batalkan Jadwal"
+        cancelLabel="Tutup"
+        loading={saving}
+        onClose={() => {
+          if (!saving) setCancelRow(null)
+        }}
+        onConfirm={() => void handleCancelSchedule()}
+      >
+        {cancelRow && (
+          <div className="confirmDialogPreview">
+            <span>{formatEmployeeDate(cancelRow.scheduleDate)}</span>
+            <strong>{cancelRow.fullName}</strong>
+            <small>{cancelRow.scheduleShiftName || cancelRow.defaultShiftName} - {cancelRow.scheduleWorkLocationName || cancelRow.defaultWorkLocationName}</small>
+          </div>
+        )}
+      </ConfirmDialog>
+      <ToastViewport toast={toast} onClose={() => setToast(null)} />
+    </OperationalPageShell>
+  )
+}
+
+function ShiftScheduleDialog({
+  open,
+  row,
+  values,
+  rows,
+  shifts,
+  locations,
+  saving,
+  schemaReady,
+  onChange,
+  onClose,
+  onSubmit,
+}: {
+  open: boolean
+  row: ShiftScheduleRow | null
+  values: ShiftScheduleFormValues
+  rows: ShiftScheduleRow[]
+  shifts: ShiftScheduleShiftOption[]
+  locations: EmployeeOption[]
+  saving: boolean
+  schemaReady: boolean
+  onChange: (values: ShiftScheduleFormValues) => void
+  onClose: () => void
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void
+}) {
+  const selectedEmployee = rows.find((item) => item.employeeId === values.employeeId) || row || null
+  const selectedShift = shifts.find((shift) => shift.id === values.shiftId) || null
+  const selectedLocation = locations.find((location) => location.id === values.workLocationId) || null
+  const employeeOptions = rows.map((employee) => ({
+    value: employee.employeeId,
+    label: employee.fullName,
+    description: `${employee.employeeCode} - ${employee.divisionName}`,
+    searchLabel: `${employee.employeeCode} ${employee.fullName} ${employee.divisionName}`,
+  }))
+  const shiftOptions = shifts
+    .filter((shift) => shift.isActive || shift.id === values.shiftId)
+    .map((shift) => ({
+      value: shift.id,
+      label: shift.name,
+      description: `${shift.code} - ${getShiftScheduleTimeLabel(shift)}`,
+      searchLabel: `${shift.code} ${shift.name} ${shift.startTime} ${shift.endTime}`,
+    }))
+  const locationOptions = [
+    {
+      value: "",
+      label: "Ikuti lokasi default",
+      description: selectedEmployee?.defaultWorkLocationName || "Lokasi dari data karyawan",
+      searchLabel: "default lokasi karyawan",
+    },
+    ...locations
+      .filter((location) => location.isActive || location.id === values.workLocationId)
+      .map((location) => ({
+        value: location.id,
+        label: location.name,
+        description: location.code,
+        searchLabel: `${location.code} ${location.name}`,
+      })),
+  ]
+  const selectedDefaultShiftTime = selectedEmployee
+    ? getShiftScheduleTimeLabel({ startTime: selectedEmployee.defaultShiftStartTime, endTime: selectedEmployee.defaultShiftEndTime })
+    : "Pilih karyawan dulu"
+  const selectedScheduleTime = selectedShift ? getShiftScheduleTimeLabel(selectedShift) : "Pilih shift"
+
+  const handleEmployeeChange = (employeeId: string) => {
+    const employee = rows.find((item) => item.employeeId === employeeId)
+    onChange({
+      ...values,
+      employeeId,
+      shiftId: values.shiftId || employee?.defaultShiftId || "",
+      workLocationId: values.workLocationId || employee?.defaultWorkLocationId || "",
+    })
+  }
+
+  return (
+    <FoundationDialog
+      open={open}
+      labelledBy="shift-schedule-dialog-title"
+      describedBy="shift-schedule-dialog-description"
+      className="shiftScheduleDialog"
+      onClose={onClose}
+    >
+      <form className="shiftScheduleDialogShell" onSubmit={onSubmit}>
+        <div className="shiftScheduleDialogHeader">
+          <span className="dialogHeaderIcon">
+            <CalendarCheck2 size={22} />
+          </span>
+          <div>
+            <span>Jadwal Shift</span>
+            <h2 id="shift-schedule-dialog-title">{row?.scheduleId ? "Edit Jadwal Harian" : "Tambah Jadwal Harian"}</h2>
+            <p id="shift-schedule-dialog-description">Dipakai saat karyawan pindah shift/lokasi pada tanggal tertentu. Default karyawan tetap menjadi fallback.</p>
+          </div>
+          <FoundationDialogCloseButton label="Tutup jadwal shift" onClose={onClose} disabled={saving} />
+        </div>
+
+        <div className="shiftScheduleDialogBody">
+          {!schemaReady && (
+            <div className="inlineAlert">
+              Migration jadwal shift belum aktif, jadi perubahan belum bisa disimpan ke database.
+            </div>
+          )}
+
+          <section className="shiftSchedulePreview">
+            <div>
+              <small>Karyawan</small>
+              <strong>{selectedEmployee?.fullName || "Belum pilih karyawan"}</strong>
+              <span>{selectedEmployee ? `${selectedEmployee.employeeCode} - ${selectedEmployee.divisionName}` : "Pilih karyawan aktif"}</span>
+            </div>
+            <div>
+              <small>Default karyawan</small>
+              <strong>{selectedEmployee?.defaultShiftName || "Belum ada shift"}</strong>
+              <span>{selectedDefaultShiftTime}</span>
+            </div>
+            <div className="active">
+              <small>Jadwal tanggal ini</small>
+              <strong>{selectedShift?.name || "Belum pilih shift"}</strong>
+              <span>{selectedScheduleTime}</span>
+            </div>
+          </section>
+
+          <div className="shiftScheduleFormGrid">
+            <FormField label="Karyawan" required>
+              <FoundationSelect
+                label="Pilih karyawan jadwal shift"
+                value={values.employeeId}
+                options={employeeOptions}
+                placeholder="Pilih karyawan"
+                searchable
+                onChange={handleEmployeeChange}
+                disabled={saving}
+              />
+            </FormField>
+            <DateFormField
+              label="Tanggal Jadwal"
+              value={values.scheduleDate}
+              onChange={(scheduleDate) => onChange({ ...values, scheduleDate })}
+              required
+              disabled={saving}
+            />
+            <FormField label="Shift" required>
+              <FoundationSelect
+                label="Pilih shift harian"
+                value={values.shiftId}
+                options={shiftOptions}
+                placeholder="Pilih shift"
+                searchable={shiftOptions.length > 8}
+                onChange={(shiftId) => onChange({ ...values, shiftId })}
+                disabled={saving}
+              />
+            </FormField>
+            <FormField label="Lokasi Kerja">
+              <FoundationSelect
+                label="Pilih lokasi kerja jadwal"
+                value={values.workLocationId}
+                options={locationOptions}
+                placeholder="Ikuti lokasi default"
+                searchable={locationOptions.length > 8}
+                onChange={(workLocationId) => onChange({ ...values, workLocationId })}
+                disabled={saving}
+              />
+            </FormField>
+            <div className="shiftScheduleNotesField">
+              <FormField label="Catatan">
+                <textarea
+                  value={values.notes}
+                  onChange={(event) => onChange({ ...values, notes: event.target.value })}
+                  placeholder="Contoh: rotasi gudang A, tukar shift minggu ini, atau backup produksi"
+                  disabled={saving}
+                  rows={3}
+                />
+              </FormField>
+            </div>
+          </div>
+        </div>
+
+        <div className="dialogActions shiftScheduleDialogActions">
+          <button className="secondaryButton" type="button" onClick={onClose} disabled={saving}>Batal</button>
+          <button className="primaryButton" type="submit" disabled={saving || !schemaReady}>
+            <FileCheck2 size={17} />
+            {saving ? "Menyimpan..." : "Simpan Jadwal"}
+          </button>
+        </div>
+      </form>
+    </FoundationDialog>
   )
 }
 
@@ -10848,6 +11803,7 @@ function EmployeeDetailDialog({
   onEdit,
   onRestore,
   onNametag,
+  onShiftSchedule,
   onFaceEnroll,
   onFaceAction,
 }: {
@@ -10858,6 +11814,7 @@ function EmployeeDetailDialog({
   onEdit: (row: EmployeeDirectoryRow) => void
   onRestore: (row: EmployeeDirectoryRow) => void
   onNametag: (row: EmployeeDirectoryRow) => void
+  onShiftSchedule?: (employeeId: string) => void
   onFaceEnroll: (row: EmployeeDirectoryRow) => void
   onFaceAction: (row: EmployeeDirectoryRow, action: "approve" | "reject" | "reset" | "disable") => Promise<void>
 }) {
@@ -11072,6 +12029,10 @@ function EmployeeDetailDialog({
           <button className="secondaryButton" type="button" onClick={() => onNametag(row)}>
             <Printer size={16} />
             Nametag
+          </button>
+          <button className="secondaryButton" type="button" disabled={!onShiftSchedule || Boolean(row.deletedAt)} onClick={() => onShiftSchedule?.(row.id)}>
+            <CalendarCheck2 size={16} />
+            Jadwal Shift
           </button>
           {row.deletedAt ? (
             <button className="primaryButton" type="button" disabled={!canManage || saving} onClick={() => onRestore(row)}>
@@ -19887,6 +20848,7 @@ export function App() {
   const [authError, setAuthError] = useState("")
   const [activeView, setActiveView] = useState<ViewId>("dashboard")
   const [guideFocusId, setGuideFocusId] = useState("")
+  const [shiftScheduleFocusEmployeeId, setShiftScheduleFocusEmployeeId] = useState("")
   const [collapsed, setCollapsed] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const activeLabel = navItems.find((item) => item.id === activeView)?.label || "Dashboard"
@@ -20122,10 +21084,25 @@ export function App() {
             <KioskModePage activeView={activeView} />
           ) : activeView === "biofinger" ? (
             <BiofingerPage activeView={activeView} profile={accessProfile} onOpenGuide={openGuide} />
+          ) : activeView === "shift-schedules" ? (
+            <ShiftSchedulesPage
+              activeView={activeView}
+              profile={accessProfile}
+              focusEmployeeId={shiftScheduleFocusEmployeeId}
+              onFocusHandled={() => setShiftScheduleFocusEmployeeId("")}
+              onOpenGuide={openGuide}
+            />
           ) : activeView === "attendance-live" || activeView === "attendance-requests" || activeView === "attendance-review" || activeView === "field-monitoring" || activeView === "payroll" ? (
             <AttendanceCyclePage activeView={activeView} profile={accessProfile} />
           ) : activeView === "employees" ? (
-            <EmployeesPage activeView={activeView} profile={accessProfile} />
+            <EmployeesPage
+              activeView={activeView}
+              profile={accessProfile}
+              onOpenShiftSchedule={(employeeId) => {
+                setShiftScheduleFocusEmployeeId(employeeId)
+                navigate("shift-schedules")
+              }}
+            />
           ) : activeView === "users" ? (
             <UsersPage activeView={activeView} profile={accessProfile} />
           ) : activeView === "role-permission" ? (
