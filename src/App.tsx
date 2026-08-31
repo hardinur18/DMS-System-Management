@@ -3903,7 +3903,7 @@ function validateUserAccessForm(values: UserAccessFormValues, employees: UserEmp
 }
 
 function useAppUsersFunction() {
-  return import.meta.env.VITE_USE_APP_USERS_FUNCTION === "true"
+  return import.meta.env.VITE_USE_APP_USERS_FUNCTION !== "false"
 }
 
 async function invokeAppUsersFunction(action: string, payload: Record<string, unknown>) {
@@ -13224,14 +13224,14 @@ function UsersPage({ activeView, profile }: { activeView: ViewId; profile: AppAc
                             <KeyRound size={14} />
                             {user.status === "invited" ? "Buat Password" : "Reset Password"}
                           </RowActionMenuItem>
-                          <RowActionMenuItem danger={user.status !== "locked"} disabled={!canLockUser || saving} onClick={() => {
+                          <RowActionMenuItem danger={user.status !== "locked"} disabled={!canLockUser || saving || user.id === profile.id} onClick={() => {
                             setDetailRow(null)
                             setStatusRow(user)
                           }}>
                             {user.status === "locked" ? <FileCheck2 size={14} /> : <Lock size={14} />}
                             {user.status === "locked" ? "Unlock" : "Lock"}
                           </RowActionMenuItem>
-                          <RowActionMenuItem danger disabled={!canEditUser || saving} onClick={() => {
+                          <RowActionMenuItem danger disabled={!canEditUser || saving || user.id === profile.id} onClick={() => {
                             setDetailRow(null)
                             setDeleteRow(user)
                           }}>
@@ -13287,6 +13287,7 @@ function UsersPage({ activeView, profile }: { activeView: ViewId; profile: AppAc
         onPasswordAction={openPasswordAction}
         canEdit={canEditUser}
         canLock={canLockUser}
+        currentUserId={profile.id}
       />
       <ConfirmDialog
         open={Boolean(statusRow)}
@@ -13648,6 +13649,7 @@ function UserAccessDetailDialog({
   onPasswordAction,
   canEdit,
   canLock,
+  currentUserId,
 }: {
   row: UserAccessRow | null
   onClose: () => void
@@ -13657,8 +13659,10 @@ function UserAccessDetailDialog({
   onPasswordAction: (row: UserAccessRow, type?: PasswordActionType) => void
   canEdit: boolean
   canLock: boolean
+  currentUserId: string
 }) {
   if (!row) return null
+  const isSelfAccount = row.id === currentUserId
   const linkedEmployee = row.employeeCode ? `${row.employeeCode} - ${row.employeeName}` : "Belum dikaitkan"
   const primaryMeta = [
     row.userCode,
@@ -13753,7 +13757,7 @@ function UserAccessDetailDialog({
             <Pencil size={16} />
             Edit
           </button>
-          <button className="secondaryButton dangerSoftButton" type="button" disabled={!canEdit} onClick={() => onDelete(row)}>
+          <button className="secondaryButton dangerSoftButton" type="button" disabled={!canEdit || isSelfAccount} onClick={() => onDelete(row)}>
             <Trash2 size={16} />
             Hapus
           </button>
@@ -13761,7 +13765,7 @@ function UserAccessDetailDialog({
             <KeyRound size={16} />
             {row.status === "invited" ? "Buat Password" : "Reset Password"}
           </button>
-          <button className={clsx("primaryButton", row.status !== "locked" && "dangerButton")} type="button" disabled={!canLock} onClick={() => onToggleStatus(row)}>
+          <button className={clsx("primaryButton", row.status !== "locked" && "dangerButton")} type="button" disabled={!canLock || isSelfAccount} onClick={() => onToggleStatus(row)}>
             {row.status === "locked" ? <FileCheck2 size={16} /> : <Lock size={16} />}
             {row.status === "locked" ? "Unlock" : "Lock"}
           </button>
