@@ -107,6 +107,10 @@ type PayrollProcessAction = "lock" | "mark_paid" | "unlock" | "void" | "restore"
 type PayrollPaymentMethod = "cash" | "bank_transfer" | "ewallet" | "other"
 type PayrollPaymentStatus = "paid" | "void" | "reversed"
 type PayrollLedgerTab = "active" | "ready" | "locked" | "paid" | "void" | "all"
+type PayrollCycleTab = "active" | "ready" | "locked" | "void" | "all"
+type PayrollWorkspaceTab = "cycle" | "overtime" | "history"
+type PayrollPaymentSource = "salary" | "overtime"
+type OvertimePaymentStatus = "unpaid" | "paid" | "void"
 type AttendanceLogStatus = "valid" | "review" | "rejected"
 type AttendanceGpsStatus = "valid" | "out_of_radius" | "missing"
 type AttendanceFaceStatus = "verified" | "review" | "failed" | "not_required"
@@ -347,6 +351,10 @@ interface OvertimeReviewRow {
   payrollCycleId: string
   payrollCycleNumber: number
   payrollStatus: PayrollStatus
+  overtimePaymentStatus: OvertimePaymentStatus
+  overtimePaymentId: string
+  overtimePaidAt: string
+  overtimePaymentNote: string
   componentName: string
   notes: string
 }
@@ -415,12 +423,64 @@ interface PayrollPaymentRow {
   notes: string
 }
 
+interface OvertimePaymentRow {
+  id: string
+  paymentNo: string
+  employeeId: string
+  employeeCode: string
+  employeeName: string
+  periodStartedAt: string
+  periodClosedAt: string
+  requestCount: number
+  overtimeMinutes: number
+  overtimeAmount: number
+  paidAmount: number
+  paymentMethod: PayrollPaymentMethod
+  paymentReference: string
+  paidAt: string
+  paidByName: string
+  status: PayrollPaymentStatus
+  notes: string
+}
+
+interface PayrollUnifiedPaymentRow {
+  id: string
+  source: PayrollPaymentSource
+  paymentNo: string
+  payrollCycleId: string
+  overtimePaymentId: string
+  employeeId: string
+  employeeCode: string
+  employeeName: string
+  cycleNumber: number
+  periodStartedAt: string
+  periodClosedAt: string
+  grossAmount: number
+  overtimeAmount: number
+  netAmount: number
+  paidAmount: number
+  paymentMethod: PayrollPaymentMethod
+  paymentReference: string
+  paidAt: string
+  paidByName: string
+  status: PayrollPaymentStatus
+  notes: string
+  requestCount: number
+  overtimeMinutes: number
+  overtimePayment?: OvertimePaymentRow
+}
+
 interface PayrollProcessSubmitPayload {
   notes: string
   paymentMethod?: PayrollPaymentMethod
   paymentReference?: string
   paidAt?: string
   paidAmount?: number
+}
+
+interface OvertimePaymentSubmitPayload extends PayrollProcessSubmitPayload {
+  overtimeRequestIds?: string[]
+  overtimePaymentId?: string
 }
 
 interface OperationsFoundationData {
@@ -432,10 +492,11 @@ interface OperationsFoundationData {
   overtime: OvertimeReviewRow[]
   leaveRequests: LeaveRequestRow[]
   payrollPayments: PayrollPaymentRow[]
+  overtimePayments: OvertimePaymentRow[]
 }
 
 function createEmptyOperationsFoundationData(): OperationsFoundationData {
-  return { rows: [], allRows: [], locations: [], fieldReadiness: [], reviews: [], overtime: [], leaveRequests: [], payrollPayments: [] }
+  return { rows: [], allRows: [], locations: [], fieldReadiness: [], reviews: [], overtime: [], leaveRequests: [], payrollPayments: [], overtimePayments: [] }
 }
 
 type AttendanceDateMode = DateModePickerMode
@@ -451,6 +512,7 @@ interface AttendanceLoadOptions {
   scope?: AttendanceLoadScope
   overtimeDateScoped?: boolean
   includePayrollPayments?: boolean
+  includeOvertimePayments?: boolean
 }
 
 function getOperationsFoundationCacheKey(
@@ -1561,8 +1623,8 @@ const guideArticles: GuideArticle[] = [
     summary: "Memproses gaji berdasarkan cycle absensi, komponen gaji, lembur, bonus, potongan, dan kasbon.",
     icon: BadgeDollarSign,
     audience: "Finance, Owner, HR",
-    frequency: "Saat closing periode payroll",
-    tags: ["gaji", "cycle", "finance"],
+    frequency: "Closing cycle 26 hari dan pembayaran lembur mingguan/custom",
+    tags: ["gaji", "cycle", "finance", "lembur"],
     steps: [
       "Pastikan rekap absensi dan approval periode sudah bersih.",
       "Pastikan komponen Lembur Weekday/Minggu aktif, unit Per Jam, dan Auto Detect Lembur menyala di Master Data > Komponen Gaji.",
@@ -1573,10 +1635,13 @@ const guideArticles: GuideArticle[] = [
       "Klik Refresh Data di Approval saat tab Lembur aktif untuk mencocokkan request dengan attendance settlement terbaru.",
       "Review di Approval > Lembur: sistem menampilkan rencana, realisasi, basis hitung, dan estimasi bayar.",
       "Approve/reject menit lembur yang dibayar beserta catatan HR/Finance.",
+      "Untuk bayar lembur mingguan/custom, buka Payroll > Bayar Lembur, pilih lembur approved, lalu simpan pembayaran.",
+      "Lembur yang sudah dibayar terpisah masuk Riwayat Bayar dan tidak ikut lagi ke gaji 26 hari.",
       "Cek komponen gaji, bonus, potongan, dan kasbon.",
-      "Review draft payroll per karyawan sebelum lock.",
-      "Lock payroll hanya setelah HR/Finance setuju.",
-      "Tandai paid setelah pembayaran benar-benar dilakukan.",
+      "Untuk metode lama, biarkan lembur approved tetap belum dibayar terpisah agar ikut total gaji saat cycle 26 hari selesai.",
+      "Review draft gaji per karyawan sebelum final.",
+      "Finalkan gaji hanya setelah HR/Finance setuju.",
+      "Tandai terbayar setelah pembayaran benar-benar dilakukan.",
     ],
     checks: [
       "Tidak ada absensi pending di periode payroll.",
@@ -1584,12 +1649,14 @@ const guideArticles: GuideArticle[] = [
       "Request lembur terencana sudah punya realisasi checkout atau sudah ditolak bila batal.",
       "Request Minggu/libur sudah terbaca sebagai full durasi kerja aktual.",
       "Lembur pending sudah di-approve atau reject sebelum lock payroll.",
+      "Lembur yang dibayar mingguan/custom tidak muncul lagi sebagai tambahan di cycle gaji 26 hari.",
       "Kasbon dan potongan sudah masuk perhitungan.",
-      "Payroll locked tidak berubah tanpa proses unlock yang diaudit.",
+      "Gaji yang sudah final tidak berubah tanpa proses buka koreksi yang diaudit.",
     ],
     pitfalls: [
       "Jangan lock payroll sebelum approval absensi selesai.",
       "Jangan approve pembayaran lembur sebelum ada checkout real dari Biofinger/app lapangan.",
+      "Jangan bayar lembur terpisah kalau cycle gaji terkait sudah final, terbayar, atau dibatalkan.",
       "Jangan membayar pulang lewat sebagai lembur jika total jam kerja aktual masih kurang dari kewajiban shift.",
       "Jangan memakai basis Full Durasi Kerja untuk Semua Hari karena bisa membuat hari kerja normal terhitung full lembur.",
       "Jangan edit manual nominal tanpa catatan dan jejak audit.",
@@ -1906,6 +1973,12 @@ const payrollPaymentStatusLabel: Record<PayrollPaymentStatus, string> = {
   paid: "Terbayar",
   void: "Dibatalkan",
   reversed: "Dikoreksi",
+}
+
+const overtimePaymentStatusLabel: Record<OvertimePaymentStatus, string> = {
+  unpaid: "Belum dibayar",
+  paid: "Terbayar",
+  void: "Dibatalkan",
 }
 
 const appScopeLabel: Record<AppScope, string> = {
@@ -4743,6 +4816,22 @@ function isMissingPayrollLedgerSchema(error: unknown) {
   return schemaHints.some((hint) => message.includes(hint))
 }
 
+function isMissingOvertimePaymentSchema(error: unknown) {
+  const errorObject = error && typeof error === "object" ? error as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown } : null
+  const message = `${String(errorObject?.code || "")} ${String(errorObject?.message || "")} ${String(errorObject?.details || "")} ${String(errorObject?.hint || "")}`.toLowerCase()
+  const schemaHints = [
+    "overtime_payments",
+    "overtime_payment_items",
+    "overtime_payment_status",
+    "mark_overtime_requests_paid",
+    "void_overtime_payment",
+    "schema cache",
+    "relation",
+  ]
+
+  return schemaHints.some((hint) => message.includes(hint))
+}
+
 function isMissingPayrollOpeningSchema(error: unknown) {
   const errorObject = error && typeof error === "object" ? error as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown } : null
   const message = `${String(errorObject?.code || "")} ${String(errorObject?.message || "")} ${String(errorObject?.details || "")} ${String(errorObject?.hint || "")}`.toLowerCase()
@@ -6343,6 +6432,69 @@ function exportPayrollPaymentCsv(rows: PayrollPaymentRow[]) {
   URL.revokeObjectURL(url)
 }
 
+function exportPayrollUnifiedPaymentCsv(rows: PayrollUnifiedPaymentRow[]) {
+  const header = ["No", "Jenis", "No Bayar", "Kode", "Nama", "Periode", "Cycle", "Gaji Pokok", "Lembur", "Total", "Nominal Bayar", "Metode", "Referensi", "Tanggal Bayar", "Dibayar Oleh", "Status", "Catatan"]
+  const body = rows.map((row, index) => [
+    index + 1,
+    row.source === "overtime" ? "Lembur terpisah" : "Gaji cycle",
+    row.paymentNo,
+    row.employeeCode,
+    row.employeeName,
+    formatPayrollPaymentPeriod(row),
+    row.source === "overtime" ? `${row.requestCount} request` : row.cycleNumber,
+    row.grossAmount,
+    row.overtimeAmount,
+    row.netAmount,
+    row.paidAmount,
+    payrollPaymentMethodLabel[row.paymentMethod],
+    row.paymentReference,
+    formatUserDateTime(row.paidAt, "-"),
+    row.paidByName,
+    payrollPaymentStatusLabel[row.status],
+    row.notes,
+  ])
+  const csv = [header, ...body]
+    .map((columns) => columns.map((column) => `"${String(column).replace(/"/g, '""')}"`).join(","))
+    .join("\n")
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement("a")
+  link.href = url
+  link.download = `dms-riwayat-pembayaran-${new Date().toISOString().slice(0, 10)}.csv`
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
+function exportPayrollOvertimeCsv(rows: OvertimeReviewRow[]) {
+  const header = ["No", "Kode", "Nama", "Divisi", "Tanggal", "Jadwal", "Rencana", "Realisasi", "Durasi Dibayar", "Rate", "Total Lembur", "Status Bayar", "Status Approval", "Catatan"]
+  const body = rows.map((row, index) => [
+    index + 1,
+    row.employeeCode,
+    row.fullName,
+    row.divisionName,
+    formatEmployeeDate(row.overtimeDate),
+    `${formatShiftClock(row.shiftStartTime)} - ${formatShiftClock(row.shiftEndTime)}`,
+    getOvertimePlanRange(row),
+    getOvertimeRealizationLabel(row),
+    formatMinutesDuration(row.approvedMinutes || row.overtimeMinutes),
+    row.rateAmount,
+    row.totalAmount,
+    overtimePaymentStatusLabel[row.overtimePaymentStatus],
+    getOvertimeStatusLabel(row.status),
+    row.notes || row.requestReason || row.overtimePaymentNote,
+  ])
+  const csv = [header, ...body]
+    .map((columns) => columns.map((column) => `"${String(column).replace(/"/g, '""')}"`).join(","))
+    .join("\n")
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement("a")
+  link.href = url
+  link.download = `dms-lembur-belum-dibayar-${new Date().toISOString().slice(0, 10)}.csv`
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
 function exportAttendanceRecapCsv(rows: AttendanceMonitorRow[], selectedDate: string, mode: AttendanceDateMode) {
   const header = [
     "No",
@@ -6562,6 +6714,53 @@ async function fetchPayrollPaymentRows() {
     return { data: rows, error: null }
   } catch (error) {
     return { data: [], error }
+  }
+}
+
+async function fetchOvertimePaymentRows() {
+  try {
+    const rows = await fetchSupabaseRangeRows<Record<string, unknown>>(() => supabase
+      .from("overtime_payments")
+      .select("id, payment_no, employee_id, employee_code, employee_name, period_started_at, period_closed_at, request_count, overtime_minutes, overtime_amount, paid_amount, payment_method, payment_reference, paid_at, paid_by_name, status, notes")
+      .order("paid_at", { ascending: false })
+      .order("payment_no", { ascending: false }), 500, 20000)
+
+    return { data: rows, error: null }
+  } catch (error) {
+    return { data: [], error }
+  }
+}
+
+const overtimeRequestBaseColumns = "id, employee_id, attendance_log_id, payroll_cycle_id, payroll_component_id, overtime_date, shift_start_time, shift_end_time, actual_check_out_at, overtime_minutes, approved_minutes, rate_amount, total_amount, day_type, overtime_basis, status, request_source, planned_start_at, planned_end_at, planned_minutes, request_reason, requested_at, matched_attendance, notes, created_at"
+const overtimeRequestPaymentColumns = `${overtimeRequestBaseColumns}, overtime_payment_status, overtime_payment_id, overtime_paid_at, overtime_payment_note`
+
+async function fetchOvertimeRequestRows(startDate: string, endDate: string, dateScoped = true) {
+  const runQuery = (columns: string) => fetchSupabaseRangeRows<Record<string, unknown>>(() => {
+    const query = supabase
+      .from("overtime_requests")
+      .select(columns)
+
+    const scopedQuery = dateScoped
+      ? query.gte("overtime_date", startDate).lte("overtime_date", endDate)
+      : query
+
+    return scopedQuery
+      .order("overtime_date", { ascending: false })
+      .order("created_at", { ascending: false }) as unknown as SupabaseRangeQuery<Record<string, unknown>>
+  }, 500, 10000)
+
+  try {
+    const rows = await runQuery(overtimeRequestPaymentColumns)
+    return { data: rows, error: null }
+  } catch (error) {
+    if (!isMissingOvertimePaymentSchema(error)) return { data: [], error }
+
+    try {
+      const rows = await runQuery(overtimeRequestBaseColumns)
+      return { data: rows, error: null }
+    } catch (legacyError) {
+      return { data: [], error: legacyError }
+    }
   }
 }
 
@@ -6993,6 +7192,33 @@ function mapPayrollPaymentRecord(row: Record<string, unknown>): PayrollPaymentRo
   }
 }
 
+function mapOvertimePaymentRecord(row: Record<string, unknown>): OvertimePaymentRow {
+  return {
+    id: String(row.id || ""),
+    paymentNo: String(row.payment_no || ""),
+    employeeId: String(row.employee_id || ""),
+    employeeCode: String(row.employee_code || ""),
+    employeeName: String(row.employee_name || "Karyawan"),
+    periodStartedAt: String(row.period_started_at || ""),
+    periodClosedAt: String(row.period_closed_at || ""),
+    requestCount: Number(row.request_count || 0),
+    overtimeMinutes: Number(row.overtime_minutes || 0),
+    overtimeAmount: Number(row.overtime_amount || 0),
+    paidAmount: Number(row.paid_amount || 0),
+    paymentMethod: mapPayrollPaymentMethod(row.payment_method),
+    paymentReference: String(row.payment_reference || ""),
+    paidAt: String(row.paid_at || ""),
+    paidByName: String(row.paid_by_name || ""),
+    status: mapPayrollPaymentStatus(row.status),
+    notes: String(row.notes || ""),
+  }
+}
+
+function mapOvertimePaymentStatus(value: unknown): OvertimePaymentStatus {
+  if (value === "paid" || value === "void") return value
+  return "unpaid"
+}
+
 function getAttendanceMonitorStatus(row?: Record<string, unknown>): AttendanceStatus {
   if (!row) return "missing"
   if (row.status === "valid") return "valid"
@@ -7129,7 +7355,7 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
   }
 
   const attendanceLogColumns = "id, employee_id, work_location_id, attendance_date, event_type, event_at, latitude, longitude, distance_m, radius_m, gps_status, face_status, face_score, face_snapshot_path, status, workday_counted, source, attendance_media, attendance_device_id, biofinger_event_id, notes"
-  const [employeeResult, divisionResult, locationResult, shiftResult, attendanceRows, dailySummaryRows, reviewAttendanceResult, payrollRows, overtimeResult, payrollComponentResult, appUserResult, faceProfileResult, leaveResult, payrollPaymentResult] = await Promise.all([
+  const [employeeResult, divisionResult, locationResult, shiftResult, attendanceRows, dailySummaryRows, reviewAttendanceResult, payrollRows, overtimeResult, payrollComponentResult, appUserResult, faceProfileResult, leaveResult, payrollPaymentResult, overtimePaymentResult] = await Promise.all([
     supabase
       .from("employees")
       .select("id, employee_code, full_name, photo_path, division_id, work_location_id, shift_id, salary_type, daily_salary, monthly_salary, payroll_cycle_days, status, deleted_at")
@@ -7165,19 +7391,7 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
       .select("id, employee_id, cycle_number, period_started_at, period_closed_at, work_days_count, target_work_days, gross_amount, overtime_amount, net_amount, salary_type, status, ready_at, locked_at, paid_at")
       .order("cycle_number", { ascending: false })
       .order("employee_id", { ascending: true }), 1000, 50000),
-    fetchSupabaseRangeRows<Record<string, unknown>>(() => {
-      const query = supabase
-        .from("overtime_requests")
-        .select("id, employee_id, attendance_log_id, payroll_cycle_id, payroll_component_id, overtime_date, shift_start_time, shift_end_time, actual_check_out_at, overtime_minutes, approved_minutes, rate_amount, total_amount, day_type, overtime_basis, status, request_source, planned_start_at, planned_end_at, planned_minutes, request_reason, requested_at, matched_attendance, notes, created_at")
-
-      const scopedQuery = options.overtimeDateScoped === false
-        ? query
-        : query.gte("overtime_date", startDate).lte("overtime_date", endDate)
-
-      return scopedQuery
-        .order("overtime_date", { ascending: false })
-        .order("created_at", { ascending: false })
-    }, 500, 10000).then((data) => ({ data, error: null })),
+    fetchOvertimeRequestRows(startDate, endDate, options.overtimeDateScoped !== false),
     supabase
       .from("payroll_components")
       .select("id, name, code, calculation_unit, rate_amount, day_type, overtime_basis, auto_detect_overtime"),
@@ -7197,9 +7411,11 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
       .order("start_date", { ascending: false })
       .order("created_at", { ascending: false }), 500, 10000).then((data) => ({ data, error: null })),
     options.includePayrollPayments ? fetchPayrollPaymentRows() : emptyResult,
+    options.includeOvertimePayments ? fetchOvertimePaymentRows() : emptyResult,
   ])
   const payrollPaymentError = payrollPaymentResult.error && !isMissingPayrollLedgerSchema(payrollPaymentResult.error) ? payrollPaymentResult.error : null
-  const error = employeeResult.error || divisionResult.error || locationResult.error || shiftResult.error || reviewAttendanceResult.error || overtimeResult.error || payrollComponentResult.error || appUserResult.error || faceProfileResult.error || leaveResult.error || payrollPaymentError
+  const overtimePaymentError = overtimePaymentResult.error && !isMissingOvertimePaymentSchema(overtimePaymentResult.error) ? overtimePaymentResult.error : null
+  const error = employeeResult.error || divisionResult.error || locationResult.error || shiftResult.error || reviewAttendanceResult.error || overtimeResult.error || payrollComponentResult.error || appUserResult.error || faceProfileResult.error || leaveResult.error || payrollPaymentError || overtimePaymentError
 
   if (error) throw error
 
@@ -7237,6 +7453,9 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
   const payrollPayments = (payrollPaymentResult.error && isMissingPayrollLedgerSchema(payrollPaymentResult.error))
     ? []
     : ((payrollPaymentResult.data || []) as Array<Record<string, unknown>>).map(mapPayrollPaymentRecord)
+  const overtimePayments = (overtimePaymentResult.error && isMissingOvertimePaymentSchema(overtimePaymentResult.error))
+    ? []
+    : ((overtimePaymentResult.data || []) as Array<Record<string, unknown>>).map(mapOvertimePaymentRecord)
   const payrollComponentMap = new Map(((payrollComponentResult.data || []) as Array<Record<string, unknown>>).map((row) => [String(row.id), row]))
   const overtimeByEmployeeDate = new Map<string, Record<string, unknown>>()
   overtimeRows.forEach((row) => {
@@ -7633,6 +7852,10 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
       payrollCycleId: String(overtime.payroll_cycle_id || payrollCycle?.id || ""),
       payrollCycleNumber: Number(payrollCycle?.cycle_number || 0),
       payrollStatus: mapPayrollCycleStatus(payrollCycle?.status),
+      overtimePaymentStatus: mapOvertimePaymentStatus(overtime.overtime_payment_status),
+      overtimePaymentId: String(overtime.overtime_payment_id || ""),
+      overtimePaidAt: String(overtime.overtime_paid_at || ""),
+      overtimePaymentNote: String(overtime.overtime_payment_note || ""),
       componentName: String(component?.name || "Komponen lembur"),
       notes: String(overtime.notes || ""),
     }
@@ -7658,7 +7881,7 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
     }
   })
 
-  return { rows, allRows, locations, fieldReadiness, reviews: reviewRows, overtime: overtimeReviewRows, leaveRequests, payrollPayments }
+  return { rows, allRows, locations, fieldReadiness, reviews: reviewRows, overtime: overtimeReviewRows, leaveRequests, payrollPayments, overtimePayments }
 }
 
 function getBrowserPosition(): Promise<GeolocationPosition> {
@@ -8292,6 +8515,38 @@ async function deleteLeaveRequest(id: string) {
 async function processPayrollCycle(cycleId: string, action: PayrollProcessAction, payload: PayrollProcessSubmitPayload) {
   const { data, error } = await supabase.functions.invoke("payroll-processing", {
     body: { action, payload: { cycleId, ...payload } },
+  })
+
+  if (error) {
+    const context = "context" in error ? (error as { context?: unknown }).context : null
+
+    if (context instanceof Response) {
+      const text = await context.clone().text()
+
+      if (text) {
+        let parsedMessage = ""
+
+        try {
+          const parsed = JSON.parse(text) as { error?: unknown; message?: unknown }
+          parsedMessage = String(parsed.error || parsed.message || "")
+        } catch {
+          parsedMessage = ""
+        }
+
+        throw new Error(parsedMessage || text)
+      }
+    }
+
+    throw error
+  }
+  if (data?.error) throw new Error(String(data.error))
+
+  return data
+}
+
+async function processOvertimePayment(action: "mark_overtime_paid" | "void_overtime_payment", payload: OvertimePaymentSubmitPayload) {
+  const { data, error } = await supabase.functions.invoke("payroll-processing", {
+    body: { action, payload },
   })
 
   if (error) {
@@ -15332,6 +15587,7 @@ function DashboardPage({ activeView }: { activeView: ViewId }) {
       scope: "full",
       overtimeDateScoped: true,
       includePayrollPayments: true,
+      includeOvertimePayments: true,
     }),
     [dashboardRange, todayDate],
   )
@@ -15418,6 +15674,7 @@ function DashboardPage({ activeView }: { activeView: ViewId }) {
         scope: "full",
         overtimeDateScoped: true,
         includePayrollPayments: true,
+        includeOvertimePayments: true,
       }),
     }).catch(() => {})
   }, [dashboardRange, loading, reload, todayDate])
@@ -16145,6 +16402,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
       scope: loadScope,
       overtimeDateScoped: activeView !== "payroll",
       includePayrollPayments: activeView === "payroll",
+      includeOvertimePayments: activeView === "payroll",
     }),
     [activeView, dataLoadRange, loadScope, selectedDate],
   )
@@ -16181,6 +16439,9 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
   const [payrollAction, setPayrollAction] = useState<PayrollProcessAction>("lock")
   const [payrollFocusTab, setPayrollFocusTab] = useState<PayrollLedgerTab | null>(null)
   const [payrollSubmitting, setPayrollSubmitting] = useState(false)
+  const [overtimePaymentTarget, setOvertimePaymentTarget] = useState<OvertimeReviewRow | null>(null)
+  const [overtimePaymentVoidTarget, setOvertimePaymentVoidTarget] = useState<OvertimePaymentRow | null>(null)
+  const [overtimePaymentSubmitting, setOvertimePaymentSubmitting] = useState(false)
   const [resetAttendanceRow, setResetAttendanceRow] = useState<AttendanceMonitorRow | null>(null)
   const [resetAttendanceSubmitting, setResetAttendanceSubmitting] = useState(false)
   const [checkinCorrectionRow, setCheckinCorrectionRow] = useState<AttendanceMonitorRow | null>(null)
@@ -16217,6 +16478,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
           scope: loadScope,
           overtimeDateScoped: activeView !== "payroll",
           includePayrollPayments: activeView === "payroll",
+          includeOvertimePayments: activeView === "payroll",
         }),
       })
     } catch (error) {
@@ -16514,6 +16776,62 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
     }
   }
 
+  const handleOvertimePaymentSubmit = async (payload: OvertimePaymentSubmitPayload) => {
+    if (!overtimePaymentTarget) return
+
+    setOvertimePaymentSubmitting(true)
+    try {
+      await processOvertimePayment("mark_overtime_paid", {
+        ...payload,
+        overtimeRequestIds: [overtimePaymentTarget.id],
+      })
+      showToast({
+        tone: "success",
+        title: "Pembayaran lembur dicatat",
+        description: `${overtimePaymentTarget.fullName} - ${formatCurrency(payload.paidAmount || overtimePaymentTarget.totalAmount)} masuk Riwayat Bayar.`,
+      })
+      setOvertimePaymentTarget(null)
+      setStatusFilter("all")
+      await refreshData()
+    } catch (error) {
+      showToast({
+        tone: "error",
+        title: "Gagal bayar lembur",
+        description: getFriendlySupabaseError(error, "Pembayaran lembur belum bisa diproses."),
+      })
+    } finally {
+      setOvertimePaymentSubmitting(false)
+    }
+  }
+
+  const handleOvertimePaymentVoidSubmit = async () => {
+    if (!overtimePaymentVoidTarget) return
+
+    setOvertimePaymentSubmitting(true)
+    try {
+      await processOvertimePayment("void_overtime_payment", {
+        overtimePaymentId: overtimePaymentVoidTarget.id,
+        notes: "Pembayaran lembur dibatalkan dari halaman Payroll.",
+      })
+      showToast({
+        tone: "success",
+        title: "Pembayaran lembur dibatalkan",
+        description: `${overtimePaymentVoidTarget.employeeName} - ${formatCurrency(overtimePaymentVoidTarget.paidAmount)} kembali ke lembur belum dibayar.`,
+      })
+      setOvertimePaymentVoidTarget(null)
+      setStatusFilter("all")
+      await refreshData()
+    } catch (error) {
+      showToast({
+        tone: "error",
+        title: "Gagal membatalkan pembayaran",
+        description: getFriendlySupabaseError(error, "Pembayaran lembur belum bisa dibatalkan."),
+      })
+    } finally {
+      setOvertimePaymentSubmitting(false)
+    }
+  }
+
   const handleResetAttendanceSubmit = async () => {
     if (!resetAttendanceRow) return
 
@@ -16757,6 +17075,27 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
 
     return matchesDivision && matchesSearch && matchesStatus
   })
+  const filteredOvertimePayments = data.overtimePayments.filter((row) => {
+    const matchesDivision = matchesDivisionFilter(employeeDivisionById.get(row.employeeId) || "")
+    const matchesSearch = normalizedSearch
+      ? [
+        row.paymentNo,
+        row.employeeCode,
+        row.employeeName,
+        row.paymentMethod,
+        payrollPaymentMethodLabel[row.paymentMethod],
+        row.paymentReference,
+        row.paidByName,
+        row.notes,
+      ].join(" ").toLowerCase().includes(normalizedSearch)
+      : true
+    const matchesStatus = statusFilter === "all"
+      || row.status === statusFilter
+      || row.paymentMethod === statusFilter
+      || (statusFilter === "paid" && row.status === "paid")
+
+    return matchesDivision && matchesSearch && matchesStatus
+  })
   const readyPayrollRows = data.rows.filter((row) => row.payrollStatus === "ready")
   const lockedPayrollRows = data.rows.filter((row) => row.payrollStatus === "locked")
   const paidPayrollRows = data.rows.filter((row) => row.payrollStatus === "paid")
@@ -16785,6 +17124,34 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
       || (statusFilter === "pending_overtime" && row.status === "pending")
 
     return matchesDate && matchesDivision && matchesSearch && matchesStatus
+  })
+  const payrollOvertimeRows = data.overtime.filter((row) => {
+    if (row.status === "draft" && row.requestSource !== "planned") return false
+
+    const matchesDivision = matchesDivisionFilter(row.divisionName)
+    const matchesSearch = normalizedSearch
+      ? [
+        row.employeeCode,
+        row.fullName,
+        row.divisionName,
+        row.componentName,
+        row.status,
+        row.dayType,
+        row.overtimeBasis,
+        row.requestSource,
+        row.requestReason,
+        overtimePaymentStatusLabel[row.overtimePaymentStatus],
+      ].join(" ").toLowerCase().includes(normalizedSearch)
+      : true
+    const matchesStatus = statusFilter === "all"
+      || row.status === statusFilter
+      || row.dayType === statusFilter
+      || row.requestSource === statusFilter
+      || row.overtimePaymentStatus === statusFilter
+      || (statusFilter === "overtime_pending" && row.status === "pending")
+      || (statusFilter === "overtime_approved" && row.status === "approved")
+
+    return matchesDivision && matchesSearch && matchesStatus
   })
   const overtimeMetricRows = activeView === "attendance-review" ? filteredOvertimeRows : data.overtime
   const pendingOvertimeRows = overtimeMetricRows.filter((row) => row.status === "pending")
@@ -17153,12 +17520,16 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
         <PayrollPreviewTable
           rows={filteredRows}
           payments={filteredPayrollPayments}
+          overtimeRows={payrollOvertimeRows}
+          overtimePayments={filteredOvertimePayments}
           loading={loading}
           errorMessage={errorMessage}
           overtimeTotal={approvedOvertimeTotal}
           focusTab={payrollFocusTab}
           onFocusTabConsumed={() => setPayrollFocusTab(null)}
           onProcess={openPayrollProcessDialog}
+          onPayOvertime={setOvertimePaymentTarget}
+          onVoidOvertimePayment={setOvertimePaymentVoidTarget}
         />
       ) : (
         <LiveAttendanceTable rows={latestFirstRows} loading={loading} errorMessage={errorMessage} selectedDate={selectedDate} onResetDay={setResetAttendanceRow} onCorrectCheckIn={setCheckinCorrectionRow} onCorrectCheckout={setCheckoutCorrectionRow} />
@@ -17262,6 +17633,35 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
         onClose={() => setPayrollTarget(null)}
         onSubmit={handlePayrollProcessSubmit}
       />
+      <OvertimePaymentDialog
+        row={overtimePaymentTarget}
+        saving={overtimePaymentSubmitting}
+        onClose={() => {
+          if (!overtimePaymentSubmitting) setOvertimePaymentTarget(null)
+        }}
+        onSubmit={handleOvertimePaymentSubmit}
+      />
+      <ConfirmDialog
+        open={Boolean(overtimePaymentVoidTarget)}
+        tone="danger"
+        icon={RotateCcw}
+        eyebrow="Batalkan Bayar Lembur"
+        title="Batalkan pembayaran lembur?"
+        description="Transaksi lembur ditandai batal dan request lembur terkait kembali menjadi belum dibayar. Data riwayat tetap tersimpan untuk audit."
+        confirmLabel="Batalkan Pembayaran"
+        cancelLabel="Batal"
+        loading={overtimePaymentSubmitting}
+        onClose={() => {
+          if (!overtimePaymentSubmitting) setOvertimePaymentVoidTarget(null)
+        }}
+        onConfirm={() => void handleOvertimePaymentVoidSubmit()}
+      >
+        <div className="confirmDialogPreview">
+          <span>{overtimePaymentVoidTarget?.paymentNo || "Pembayaran lembur"}</span>
+          <strong>{overtimePaymentVoidTarget?.employeeName || "-"}</strong>
+          <small>{overtimePaymentVoidTarget ? `${formatCurrency(overtimePaymentVoidTarget.paidAmount)} / ${formatPayrollPaymentPeriod(overtimePaymentVoidTarget)}` : "Belum ada transaksi"}</small>
+        </div>
+      </ConfirmDialog>
       <ConfirmDialog
         open={Boolean(resetAttendanceRow)}
         tone="danger"
@@ -19008,32 +19408,215 @@ function PayrollProcessDialog({
   )
 }
 
+function OvertimePaymentDialog({
+  row,
+  saving,
+  onClose,
+  onSubmit,
+}: {
+  row: OvertimeReviewRow | null
+  saving: boolean
+  onClose: () => void
+  onSubmit: (payload: OvertimePaymentSubmitPayload) => Promise<void> | void
+}) {
+  const [notes, setNotes] = useState("")
+  const [paymentMethod, setPaymentMethod] = useState<PayrollPaymentMethod>("bank_transfer")
+  const [paymentReference, setPaymentReference] = useState("")
+  const [paidAt, setPaidAt] = useState(getLocalDateKey())
+  const [paidAmount, setPaidAmount] = useState("")
+  const [submitError, setSubmitError] = useState("")
+
+  useEffect(() => {
+    if (!row) return
+    setNotes("")
+    setPaymentMethod("bank_transfer")
+    setPaymentReference("")
+    setPaidAt(getLocalDateKey())
+    setPaidAmount(String(Math.max(0, Math.round(row.totalAmount || 0))))
+    setSubmitError("")
+  }, [row])
+
+  if (!row) return null
+
+  const paymentMethodOptions = (Object.keys(payrollPaymentMethodLabel) as PayrollPaymentMethod[]).map((method) => ({
+    value: method,
+    label: payrollPaymentMethodLabel[method],
+  }))
+  const blockReason = getOvertimePaymentBlockReason(row)
+  const numericPaidAmount = Number(paidAmount)
+  const paymentDelta = Number.isFinite(numericPaidAmount) ? numericPaidAmount - row.totalAmount : 0
+
+  const submitPayment = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (saving) return
+    if (blockReason) {
+      setSubmitError(blockReason)
+      return
+    }
+    if (!paidAt) {
+      setSubmitError("Tanggal bayar wajib diisi.")
+      return
+    }
+    if (!Number.isFinite(numericPaidAmount) || numericPaidAmount <= 0) {
+      setSubmitError("Nominal bayar harus lebih dari 0.")
+      return
+    }
+    setSubmitError("")
+    void onSubmit({
+      notes: notes.trim(),
+      paymentMethod,
+      paymentReference: paymentReference.trim(),
+      paidAt,
+      paidAmount: numericPaidAmount,
+    })
+  }
+
+  return (
+    <FoundationDialog className="payrollProcessDialog overtimePaymentDialog" open onClose={onClose}>
+      <form className="payrollProcessShell" onSubmit={submitPayment}>
+        <div className="payrollProcessHeader">
+          <span className="payrollProcessIcon success">
+            <BadgeDollarSign size={22} />
+          </span>
+          <div>
+            <span>Bayar Lembur</span>
+            <h2>{`Bayar lembur ${row.fullName}`}</h2>
+            <p>Dipakai untuk lembur yang dibayar mingguan atau custom. Lembur ini tidak ikut dihitung lagi di gaji 26 hari.</p>
+          </div>
+          <button className="foundationDialogClose" type="button" aria-label="Tutup dialog" onClick={onClose} disabled={saving}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="payrollProcessBody">
+          <section className="payrollProcessSummary">
+            <div className="payrollProcessEmployee">
+              <EmployeeIdentityCell fullName={row.fullName} code={`${row.employeeCode} / ${row.divisionName}`} photoUrl={row.employeePhotoUrl} />
+              <OvertimePaymentStatusBadge status={row.overtimePaymentStatus} />
+            </div>
+            <div className="payrollProcessGrid">
+              <div>
+                <small>Tanggal</small>
+                <strong>{formatEmployeeDate(row.overtimeDate)}</strong>
+              </div>
+              <div>
+                <small>Jadwal</small>
+                <strong>{`${formatShiftClock(row.shiftStartTime)} - ${formatShiftClock(row.shiftEndTime)}`}</strong>
+              </div>
+              <div>
+                <small>Durasi</small>
+                <strong>{formatMinutesDuration(row.approvedMinutes || row.overtimeMinutes)}</strong>
+              </div>
+              <div>
+                <small>Rate</small>
+                <strong>{`${formatCurrency(row.rateAmount)}/jam`}</strong>
+              </div>
+              <div className="payrollProcessTotal">
+                <small>Total Lembur</small>
+                <strong>{formatCurrency(row.totalAmount)}</strong>
+              </div>
+            </div>
+          </section>
+
+          {blockReason && (
+            <div className="payrollPaymentDelta hasDelta">
+              <span>Belum bisa dibayar</span>
+              <strong>{blockReason}</strong>
+            </div>
+          )}
+
+          <section className="payrollPaymentForm">
+            <div className="payrollPaymentFormHeader">
+              <CreditCard size={18} />
+              <div>
+                <strong>Detail Pembayaran</strong>
+                <small>Nominal ini masuk ke Riwayat Bayar sebagai transaksi lembur terpisah.</small>
+              </div>
+            </div>
+            <div className="payrollPaymentFields">
+              <DateFormField label="Tanggal Bayar" value={paidAt} onChange={setPaidAt} required />
+              <TextFormField label="Nominal Dibayar" type="number" min={1} value={paidAmount} onChange={(event) => setPaidAmount(event.target.value)} required />
+              <FormField label="Metode Bayar" required>
+                <FoundationSelect
+                  label="Metode Bayar"
+                  value={paymentMethod}
+                  options={paymentMethodOptions}
+                  searchable={false}
+                  onChange={(value) => setPaymentMethod(mapPayrollPaymentMethod(value))}
+                />
+              </FormField>
+              <TextFormField label="Referensi" value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} placeholder="Nomor transfer, kas, atau bukti pembayaran" />
+            </div>
+            <div className={clsx("payrollPaymentDelta", paymentDelta !== 0 && "hasDelta")}>
+              <span>Selisih bayar</span>
+              <strong>{paymentDelta === 0 ? "Sesuai total lembur" : formatCurrency(paymentDelta)}</strong>
+            </div>
+          </section>
+
+          <div className="payrollProcessNotes">
+            <span>Catatan Finance</span>
+            <textarea
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              placeholder="Contoh: lembur dibayar Sabtu via transfer dan bukti sudah disimpan."
+              disabled={saving}
+            />
+          </div>
+          {submitError && <p className="formErrorMessage">{submitError}</p>}
+        </div>
+
+        <div className="attendanceReviewActions">
+          <button className="secondaryButton" type="button" onClick={onClose} disabled={saving}>
+            Batal
+          </button>
+          <button className="primaryButton" type="submit" disabled={saving || Boolean(blockReason)}>
+            <CreditCard size={16} />
+            {saving ? "Menyimpan..." : "Simpan Bayar Lembur"}
+          </button>
+        </div>
+      </form>
+    </FoundationDialog>
+  )
+}
+
 function PayrollPreviewTable({
   rows,
   payments,
+  overtimeRows,
+  overtimePayments,
   loading,
   errorMessage,
   overtimeTotal,
   focusTab,
   onFocusTabConsumed,
   onProcess,
+  onPayOvertime,
+  onVoidOvertimePayment,
 }: {
   rows: AttendanceMonitorRow[]
   payments: PayrollPaymentRow[]
+  overtimeRows: OvertimeReviewRow[]
+  overtimePayments: OvertimePaymentRow[]
   loading: boolean
   errorMessage: string
   overtimeTotal: number
   focusTab: PayrollLedgerTab | null
   onFocusTabConsumed: () => void
   onProcess: (row: AttendanceMonitorRow, action: PayrollProcessAction) => void
+  onPayOvertime: (row: OvertimeReviewRow) => void
+  onVoidOvertimePayment: (row: OvertimePaymentRow) => void
 }) {
-  const [activeTab, setActiveTab] = useState<PayrollLedgerTab>("ready")
+  const [workspaceTab, setWorkspaceTab] = useState<PayrollWorkspaceTab>("cycle")
+  const [cycleTab, setCycleTab] = useState<PayrollCycleTab>("ready")
   const [detailRow, setDetailRow] = useState<AttendanceMonitorRow | null>(null)
   const [cyclePage, setCyclePage] = useState(1)
   const [cyclePageSize, setCyclePageSize] = useState(25)
+  const [overtimePage, setOvertimePage] = useState(1)
+  const [overtimePageSize, setOvertimePageSize] = useState(25)
   const [historyPage, setHistoryPage] = useState(1)
   const [historyPageSize, setHistoryPageSize] = useState(25)
   const cycleScrollProps = useHorizontalDragScroll<HTMLDivElement>()
+  const overtimeScrollProps = useHorizontalDragScroll<HTMLDivElement>()
   const historyScrollProps = useHorizontalDragScroll<HTMLDivElement>()
   const sortedRows = useMemo(() => sortPayrollRows(rows), [rows])
   const paidCycleRows = useMemo(() => sortedRows.filter((row) => row.payrollStatus === "paid"), [sortedRows])
@@ -19046,60 +19629,78 @@ function PayrollPreviewTable({
 
     return buildPayrollPaymentHistoryRows([...ledgerRows, ...fallbackRows])
   }, [paidCycleRows, payments])
+  const unifiedPaymentRows = useMemo(() => buildPayrollUnifiedPaymentRows(paymentRows, overtimePayments), [overtimePayments, paymentRows])
+  const overtimePayableRows = useMemo(() => sortPayrollOvertimeRows(overtimeRows.filter((row) => row.status === "approved" && row.overtimePaymentStatus !== "paid" && row.overtimePaymentStatus !== "void" && row.approvedMinutes > 0 && row.totalAmount > 0)), [overtimeRows])
   const readyRows = useMemo(() => sortedRows.filter((row) => row.payrollStatus === "ready"), [sortedRows])
   const activeRows = useMemo(() => sortedRows.filter((row) => row.payrollStatus === "active"), [sortedRows])
   const voidRows = useMemo(() => sortedRows.filter((row) => row.payrollStatus === "void"), [sortedRows])
   const lockedRows = useMemo(() => sortedRows.filter((row) => row.payrollStatus === "locked"), [sortedRows])
   const payableRows = useMemo(() => [...readyRows, ...lockedRows], [lockedRows, readyRows])
-  const visibleCycleRows = activeTab === "ready"
+  const visibleCycleRows = cycleTab === "ready"
     ? readyRows
-    : activeTab === "locked"
+    : cycleTab === "locked"
       ? lockedRows
-    : activeTab === "active"
+    : cycleTab === "active"
       ? activeRows
-      : activeTab === "void"
+      : cycleTab === "void"
         ? voidRows
         : sortedRows
   const pagedCycleRows = visibleCycleRows.slice((cyclePage - 1) * cyclePageSize, cyclePage * cyclePageSize)
-  const pagedPaymentRows = paymentRows.slice((historyPage - 1) * historyPageSize, historyPage * historyPageSize)
+  const pagedOvertimeRows = overtimePayableRows.slice((overtimePage - 1) * overtimePageSize, overtimePage * overtimePageSize)
+  const pagedPaymentRows = unifiedPaymentRows.slice((historyPage - 1) * historyPageSize, historyPage * historyPageSize)
   const payableAmount = payableRows.reduce((total, row) => total + row.payrollAmount, 0)
   const lockedAmount = lockedRows.reduce((total, row) => total + row.payrollAmount, 0)
-  const paidAmount = paymentRows.filter((row) => row.status === "paid").reduce((total, row) => total + row.paidAmount, 0)
-  const payrollTabs = useMemo(() => ([
-    { id: "active" as const, label: "Berjalan", icon: BadgeDollarSign, count: activeRows.length },
+  const overtimePayableAmount = overtimePayableRows.reduce((total, row) => total + row.totalAmount, 0)
+  const paidAmount = unifiedPaymentRows.filter((row) => row.status === "paid").reduce((total, row) => total + row.paidAmount, 0)
+  const workspaceTabs = useMemo(() => ([
+    { id: "cycle" as const, label: "Gaji 26 Hari", icon: WalletCards, count: payableRows.length },
+    { id: "overtime" as const, label: "Bayar Lembur", icon: BadgeDollarSign, count: overtimePayableRows.length },
+    { id: "history" as const, label: "Riwayat Bayar", icon: FileCheck2, count: unifiedPaymentRows.length },
+  ]), [overtimePayableRows.length, payableRows.length, unifiedPaymentRows.length])
+  const payrollCycleTabs = useMemo(() => ([
     { id: "ready" as const, label: "Siap Dicek", icon: WalletCards, count: readyRows.length },
-    { id: "locked" as const, label: "Final", icon: Lock, count: lockedRows.length },
-    { id: "paid" as const, label: "Riwayat Bayar", icon: FileCheck2, count: paymentRows.length },
+    { id: "locked" as const, label: "Menunggu Bayar", icon: Lock, count: lockedRows.length },
+    { id: "active" as const, label: "Berjalan", icon: BadgeDollarSign, count: activeRows.length },
     { id: "void" as const, label: "Dibatalkan", icon: Trash2, count: voidRows.length },
-    { id: "all" as const, label: "Semua Cycle", icon: Database, count: sortedRows.length },
+    { id: "all" as const, label: "Semua Gaji", icon: Database, count: sortedRows.length },
   ]), [activeRows.length, lockedRows.length, paymentRows.length, readyRows.length, sortedRows.length, voidRows.length])
 
   useEffect(() => {
     if (!focusTab) return
-    setActiveTab(focusTab)
+    if (focusTab === "paid") {
+      setWorkspaceTab("history")
+    } else {
+      setWorkspaceTab("cycle")
+      setCycleTab(focusTab)
+    }
     onFocusTabConsumed()
   }, [focusTab, onFocusTabConsumed])
 
   useEffect(() => {
     setCyclePage(1)
+    setOvertimePage(1)
     setHistoryPage(1)
-  }, [activeTab, rows.length, payments.length])
+  }, [cycleTab, overtimePayableRows.length, rows.length, unifiedPaymentRows.length, workspaceTab])
 
   return (
     <>
-      <OperationalTableCard>
+      <OperationalTableCard className="payrollWorkspaceCard">
         <div className="tableHeader">
           <div>
             <h2>Proses Payroll</h2>
-            <p>Alur: cek nominal, finalkan gaji, catat pembayaran, lalu tersimpan di Riwayat Bayar.</p>
-            <InlinePageStats items={[`${formatCurrency(overtimeTotal)} lembur disetujui`, `${formatCurrency(payableAmount)} siap diproses`, `${formatNumber(paymentRows.length)} transaksi terbayar`]} />
+            <p>Gaji 26 hari tetap berjalan. Lembur bisa ikut cycle atau dibayar terpisah mingguan/custom.</p>
+            <InlinePageStats items={[`${formatCurrency(overtimeTotal)} lembur disetujui`, `${formatCurrency(payableAmount)} gaji siap proses`, `${formatCurrency(overtimePayableAmount)} lembur belum dibayar`, `${formatNumber(unifiedPaymentRows.length)} riwayat bayar`]} />
           </div>
           <div className="payrollTableActions">
-            <button className="secondaryButton" type="button" onClick={() => exportPayrollCsv(visibleCycleRows)} disabled={loading || activeTab === "paid" || visibleCycleRows.length === 0}>
+            <button className="secondaryButton" type="button" onClick={() => exportPayrollCsv(visibleCycleRows)} disabled={loading || workspaceTab !== "cycle" || visibleCycleRows.length === 0}>
               <FileBarChart size={17} />
-              Export Rekap
+              Export Gaji
             </button>
-            <button className="secondaryButton" type="button" onClick={() => exportPayrollPaymentCsv(paymentRows)} disabled={loading || paymentRows.length === 0}>
+            <button className="secondaryButton" type="button" onClick={() => exportPayrollOvertimeCsv(overtimePayableRows)} disabled={loading || workspaceTab !== "overtime" || overtimePayableRows.length === 0}>
+              <Download size={17} />
+              Export Lembur
+            </button>
+            <button className="secondaryButton" type="button" onClick={() => exportPayrollUnifiedPaymentCsv(unifiedPaymentRows)} disabled={loading || unifiedPaymentRows.length === 0}>
               <Download size={17} />
               Export Riwayat
             </button>
@@ -19107,33 +19708,21 @@ function PayrollPreviewTable({
         </div>
 
         <div className="payrollFinanceSummary">
-          <PayrollFinanceMetric icon={WalletCards} label="Total siap proses" value={formatCurrency(payableAmount)} meta={`${formatNumber(payableRows.length)} cycle siap/menunggu bayar`} tone="info" />
-          <PayrollFinanceMetric icon={Lock} label="Menunggu dibayar" value={formatCurrency(lockedAmount)} meta={`${formatNumber(lockedRows.length)} cycle sudah difinalkan`} tone="warning" />
-          <PayrollFinanceMetric icon={FileCheck2} label="Sudah terbayar" value={formatCurrency(paidAmount)} meta={`${formatNumber(paymentRows.length)} transaksi riwayat`} tone="success" />
+          <PayrollFinanceMetric icon={WalletCards} label="Gaji perlu diproses" value={formatCurrency(payableAmount)} meta={`${formatNumber(payableRows.length)} cycle siap/final`} tone="info" />
+          <PayrollFinanceMetric icon={BadgeDollarSign} label="Lembur belum dibayar" value={formatCurrency(overtimePayableAmount)} meta={`${formatNumber(overtimePayableRows.length)} request approved`} tone="warning" />
+          <PayrollFinanceMetric icon={FileCheck2} label="Sudah terbayar" value={formatCurrency(paidAmount)} meta={`${formatNumber(unifiedPaymentRows.length)} transaksi riwayat`} tone="success" />
           <PayrollFinanceMetric icon={BadgeDollarSign} label="Masih berjalan" value={formatNumber(activeRows.length)} meta="masih mengikuti absensi" tone="neutral" />
         </div>
 
         <div className="payrollTableToolbar">
-          <CategoryTabs items={payrollTabs} activeId={activeTab} ariaLabel="Payroll tabs" onChange={setActiveTab} />
+          <CategoryTabs items={workspaceTabs} activeId={workspaceTab} ariaLabel="Area payroll" onChange={setWorkspaceTab} />
         </div>
 
-        {activeTab === "paid" ? (
-          <PayrollPaymentHistoryTable
-            rows={pagedPaymentRows}
-            loading={loading}
-            errorMessage={errorMessage}
-            page={historyPage}
-            pageSize={historyPageSize}
-            totalRows={paymentRows.length}
-            scrollProps={historyScrollProps}
-            onPageChange={setHistoryPage}
-            onPageSizeChange={(nextSize) => {
-              setHistoryPageSize(nextSize)
-              setHistoryPage(1)
-            }}
-          />
-        ) : (
+        {workspaceTab === "cycle" && (
           <>
+            <div className="payrollCycleSubtabs">
+              <CategoryTabs items={payrollCycleTabs} activeId={cycleTab} ariaLabel="Status gaji payroll" onChange={setCycleTab} />
+            </div>
             <div className="tableScroller uiDataTableScroller uiDataTableHasColumns payrollCycleTableScroller" {...cycleScrollProps}>
               <table>
                 <colgroup>
@@ -19161,7 +19750,7 @@ function PayrollPreviewTable({
                   </tr>
                 </thead>
                 <tbody>
-                  {loading && <tr><td className="tableStateCell" colSpan={9}><TableState title="Memuat payroll" description="Menghitung preview payroll cycle." icon={BadgeDollarSign} /></td></tr>}
+                  {loading && <tr><td className="tableStateCell" colSpan={9}><TableState title="Memuat payroll" description="Menghitung preview gaji 26 hari." icon={BadgeDollarSign} /></td></tr>}
                   {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={9}><TableState title="Gagal memuat" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
                   {!loading && !errorMessage && pagedCycleRows.map((row, index) => (
                     <ClickableTableRow key={row.payrollCycleId || row.employeeId} label={`Lihat detail payroll ${row.fullName}`} onOpen={() => setDetailRow(row)}>
@@ -19177,11 +19766,11 @@ function PayrollPreviewTable({
                         <RowActionMenu label={`Aksi payroll ${row.fullName}`}>
                           <RowActionMenuItem disabled={!row.payrollCycleId || row.payrollStatus !== "ready"} onClick={() => onProcess(row, "lock")}>
                             <Lock size={15} />
-                            Finalkan Nominal
+                            Finalkan Gaji
                           </RowActionMenuItem>
                           <RowActionMenuItem disabled={!row.payrollCycleId || row.payrollStatus !== "locked"} onClick={() => onProcess(row, "mark_paid")}>
                             <CreditCard size={15} />
-                            Catat Pembayaran
+                            Tandai Terbayar
                           </RowActionMenuItem>
                           <RowActionMenuItem disabled={!row.payrollCycleId || row.payrollStatus !== "locked"} onClick={() => onProcess(row, "unlock")}>
                             <FileCheck2 size={15} />
@@ -19199,7 +19788,7 @@ function PayrollPreviewTable({
                       </td>
                     </ClickableTableRow>
                   ))}
-                  {!loading && !errorMessage && visibleCycleRows.length === 0 && <tr><td className="tableStateCell" colSpan={9}><TableState title="Tidak ada payroll" description="Belum ada data sesuai tab/filter ini." icon={Search} /></td></tr>}
+                  {!loading && !errorMessage && visibleCycleRows.length === 0 && <tr><td className="tableStateCell" colSpan={9}><TableState title="Tidak ada gaji 26 hari" description="Belum ada cycle sesuai tab/filter ini." icon={Search} /></td></tr>}
                 </tbody>
               </table>
             </div>
@@ -19215,6 +19804,42 @@ function PayrollPreviewTable({
               }}
             />
           </>
+        )}
+
+        {workspaceTab === "overtime" && (
+          <PayrollOvertimePaymentTable
+            rows={pagedOvertimeRows}
+            loading={loading}
+            errorMessage={errorMessage}
+            page={overtimePage}
+            pageSize={overtimePageSize}
+            totalRows={overtimePayableRows.length}
+            scrollProps={overtimeScrollProps}
+            onPayOvertime={onPayOvertime}
+            onPageChange={setOvertimePage}
+            onPageSizeChange={(nextSize) => {
+              setOvertimePageSize(nextSize)
+              setOvertimePage(1)
+            }}
+          />
+        )}
+
+        {workspaceTab === "history" && (
+          <PayrollUnifiedPaymentHistoryTable
+            rows={pagedPaymentRows}
+            loading={loading}
+            errorMessage={errorMessage}
+            page={historyPage}
+            pageSize={historyPageSize}
+            totalRows={unifiedPaymentRows.length}
+            scrollProps={historyScrollProps}
+            onVoidOvertimePayment={onVoidOvertimePayment}
+            onPageChange={setHistoryPage}
+            onPageSizeChange={(nextSize) => {
+              setHistoryPageSize(nextSize)
+              setHistoryPage(1)
+            }}
+          />
         )}
       </OperationalTableCard>
       <AttendanceMonitorDetailDialog row={detailRow} onClose={() => setDetailRow(null)} />
@@ -19287,10 +19912,86 @@ function buildPayrollPaymentHistoryRows(rows: PayrollPaymentRow[]) {
   })
 }
 
+function buildPayrollUnifiedPaymentRows(payments: PayrollPaymentRow[], overtimePayments: OvertimePaymentRow[]): PayrollUnifiedPaymentRow[] {
+  const salaryRows = payments.map((row) => ({
+    ...row,
+    id: `salary-${row.id}`,
+    source: "salary" as const,
+    overtimePaymentId: "",
+    requestCount: 0,
+    overtimeMinutes: 0,
+  }))
+  const overtimeRows = overtimePayments.map((row) => ({
+    id: `overtime-${row.id}`,
+    source: "overtime" as const,
+    paymentNo: row.paymentNo,
+    payrollCycleId: "",
+    overtimePaymentId: row.id,
+    employeeId: row.employeeId,
+    employeeCode: row.employeeCode,
+    employeeName: row.employeeName,
+    cycleNumber: 0,
+    periodStartedAt: row.periodStartedAt,
+    periodClosedAt: row.periodClosedAt,
+    grossAmount: 0,
+    overtimeAmount: row.overtimeAmount,
+    netAmount: row.overtimeAmount,
+    paidAmount: row.paidAmount,
+    paymentMethod: row.paymentMethod,
+    paymentReference: row.paymentReference,
+    paidAt: row.paidAt,
+    paidByName: row.paidByName,
+    status: row.status,
+    notes: row.notes,
+    requestCount: row.requestCount,
+    overtimeMinutes: row.overtimeMinutes,
+    overtimePayment: row,
+  }))
+
+  return [...salaryRows, ...overtimeRows].sort((a, b) => {
+    const first = new Date(a.paidAt || a.periodClosedAt || "").getTime()
+    const second = new Date(b.paidAt || b.periodClosedAt || "").getTime()
+    return (Number.isFinite(second) ? second : 0) - (Number.isFinite(first) ? first : 0)
+  })
+}
+
+function sortPayrollOvertimeRows(rows: OvertimeReviewRow[]) {
+  return [...rows].sort((a, b) => {
+    const paymentDiff = a.overtimePaymentStatus.localeCompare(b.overtimePaymentStatus)
+    if (paymentDiff !== 0) return paymentDiff
+    const dateDiff = new Date(`${b.overtimeDate}T00:00:00+07:00`).getTime() - new Date(`${a.overtimeDate}T00:00:00+07:00`).getTime()
+    if (Number.isFinite(dateDiff) && dateDiff !== 0) return dateDiff
+    const requestDiff = new Date(b.requestedAt || "").getTime() - new Date(a.requestedAt || "").getTime()
+    if (Number.isFinite(requestDiff) && requestDiff !== 0) return requestDiff
+    return b.fullName.localeCompare(a.fullName)
+  })
+}
+
+function getOvertimePaymentBlockReason(row: OvertimeReviewRow) {
+  if (row.status !== "approved") return "Lembur belum disetujui."
+  if (row.overtimePaymentStatus === "paid") return "Lembur sudah dibayar."
+  if (row.overtimePaymentStatus === "void") return "Pembayaran lembur pernah dibatalkan."
+  if (isOvertimePayrollFinal(row)) return getOvertimePayrollFinalLabel(row)
+  if (row.payrollStatus === "void") return "Cycle payroll dibatalkan."
+  if ((row.approvedMinutes || row.overtimeMinutes) <= 0) return "Durasi lembur belum valid."
+  if (row.totalAmount <= 0) return "Nominal lembur belum valid."
+  return ""
+}
+
+function getPayrollPaymentSourceLabel(source: PayrollPaymentSource) {
+  return source === "overtime" ? "Lembur terpisah" : "Gaji 26 hari"
+}
+
 function PayrollPaymentStatusBadge({ status }: { status: PayrollPaymentStatus }) {
   if (status === "paid") return <UiStatusBadge tone="valid">{payrollPaymentStatusLabel.paid}</UiStatusBadge>
   if (status === "reversed") return <UiStatusBadge tone="pending">{payrollPaymentStatusLabel.reversed}</UiStatusBadge>
   return <UiStatusBadge tone="failed">{payrollPaymentStatusLabel.void}</UiStatusBadge>
+}
+
+function OvertimePaymentStatusBadge({ status }: { status: OvertimePaymentStatus }) {
+  if (status === "paid") return <UiStatusBadge tone="valid">{overtimePaymentStatusLabel.paid}</UiStatusBadge>
+  if (status === "void") return <UiStatusBadge tone="failed">{overtimePaymentStatusLabel.void}</UiStatusBadge>
+  return <UiStatusBadge tone="pending">{overtimePaymentStatusLabel.unpaid}</UiStatusBadge>
 }
 
 function mapPaidCycleToPaymentHistory(row: AttendanceMonitorRow): PayrollPaymentRow {
@@ -19415,106 +20116,213 @@ function PayrollPaymentHistoryTable({
   )
 }
 
-function PayrollPreviewTableLegacy({
+function PayrollOvertimePaymentTable({
   rows,
   loading,
   errorMessage,
-  overtimeTotal,
-  onProcess,
+  page,
+  pageSize,
+  totalRows,
+  scrollProps,
+  onPayOvertime,
+  onPageChange,
+  onPageSizeChange,
 }: {
-  rows: AttendanceMonitorRow[]
+  rows: OvertimeReviewRow[]
   loading: boolean
   errorMessage: string
-  overtimeTotal: number
-  onProcess: (row: AttendanceMonitorRow, action: PayrollProcessAction) => void
+  page: number
+  pageSize: number
+  totalRows: number
+  scrollProps: ReturnType<typeof useHorizontalDragScroll<HTMLDivElement>>
+  onPayOvertime: (row: OvertimeReviewRow) => void
+  onPageChange: (page: number) => void
+  onPageSizeChange: (pageSize: number) => void
 }) {
-  const [detailRow, setDetailRow] = useState<AttendanceMonitorRow | null>(null)
-
   return (
     <>
-      <OperationalTableCard>
-        <div className="tableHeader">
-          <div>
-            <h2>Proses Payroll</h2>
-            <p>Finalisasi cycle 26 hari kerja: cek nominal, finalkan gaji, lalu catat pembayaran.</p>
-            <InlinePageStats items={[`${formatCurrency(overtimeTotal)} lembur disetujui`, "Siap Dicek bisa difinalkan", "Menunggu Bayar siap dicatat"]} />
-          </div>
-          <button className="secondaryButton" type="button" onClick={() => exportPayrollCsv(rows)} disabled={loading || rows.length === 0}>
-            <FileBarChart size={17} />
-            Export Rekap
-          </button>
-        </div>
-        <div className="tableScroller uiDataTableScroller uiDataTableHasColumns">
-          <table>
-            <colgroup>
-              <col className="tableNumberColumn" />
-              <col style={{ width: "240px" }} />
-              <col style={{ width: "230px" }} />
-              <col style={{ width: "140px" }} />
-              <col style={{ width: "150px" }} />
-              <col style={{ width: "150px" }} />
-              <col style={{ width: "160px" }} />
-              <col style={{ width: "150px" }} />
-              <col className="tableActionColumn" />
-            </colgroup>
-            <thead>
-              <tr>
-                <th className="tableNumberHeader">No</th>
-                <th>Karyawan</th>
-                <th>Periode</th>
-                <th>Gaji Pokok</th>
-                <th>Lembur</th>
-                    <th>Total Gaji</th>
-                <th>Cycle</th>
-                <th>Status</th>
-                <th className="tableActionHeader">Aksi</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading && <tr><td className="tableStateCell" colSpan={9}><TableState title="Memuat payroll" description="Menghitung preview payroll cycle." icon={BadgeDollarSign} /></td></tr>}
-              {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={9}><TableState title="Gagal memuat" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
-              {!loading && !errorMessage && rows.map((row, index) => (
-                <ClickableTableRow key={row.employeeId} label={`Lihat detail payroll ${row.fullName}`} onOpen={() => setDetailRow(row)}>
-                  <td><TableNumberCell value={index + 1} /></td>
-                  <td><EmployeeIdentityCell fullName={row.fullName} code={row.employeeCode} photoUrl={row.employeePhotoUrl} /></td>
-                  <td><TableText primary={formatPayrollPeriod(row)} secondary={row.payrollCycleNumber ? `Cycle ${row.payrollCycleNumber} · ${employeeSalaryTypeLabel[row.salaryType]}` : employeeSalaryTypeLabel[row.salaryType]} /></td>
-                  <td><TableText primary={row.basePayrollAmount ? formatCurrency(row.basePayrollAmount) : "-"} /></td>
-                  <td><TableText primary={row.overtimeAmount ? formatCurrency(row.overtimeAmount) : "-"} /></td>
-                  <td><TableText primary={row.payrollAmount ? formatCurrency(row.payrollAmount) : "-"} /></td>
-                  <td><span className="cycleCell"><ProgressRing value={row.cycleDays} /><span>{row.cycleDays}/{row.targetDays}</span></span></td>
-                  <td><PayrollStatusBadge status={row.payrollStatus} /></td>
+      <div className="tableScroller uiDataTableScroller uiDataTableHasColumns payrollOvertimeTableScroller" {...scrollProps}>
+        <table>
+          <colgroup>
+            <col className="tableNumberColumn" />
+            <col style={{ width: "250px" }} />
+            <col style={{ width: "160px" }} />
+            <col style={{ width: "160px" }} />
+            <col style={{ width: "160px" }} />
+            <col style={{ width: "155px" }} />
+            <col style={{ width: "165px" }} />
+            <col style={{ width: "190px" }} />
+            <col style={{ width: "150px" }} />
+            <col className="tableActionColumn" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th className="tableNumberHeader">No</th>
+              <th>Karyawan</th>
+              <th>Tanggal</th>
+              <th>Jadwal</th>
+              <th>Durasi</th>
+              <th>Rate</th>
+              <th>Total Lembur</th>
+              <th>Catatan</th>
+              <th>Status</th>
+              <th className="tableActionHeader">Aksi</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading && <tr><td className="tableStateCell" colSpan={10}><TableState title="Memuat lembur" description="Mengambil lembur approved yang belum dibayar." icon={BadgeDollarSign} /></td></tr>}
+            {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={10}><TableState title="Gagal memuat" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
+            {!loading && !errorMessage && rows.map((row, index) => {
+              const blockReason = getOvertimePaymentBlockReason(row)
+
+              return (
+                <tr key={row.id}>
+                  <td><TableNumberCell value={(page - 1) * pageSize + index + 1} /></td>
+                  <td><EmployeeIdentityCell fullName={row.fullName} code={`${row.employeeCode} / ${row.divisionName}`} photoUrl={row.employeePhotoUrl} /></td>
+                  <td><TableText primary={formatEmployeeDate(row.overtimeDate)} secondary={getOvertimeSourceLabel(row.requestSource)} /></td>
+                  <td><TableText primary={`${formatShiftClock(row.shiftStartTime)} - ${formatShiftClock(row.shiftEndTime)}`} secondary={getOvertimePlanRange(row)} /></td>
+                  <td><TableText primary={formatMinutesDuration(row.approvedMinutes || row.overtimeMinutes)} secondary={getOvertimeRealizationLabel(row)} /></td>
+                  <td><TableText primary={`${formatCurrency(row.rateAmount)}/jam`} secondary={row.componentName || (row.dayType === "sunday" ? "Lembur Minggu" : "Lembur Weekday")} /></td>
+                  <td><TableText primary={formatCurrency(row.totalAmount)} secondary={row.payrollCycleNumber ? `Cycle ${row.payrollCycleNumber}` : "Belum masuk cycle"} /></td>
+                  <td><TableText primary={blockReason || "Siap dibayar"} secondary={row.notes || row.requestReason || ""} /></td>
+                  <td><OvertimePaymentStatusBadge status={row.overtimePaymentStatus} /></td>
                   <td className="tableActionCell">
-                    <RowActionMenu label={`Aksi payroll ${row.fullName}`}>
-                      <RowActionMenuItem disabled={!row.payrollCycleId || row.payrollStatus !== "ready"} onClick={() => onProcess(row, "lock")}>
-                        <Lock size={15} />
-                        Finalkan Nominal
-                      </RowActionMenuItem>
-                      <RowActionMenuItem disabled={!row.payrollCycleId || row.payrollStatus !== "locked"} onClick={() => onProcess(row, "mark_paid")}>
+                    <RowActionMenu label={`Aksi lembur ${row.fullName}`}>
+                      <RowActionMenuItem disabled={Boolean(blockReason)} onClick={() => onPayOvertime(row)}>
                         <CreditCard size={15} />
-                        Catat Pembayaran
-                      </RowActionMenuItem>
-                      <RowActionMenuItem disabled={!row.payrollCycleId || row.payrollStatus !== "locked"} onClick={() => onProcess(row, "unlock")}>
-                        <FileCheck2 size={15} />
-                        Buka Koreksi
-                      </RowActionMenuItem>
-                      <RowActionMenuItem danger disabled={!row.payrollCycleId || row.payrollStatus === "paid" || row.payrollStatus === "void"} onClick={() => onProcess(row, "void")}>
-                        <Trash2 size={15} />
-                        Batalkan Cycle
-                      </RowActionMenuItem>
-                      <RowActionMenuItem disabled={!row.payrollCycleId || row.payrollStatus !== "void"} onClick={() => onProcess(row, "restore")}>
-                        <FileCheck2 size={15} />
-                        Pulihkan
+                        Bayar Lembur
                       </RowActionMenuItem>
                     </RowActionMenu>
                   </td>
-                </ClickableTableRow>
-              ))}
-              {!loading && !errorMessage && rows.length === 0 && <tr><td className="tableStateCell" colSpan={9}><TableState title="Tidak ada payroll" description="Belum ada data sesuai filter." icon={Search} /></td></tr>}
-            </tbody>
-          </table>
-        </div>
-      </OperationalTableCard>
-      <AttendanceMonitorDetailDialog row={detailRow} onClose={() => setDetailRow(null)} />
+                </tr>
+              )
+            })}
+            {!loading && !errorMessage && totalRows === 0 && <tr><td className="tableStateCell" colSpan={10}><TableState title="Tidak ada lembur belum dibayar" description="Lembur approved akan muncul di sini kalau belum dibayar terpisah dan belum masuk payroll final." icon={BadgeDollarSign} /></td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <DataTablePagination
+        page={page}
+        pageSize={pageSize}
+        totalRows={totalRows}
+        pageSizeOptions={[10, 25, 50, 100]}
+        onPageChange={onPageChange}
+        onPageSizeChange={onPageSizeChange}
+      />
+    </>
+  )
+}
+
+function PayrollUnifiedPaymentHistoryTable({
+  rows,
+  loading,
+  errorMessage,
+  page,
+  pageSize,
+  totalRows,
+  scrollProps,
+  onVoidOvertimePayment,
+  onPageChange,
+  onPageSizeChange,
+}: {
+  rows: PayrollUnifiedPaymentRow[]
+  loading: boolean
+  errorMessage: string
+  page: number
+  pageSize: number
+  totalRows: number
+  scrollProps: ReturnType<typeof useHorizontalDragScroll<HTMLDivElement>>
+  onVoidOvertimePayment: (row: OvertimePaymentRow) => void
+  onPageChange: (page: number) => void
+  onPageSizeChange: (pageSize: number) => void
+}) {
+  const copyPaymentNo = (paymentNo: string) => {
+    if (!paymentNo || !navigator.clipboard) return
+    void navigator.clipboard.writeText(paymentNo)
+  }
+
+  return (
+    <>
+      <div className="tableScroller uiDataTableScroller uiDataTableHasColumns payrollHistoryTableScroller" {...scrollProps}>
+        <table>
+          <colgroup>
+            <col className="tableNumberColumn" />
+            <col style={{ width: "170px" }} />
+            <col style={{ width: "190px" }} />
+            <col style={{ width: "240px" }} />
+            <col style={{ width: "220px" }} />
+            <col style={{ width: "190px" }} />
+            <col style={{ width: "165px" }} />
+            <col style={{ width: "170px" }} />
+            <col style={{ width: "180px" }} />
+            <col style={{ width: "140px" }} />
+            <col className="tableActionColumn" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th className="tableNumberHeader">No</th>
+              <th>Jenis</th>
+              <th>No Bayar</th>
+              <th>Karyawan</th>
+              <th>Periode</th>
+              <th>Rincian</th>
+              <th>Dibayar</th>
+              <th>Metode</th>
+              <th>Tanggal Bayar</th>
+              <th>Status</th>
+              <th className="tableActionHeader">Aksi</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading && <tr><td className="tableStateCell" colSpan={11}><TableState title="Memuat riwayat bayar" description="Mengambil transaksi gaji dan lembur." icon={CreditCard} /></td></tr>}
+            {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={11}><TableState title="Gagal memuat" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
+            {!loading && !errorMessage && rows.map((row, index) => (
+              <tr key={row.id || row.paymentNo}>
+                <td><TableNumberCell value={(page - 1) * pageSize + index + 1} /></td>
+                <td>
+                  <span className={clsx("payrollPaymentTypeBadge", row.source)}>
+                    {getPayrollPaymentSourceLabel(row.source)}
+                  </span>
+                </td>
+                <td><TableText primary={row.paymentNo || "-"} secondary={row.source === "salary" ? `Cycle ${row.cycleNumber || "-"}` : `${formatNumber(row.requestCount)} request`} /></td>
+                <td><TableText primary={row.employeeName} secondary={row.employeeCode || "-"} /></td>
+                <td><TableText primary={formatPayrollPaymentPeriod(row)} secondary={row.notes || ""} /></td>
+                <td>
+                  <TableText
+                    primary={row.source === "salary" ? `Gaji ${formatCurrency(row.grossAmount)}` : `${formatMinutesDuration(row.overtimeMinutes)} lembur`}
+                    secondary={row.source === "salary" ? `Lembur ikut cycle ${formatCurrency(row.overtimeAmount)}` : `Nominal lembur ${formatCurrency(row.overtimeAmount)}`}
+                  />
+                </td>
+                <td><TableText primary={formatCurrency(row.paidAmount)} secondary={row.paidByName || "Finance"} /></td>
+                <td><TableText primary={payrollPaymentMethodLabel[row.paymentMethod]} secondary={row.paymentReference || "Tanpa referensi"} /></td>
+                <td><TableText primary={formatUserDateTime(row.paidAt, "-")} /></td>
+                <td><PayrollPaymentStatusBadge status={row.status} /></td>
+                <td className="tableActionCell">
+                  <RowActionMenu label={`Aksi pembayaran ${row.paymentNo || row.employeeName}`}>
+                    <RowActionMenuItem disabled={!row.paymentNo} onClick={() => copyPaymentNo(row.paymentNo)}>
+                      <Copy size={15} />
+                      Copy No Bayar
+                    </RowActionMenuItem>
+                    <RowActionMenuItem danger disabled={row.source !== "overtime" || row.status !== "paid" || !row.overtimePayment} onClick={() => row.overtimePayment && onVoidOvertimePayment(row.overtimePayment)}>
+                      <RotateCcw size={15} />
+                      Batalkan Bayar Lembur
+                    </RowActionMenuItem>
+                  </RowActionMenu>
+                </td>
+              </tr>
+            ))}
+            {!loading && !errorMessage && totalRows === 0 && <tr><td className="tableStateCell" colSpan={11}><TableState title="Belum ada riwayat bayar" description="Transaksi muncul setelah gaji atau lembur dicatat sebagai terbayar." icon={CreditCard} /></td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <DataTablePagination
+        page={page}
+        pageSize={pageSize}
+        totalRows={totalRows}
+        pageSizeOptions={[10, 25, 50, 100]}
+        onPageChange={onPageChange}
+        onPageSizeChange={onPageSizeChange}
+      />
     </>
   )
 }

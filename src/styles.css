@@ -18018,14 +18018,44 @@ button {
   padding: 0 22px 16px;
 }
 
+.payrollWorkspaceCard .tableHeader {
+  padding-bottom: 14px;
+}
+
+.payrollCycleSubtabs {
+  padding: 0 22px 14px;
+}
+
 .payrollCycleTableScroller,
+.payrollOvertimeTableScroller,
 .payrollHistoryTableScroller {
   cursor: grab;
 }
 
 .payrollCycleTableScroller.dragging,
+.payrollOvertimeTableScroller.dragging,
 .payrollHistoryTableScroller.dragging {
   cursor: grabbing;
+}
+
+.payrollPaymentTypeBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0;
+  color: #0f766e;
+  font-size: 0.78rem;
+  font-weight: var(--fw-body-strong);
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.payrollPaymentTypeBadge.salary {
+  color: var(--blue-ink);
+}
+
+.payrollPaymentTypeBadge.overtime {
+  color: #b45309;
 }
 
 .payrollProcessDialog {
@@ -18305,6 +18335,10 @@ button {
   }
 
   .payrollTableToolbar {
+    padding-inline: 14px;
+  }
+
+  .payrollCycleSubtabs {
     padding-inline: 14px;
   }
 

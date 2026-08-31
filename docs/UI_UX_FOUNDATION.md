@@ -525,11 +525,15 @@ Payroll cycle harus sangat jelas:
 - Detail hari yang dihitung dan tidak dihitung.
 - Bonus, potongan, dan kasbon terpisah sebagai ledger.
 - Payroll final harus lock dan punya audit trail.
-- Proses payroll dan Riwayat Bayar harus dipisah dengan tab. Tab utama: `Berjalan`, `Siap Dicek`, `Final`, `Riwayat Bayar`, `Dibatalkan`, dan `Semua Cycle`. `Final` berarti nominal sudah dikunci dan sedang menunggu pembayaran. `Semua Cycle` adalah rekap cycle payroll per karyawan, bukan transaksi pembayaran.
-- Action `Catat Pembayaran` wajib membuat baris di `payroll_payments` berisi nomor bayar, tanggal bayar, metode, referensi, nominal, actor, dan catatan finance.
+- Proses payroll harus dipisah menjadi workspace: `Gaji 26 Hari`, `Bayar Lembur`, dan `Riwayat Bayar`.
+- Di workspace `Gaji 26 Hari`, tab status minimal: `Siap Dicek`, `Menunggu Bayar`, `Berjalan`, `Dibatalkan`, dan `Semua Gaji`. `Menunggu Bayar` berarti nominal sudah difinalkan dan siap dicatat sebagai terbayar.
+- Action `Tandai Terbayar` gaji wajib membuat baris di `payroll_payments` berisi nomor bayar, tanggal bayar, metode, referensi, nominal, actor, dan catatan finance.
+- Approved overtime punya dua jalur sah: ikut gajian setelah cycle 26 hari, atau dibayar terpisah mingguan/custom dari workspace `Bayar Lembur`.
+- Lembur yang sudah dibayar terpisah wajib masuk `overtime_payments`, tampil di `Riwayat Bayar`, dan dikeluarkan dari perhitungan tambahan lembur di payroll cycle 26 hari agar tidak double-pay.
+- Batalkan pembayaran lembur hanya boleh jika cycle terkait belum final/terbayar/dibatalkan, lalu request lembur kembali menjadi belum dibayar.
 - Data yang sudah `Terbayar` tidak boleh berubah otomatis saat refresh absensi/lembur. Kalau perlu koreksi setelah terbayar, lakukan via reversal/pembatalan terkontrol, bukan edit diam-diam.
 - Sebelum payroll dibayar, sistem wajib menolak jika masih ada absensi review atau lembur draft/pending di periode cycle tersebut.
-- Summary finance harus langsung menjawab total siap proses, cycle menunggu dibayar, total sudah terbayar, dan cycle yang masih berjalan.
+- Summary finance harus langsung menjawab total gaji siap proses, lembur belum dibayar, total sudah terbayar, dan cycle yang masih berjalan.
 
 ## Performance Rules
 

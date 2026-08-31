@@ -1,15 +1,17 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0"
 
-type PayrollProcessAction = "lock" | "mark_paid" | "unlock" | "void" | "restore"
+type PayrollProcessAction = "lock" | "mark_paid" | "unlock" | "void" | "restore" | "mark_overtime_paid" | "void_overtime_payment"
 type PayrollPaymentMethod = "cash" | "bank_transfer" | "ewallet" | "other"
 
 interface PayrollProcessPayload {
   cycleId?: string
+  overtimeRequestIds?: string[]
+  overtimePaymentId?: string
   notes?: string
   paymentMethod?: PayrollPaymentMethod
   paymentReference?: string
   paidAt?: string
-  paidAmount?: number
+  paidAmount?: number | string
 }
 
 const corsHeaders = {
@@ -59,11 +61,11 @@ function normalizePaidAmount(value: unknown, fallback: number) {
 
 function isMissingLedgerError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error || "")
-  return /payroll_payments|payroll_cycle_items|mark_payroll_cycle_paid|rebuild_payroll_cycle_items|schema cache|PGRST202/i.test(message)
+  return /payroll_payments|payroll_cycle_items|overtime_payments|overtime_payment_items|overtime_payment_status|mark_payroll_cycle_paid|mark_overtime_requests_paid|void_overtime_payment|rebuild_payroll_cycle_items|schema cache|PGRST202/i.test(message)
 }
 
 function ledgerMigrationMessage() {
-  return "Migration payroll payment ledger belum diterapkan. Jalankan migration 20260828000100_payroll_payment_ledger.sql lalu deploy ulang edge function."
+  return "Migration payment ledger belum diterapkan. Jalankan migration payroll/overtime ledger terbaru lalu deploy ulang edge function."
 }
 
 async function assertNoOpenPayrollDependencies(adminClient: any, cycle: Record<string, unknown>) {
@@ -134,8 +136,16 @@ Deno.serve(async (request) => {
     const action = body.action
     const payload = body.payload || {}
 
-    assertPayload(action === "lock" || action === "mark_paid" || action === "unlock" || action === "void" || action === "restore", "Action payroll tidak valid.")
-    assertPayload(payload.cycleId, "ID payroll cycle wajib ada.")
+    assertPayload(
+      action === "lock"
+      || action === "mark_paid"
+      || action === "unlock"
+      || action === "void"
+      || action === "restore"
+      || action === "mark_overtime_paid"
+      || action === "void_overtime_payment",
+      "Action payroll tidak valid.",
+    )
 
     const token = authorization.replace(/^Bearer\s+/i, "")
     const { data: authData, error: authError } = await userClient.auth.getUser(token)
@@ -161,6 +171,57 @@ Deno.serve(async (request) => {
     if (permissionError) throw permissionError
     if (!permission) return jsonResponse({ error: "Role tidak punya permission Proses Payroll." }, 403)
 
+    const notes = payload.notes?.trim()
+
+    if (action === "mark_overtime_paid") {
+      const requestIds = Array.isArray(payload.overtimeRequestIds)
+        ? payload.overtimeRequestIds.map((id) => String(id || "").trim()).filter(Boolean)
+        : []
+      const paidAmount = payload.paidAmount === undefined || payload.paidAmount === null || payload.paidAmount === ""
+        ? null
+        : normalizePaidAmount(payload.paidAmount, 1)
+
+      assertPayload(requestIds.length > 0, "Minimal satu request lembur wajib dipilih.")
+
+      const { data: paymentResult, error: paymentError } = await adminClient.rpc("mark_overtime_requests_paid", {
+        target_overtime_request_ids: requestIds,
+        actor_user_id: actor.id,
+        actor_name: String(actor.full_name || actor.email || "Finance"),
+        payment_method: normalizePaymentMethod(payload.paymentMethod),
+        payment_reference: payload.paymentReference?.trim() || null,
+        paid_at: normalizePaidAt(payload.paidAt),
+        paid_amount: paidAmount,
+        note_text: notes || "",
+      })
+
+      if (paymentError) {
+        if (isMissingLedgerError(paymentError)) throw new Error(ledgerMigrationMessage())
+        throw paymentError
+      }
+
+      return jsonResponse({ ok: true, ...paymentResult })
+    }
+
+    if (action === "void_overtime_payment") {
+      assertPayload(payload.overtimePaymentId, "ID pembayaran lembur wajib ada.")
+
+      const { data: paymentResult, error: paymentError } = await adminClient.rpc("void_overtime_payment", {
+        target_payment_id: payload.overtimePaymentId,
+        actor_user_id: actor.id,
+        actor_name: String(actor.full_name || actor.email || "Finance"),
+        note_text: notes || "",
+      })
+
+      if (paymentError) {
+        if (isMissingLedgerError(paymentError)) throw new Error(ledgerMigrationMessage())
+        throw paymentError
+      }
+
+      return jsonResponse({ ok: true, ...paymentResult })
+    }
+
+    assertPayload(payload.cycleId, "ID payroll cycle wajib ada.")
+
     const { data: cycle, error: cycleError } = await adminClient
       .from("payroll_cycles")
       .select("id, employee_id, cycle_number, work_days_count, target_work_days, gross_amount, overtime_amount, net_amount, status, notes, period_started_at, period_closed_at")
@@ -179,7 +240,6 @@ Deno.serve(async (request) => {
     if (employeeError) throw employeeError
 
     const now = new Date().toISOString()
-    const notes = payload.notes?.trim()
     const grossAmount = Number(cycle.gross_amount || 0)
     const overtimeAmount = Number(cycle.overtime_amount || 0)
     const savedNetAmount = Number(cycle.net_amount || 0)
