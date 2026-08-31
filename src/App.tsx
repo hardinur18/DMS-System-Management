@@ -657,6 +657,7 @@ function createEmptyEmployeeDirectoryData(): EmployeeDirectoryData {
 }
 
 type ShiftScheduleStatus = "active" | "cancelled"
+type ShiftScheduleDialogMode = "single" | "month"
 
 interface ShiftScheduleShiftOption extends EmployeeOption {
   startTime: string
@@ -701,9 +702,23 @@ interface ShiftScheduleData {
   schemaReady: boolean
 }
 
-interface ShiftScheduleFormValues {
+interface ShiftScheduleMonthEntry {
+  id: string
   employeeId: string
   scheduleDate: string
+  shiftId: string
+  workLocationId: string
+  status: ShiftScheduleStatus
+  notes: string
+}
+
+interface ShiftScheduleFormValues {
+  mode: ShiftScheduleDialogMode
+  employeeId: string
+  scheduleDate: string
+  scheduleMonth: string
+  selectedDates: string[]
+  dateShiftIds: Record<string, string>
   shiftId: string
   workLocationId: string
   notes: string
@@ -5643,6 +5658,14 @@ function getShiftScheduleTimeLabel(shift?: Pick<ShiftScheduleShiftOption, "start
   return `${formatShiftClock(shift.startTime)} - ${formatShiftClock(shift.endTime)}`
 }
 
+function getShiftScheduleDisplayShiftName(name?: string | null, fallback = "Belum pilih shift") {
+  const cleanName = String(name || "").trim()
+  if (!cleanName) return fallback
+
+  const normalizedName = cleanName.replace(/\s+/g, "").toUpperCase()
+  return normalizedName === "JAMNORMAL" ? "Default" : cleanName
+}
+
 function getShiftScheduleSourceLabel(row: ShiftScheduleRow) {
   if (row.scheduleId && row.scheduleStatus === "cancelled") return "Jadwal dibatalkan"
   if (row.source === "daily_schedule") return "Jadwal harian"
@@ -5658,17 +5681,89 @@ function getShiftScheduleStatusLabel(row: ShiftScheduleRow) {
 }
 
 function getShiftScheduleResolvedShiftName(row: ShiftScheduleRow) {
-  return row.source === "daily_schedule" ? row.scheduleShiftName || "Belum pilih shift" : row.defaultShiftName
+  return getShiftScheduleDisplayShiftName(row.source === "daily_schedule" ? row.scheduleShiftName : row.defaultShiftName)
 }
 
 function getShiftScheduleResolvedLocationName(row: ShiftScheduleRow) {
   return row.source === "daily_schedule" ? row.scheduleWorkLocationName || row.defaultWorkLocationName : row.defaultWorkLocationName
 }
 
-function createShiftScheduleFormValues(row: ShiftScheduleRow | null, fallbackDate = getLocalDateKey(), fallbackEmployeeId = ""): ShiftScheduleFormValues {
+const SHIFT_SCHEDULE_DAY_LABELS = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"]
+
+function getShiftScheduleMonthValue(dateKey = getLocalDateKey()) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(dateKey) ? dateKey.slice(0, 7) : getLocalDateKey().slice(0, 7)
+}
+
+function getShiftScheduleMonthDate(dateKey: string) {
+  const [year, month, day] = dateKey.split("-").map(Number)
+  if (!year || !month || !day) return null
+  const parsedDate = new Date(year, month - 1, day)
+  if (parsedDate.getFullYear() !== year || parsedDate.getMonth() !== month - 1 || parsedDate.getDate() !== day) return null
+  return parsedDate
+}
+
+function getShiftScheduleMonthDates(monthValue: string) {
+  const [year, month] = monthValue.split("-").map(Number)
+  if (!year || !month || month < 1 || month > 12) return getShiftScheduleMonthDates(getLocalDateKey().slice(0, 7))
+
+  const totalDays = new Date(year, month, 0).getDate()
+  return Array.from({ length: totalDays }, (_, index) => `${year}-${String(month).padStart(2, "0")}-${String(index + 1).padStart(2, "0")}`)
+}
+
+function formatShiftScheduleMonth(monthValue: string) {
+  const [year, month] = monthValue.split("-").map(Number)
+  if (!year || !month) return monthValue || "Bulan belum dipilih"
+  return new Intl.DateTimeFormat("id-ID", { month: "long", year: "numeric" }).format(new Date(year, month - 1, 1))
+}
+
+function getShiftScheduleDayLabel(dateKey: string) {
+  const parsedDate = getShiftScheduleMonthDate(dateKey)
+  return parsedDate ? SHIFT_SCHEDULE_DAY_LABELS[parsedDate.getDay()] : "-"
+}
+
+function normalizeShiftScheduleDates(dates: string[]) {
+  return Array.from(new Set(dates.filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date)))).sort()
+}
+
+function getShiftScheduleMonthRange(monthValue: string) {
+  const dates = getShiftScheduleMonthDates(monthValue)
   return {
+    startDate: dates[0] || `${getLocalDateKey().slice(0, 7)}-01`,
+    endDate: dates[dates.length - 1] || getLocalDateKey(),
+  }
+}
+
+const SHIFT_SCHEDULE_TONES = [
+  { surface: "rgba(236, 253, 255, 0.94)", border: "rgba(34, 174, 202, 0.56)", text: "#075f72", dot: "#06b6d4" },
+  { surface: "rgba(240, 253, 244, 0.96)", border: "rgba(34, 197, 94, 0.44)", text: "#166534", dot: "#22c55e" },
+  { surface: "rgba(255, 251, 235, 0.96)", border: "rgba(245, 158, 11, 0.46)", text: "#92400e", dot: "#f59e0b" },
+  { surface: "rgba(239, 246, 255, 0.96)", border: "rgba(59, 130, 246, 0.44)", text: "#1d4ed8", dot: "#3b82f6" },
+  { surface: "rgba(254, 242, 242, 0.96)", border: "rgba(248, 113, 113, 0.46)", text: "#991b1b", dot: "#ef4444" },
+  { surface: "rgba(245, 243, 255, 0.96)", border: "rgba(139, 92, 246, 0.42)", text: "#5b21b6", dot: "#8b5cf6" },
+]
+
+function getShiftScheduleToneStyle(shiftId: string, shifts: ShiftScheduleShiftOption[], mode: "default" | "override" = "override"): CSSProperties {
+  const directIndex = shifts.findIndex((shift) => shift.id === shiftId)
+  const fallbackIndex = shiftId.split("").reduce((total, character) => total + character.charCodeAt(0), 0)
+  const tone = SHIFT_SCHEDULE_TONES[(directIndex >= 0 ? directIndex : fallbackIndex) % SHIFT_SCHEDULE_TONES.length]
+
+  return {
+    "--shift-surface": mode === "default" ? "rgba(255, 255, 255, 0.78)" : tone.surface,
+    "--shift-border": mode === "default" ? "rgba(148, 163, 184, 0.18)" : tone.border,
+    "--shift-text": mode === "default" ? "#64748b" : tone.text,
+    "--shift-dot": mode === "default" ? "rgba(148, 163, 184, 0.62)" : tone.dot,
+  } as CSSProperties
+}
+
+function createShiftScheduleFormValues(row: ShiftScheduleRow | null, fallbackDate = getLocalDateKey(), fallbackEmployeeId = ""): ShiftScheduleFormValues {
+  const scheduleDate = row?.scheduleDate || fallbackDate
+  return {
+    mode: "single",
     employeeId: row?.employeeId || fallbackEmployeeId,
-    scheduleDate: row?.scheduleDate || fallbackDate,
+    scheduleDate,
+    scheduleMonth: getShiftScheduleMonthValue(scheduleDate),
+    selectedDates: [scheduleDate],
+    dateShiftIds: row?.scheduleShiftId ? { [scheduleDate]: row.scheduleShiftId } : {},
     shiftId: row?.scheduleShiftId || row?.defaultShiftId || "",
     workLocationId: row?.scheduleWorkLocationId || row?.defaultWorkLocationId || "",
     notes: row?.scheduleNotes || "",
@@ -5779,12 +5874,48 @@ async function loadShiftScheduleData(targetDate = getLocalDateKey()): Promise<Sh
   return { rows, divisions, locations, shifts, schemaReady: scheduleSchemaReady }
 }
 
+async function loadEmployeeShiftSchedulesForMonth(employeeId: string, monthValue: string): Promise<ShiftScheduleMonthEntry[]> {
+  if (!employeeId || !/^\d{4}-\d{2}$/.test(monthValue)) return []
+
+  const { startDate, endDate } = getShiftScheduleMonthRange(monthValue)
+  const { data, error } = await supabase
+    .from("employee_shift_schedules")
+    .select("id, employee_id, schedule_date, shift_id, work_location_id, status, notes")
+    .eq("employee_id", employeeId)
+    .gte("schedule_date", startDate)
+    .lte("schedule_date", endDate)
+    .order("schedule_date", { ascending: true })
+
+  if (error) {
+    if (isMissingShiftScheduleSchema(error)) return []
+    throw error
+  }
+
+  return ((data || []) as Array<Record<string, unknown>>)
+    .filter((row) => mapShiftScheduleStatus(row.status) === "active")
+    .map((row) => ({
+      id: String(row.id || ""),
+      employeeId: String(row.employee_id || ""),
+      scheduleDate: String(row.schedule_date || ""),
+      shiftId: String(row.shift_id || ""),
+      workLocationId: String(row.work_location_id || ""),
+      status: mapShiftScheduleStatus(row.status),
+      notes: String(row.notes || ""),
+    }))
+}
+
 function validateShiftScheduleForm(values: ShiftScheduleFormValues) {
   const errors: string[] = []
 
   if (!values.employeeId) errors.push("Karyawan wajib dipilih.")
-  if (!values.scheduleDate || !/^\d{4}-\d{2}-\d{2}$/.test(values.scheduleDate)) errors.push("Tanggal jadwal wajib valid.")
-  if (!values.shiftId) errors.push("Shift wajib dipilih.")
+  if (values.mode === "month") {
+    if (!/^\d{4}-\d{2}$/.test(values.scheduleMonth)) errors.push("Bulan jadwal wajib valid.")
+    const targetDates = normalizeShiftScheduleDates(values.selectedDates.filter((date) => date.startsWith(`${values.scheduleMonth}-`)))
+    if (targetDates.length === 0) errors.push("Minimal satu tanggal harus dicentang.")
+    if (targetDates.some((date) => !values.dateShiftIds[date] && !values.shiftId)) errors.push("Semua tanggal terpilih wajib punya shift.")
+  } else if (!values.scheduleDate || !/^\d{4}-\d{2}-\d{2}$/.test(values.scheduleDate)) {
+    errors.push("Tanggal jadwal wajib valid.")
+  } else if (!values.shiftId) errors.push("Shift wajib dipilih.")
 
   return errors
 }
@@ -5793,33 +5924,43 @@ async function saveEmployeeShiftSchedule(values: ShiftScheduleFormValues, editin
   const errors = validateShiftScheduleForm(values)
   if (errors.length) throw new Error(errors[0])
 
-  const payload = {
+  const targetDates = values.mode === "month"
+    ? normalizeShiftScheduleDates(values.selectedDates.filter((date) => date.startsWith(`${values.scheduleMonth}-`)))
+    : [values.scheduleDate]
+  const payload = targetDates.map((scheduleDate) => ({
     employee_id: values.employeeId,
-    schedule_date: values.scheduleDate,
-    shift_id: values.shiftId,
+    schedule_date: scheduleDate,
+    shift_id: values.mode === "month" ? values.dateShiftIds[scheduleDate] || values.shiftId : values.shiftId,
     work_location_id: values.workLocationId || null,
     status: "active",
     notes: values.notes.trim() || null,
-  }
+  }))
   const { error } = await supabase
     .from("employee_shift_schedules")
     .upsert(payload, { onConflict: "employee_id,schedule_date" })
 
   if (error) throw error
 
-  await supabase.rpc("refresh_attendance_daily_summary", {
-    target_employee_id: values.employeeId,
-    target_attendance_date: values.scheduleDate,
-  }).then(({ error: refreshError }) => {
-    if (refreshError) throw refreshError
-  })
+  await Promise.all(targetDates.map((scheduleDate) => (
+    supabase.rpc("refresh_attendance_daily_summary", {
+      target_employee_id: values.employeeId,
+      target_attendance_date: scheduleDate,
+    }).then(({ error: refreshError }) => {
+      if (refreshError) throw refreshError
+    })
+  )))
   await refreshEmployeePayrollCyclesSilently(values.employeeId)
   await writeAuditLog(editingRow?.scheduleId ? "Update employee shift schedule" : "Create employee shift schedule", "employee_shift_schedules", editingRow?.scheduleId || values.employeeId, {
     employee_id: values.employeeId,
-    schedule_date: values.scheduleDate,
-    shift_id: values.shiftId,
+    schedule_date: values.mode === "single" ? targetDates[0] : null,
+    schedule_dates: values.mode === "month" ? targetDates : null,
+    schedule_mode: values.mode,
+    shift_id: values.mode === "single" ? values.shiftId : null,
+    shift_ids: values.mode === "month" ? Array.from(new Set(targetDates.map((date) => values.dateShiftIds[date] || values.shiftId))).filter(Boolean) : null,
     work_location_id: values.workLocationId || null,
   }).catch(() => {})
+
+  return targetDates
 }
 
 async function cancelEmployeeShiftSchedule(row: ShiftScheduleRow) {
@@ -8731,19 +8872,20 @@ function ShiftSchedulesPage({
     setErrorMessage("")
 
     try {
-      await saveEmployeeShiftSchedule(formValues, editingRow)
+      const savedDates = await saveEmployeeShiftSchedule(formValues, editingRow)
+      const nextSelectedDate = savedDates.includes(selectedDate) ? selectedDate : savedDates[0] || formValues.scheduleDate
       setDialogOpen(false)
       setEditingRow(null)
-      if (formValues.scheduleDate !== selectedDate) setSelectedDate(formValues.scheduleDate)
+      if (nextSelectedDate !== selectedDate) setSelectedDate(nextSelectedDate)
       await reloadScheduleData({
-        cacheKey: `shift-schedules:${formValues.scheduleDate}`,
+        cacheKey: `shift-schedules:${nextSelectedDate}`,
         silent: true,
-        load: () => loadShiftScheduleData(formValues.scheduleDate),
+        load: () => loadShiftScheduleData(nextSelectedDate),
       })
       showToast({
         tone: "success",
-        title: "Jadwal shift tersimpan",
-        description: "Summary absensi tanggal ini sudah dihitung ulang.",
+        title: formValues.mode === "month" ? `${savedDates.length} jadwal shift tersimpan` : "Jadwal shift tersimpan",
+        description: formValues.mode === "month" ? "Summary absensi tanggal terpilih sudah dihitung ulang." : "Summary absensi tanggal ini sudah dihitung ulang.",
       })
     } catch (error) {
       const message = getFriendlySupabaseError(error, "Jadwal shift belum bisa disimpan.")
@@ -8970,7 +9112,7 @@ function ShiftSchedulesPage({
                       <td className="tableNumberCell"><TableNumberCell value={(currentPage - 1) * Math.min(pageSize, 50) + index + 1} /></td>
                       <td><EmployeeIdentityCell fullName={row.fullName} code={row.employeeCode} photoUrl={row.photoUrl} onOpen={() => openCreateDialog(row)} /></td>
                       <td><TableText primary={row.divisionName} secondary={row.divisionId ? "Aktif" : "Belum dipilih"} /></td>
-                      <td><TableText primary={row.defaultShiftName} secondary={getShiftScheduleTimeLabel({ startTime: row.defaultShiftStartTime, endTime: row.defaultShiftEndTime })} /></td>
+                      <td><TableText primary={getShiftScheduleDisplayShiftName(row.defaultShiftName)} secondary={getShiftScheduleTimeLabel({ startTime: row.defaultShiftStartTime, endTime: row.defaultShiftEndTime })} /></td>
                       <td><TableText primary={resolvedShiftName} secondary={resolvedTimeLabel} /></td>
                       <td><TableText primary={resolvedLocationName} secondary={row.source === "daily_schedule" && row.scheduleWorkLocationId ? "Override lokasi" : "Lokasi default"} /></td>
                       <td><TableText primary={getShiftScheduleSourceLabel(row)} secondary={row.updatedAt ? `Update ${formatUserDateTime(row.updatedAt, "-")}` : "Belum ada override"} /></td>
@@ -9037,7 +9179,7 @@ function ShiftSchedulesPage({
           <div className="confirmDialogPreview">
             <span>{formatEmployeeDate(cancelRow.scheduleDate)}</span>
             <strong>{cancelRow.fullName}</strong>
-            <small>{cancelRow.scheduleShiftName || cancelRow.defaultShiftName} - {cancelRow.scheduleWorkLocationName || cancelRow.defaultWorkLocationName}</small>
+            <small>{getShiftScheduleDisplayShiftName(cancelRow.scheduleShiftName || cancelRow.defaultShiftName)} - {cancelRow.scheduleWorkLocationName || cancelRow.defaultWorkLocationName}</small>
           </div>
         )}
       </ConfirmDialog>
@@ -9084,7 +9226,7 @@ function ShiftScheduleDialog({
     .filter((shift) => shift.isActive || shift.id === values.shiftId)
     .map((shift) => ({
       value: shift.id,
-      label: shift.name,
+      label: getShiftScheduleDisplayShiftName(shift.name),
       description: `${shift.code} - ${getShiftScheduleTimeLabel(shift)}`,
       searchLabel: `${shift.code} ${shift.name} ${shift.startTime} ${shift.endTime}`,
     }))
@@ -9108,15 +9250,194 @@ function ShiftScheduleDialog({
     ? getShiftScheduleTimeLabel({ startTime: selectedEmployee.defaultShiftStartTime, endTime: selectedEmployee.defaultShiftEndTime })
     : "Pilih karyawan dulu"
   const selectedScheduleTime = selectedShift ? getShiftScheduleTimeLabel(selectedShift) : "Pilih shift"
+  const monthDates = useMemo(() => getShiftScheduleMonthDates(values.scheduleMonth || getShiftScheduleMonthValue(values.scheduleDate)), [values.scheduleDate, values.scheduleMonth])
+  const selectedDateSet = useMemo(() => new Set(normalizeShiftScheduleDates(values.selectedDates)), [values.selectedDates])
+  const selectedMonthDates = useMemo(
+    () => normalizeShiftScheduleDates(values.selectedDates.filter((date) => date.startsWith(`${values.scheduleMonth}-`))),
+    [values.scheduleMonth, values.selectedDates],
+  )
+  const selectedDateCount = values.mode === "month" ? selectedMonthDates.length : values.scheduleDate ? 1 : 0
+  const [monthScheduleLoading, setMonthScheduleLoading] = useState(false)
+  const monthHydrationKeyRef = useRef("")
+  const monthlyShiftSummary = useMemo(() => {
+    const counts = new Map<string, number>()
+    selectedMonthDates.forEach((date) => {
+      const shiftId = values.dateShiftIds[date] || values.shiftId
+      if (shiftId) counts.set(shiftId, (counts.get(shiftId) || 0) + 1)
+    })
+
+    return Array.from(counts.entries()).map(([shiftId, count]) => ({
+      shift: shifts.find((shift) => shift.id === shiftId),
+      count,
+    }))
+  }, [selectedMonthDates, shifts, values.dateShiftIds, values.shiftId])
+  const scheduleScopeLabel = values.mode === "month"
+    ? `${selectedDateCount} tanggal / ${monthlyShiftSummary.length || 0} shift - ${formatShiftScheduleMonth(values.scheduleMonth)}`
+    : formatEmployeeDate(values.scheduleDate)
+
+  useEffect(() => {
+    if (!open) {
+      monthHydrationKeyRef.current = ""
+      setMonthScheduleLoading(false)
+      return
+    }
+
+    if (!schemaReady || values.mode !== "month" || !values.employeeId || !/^\d{4}-\d{2}$/.test(values.scheduleMonth)) return
+
+    const hydrationKey = `${values.employeeId}:${values.scheduleMonth}`
+    if (monthHydrationKeyRef.current === hydrationKey) return
+
+    let cancelled = false
+    monthHydrationKeyRef.current = hydrationKey
+    setMonthScheduleLoading(true)
+
+    loadEmployeeShiftSchedulesForMonth(values.employeeId, values.scheduleMonth)
+      .then((entries) => {
+        if (cancelled) return
+
+        const monthDateSet = new Set(getShiftScheduleMonthDates(values.scheduleMonth))
+        const storedDates = entries.map((entry) => entry.scheduleDate).filter(Boolean)
+        const nextDateShiftIds = { ...values.dateShiftIds }
+        monthDateSet.forEach((dateKey) => delete nextDateShiftIds[dateKey])
+        entries.forEach((entry) => {
+          if (entry.scheduleDate && entry.shiftId) nextDateShiftIds[entry.scheduleDate] = entry.shiftId
+        })
+
+        const sameLocationId = entries.length > 0 && entries.every((entry) => entry.workLocationId === entries[0].workLocationId)
+          ? entries[0].workLocationId
+          : values.workLocationId
+        const sameNotes = entries.length > 0 && entries.every((entry) => entry.notes === entries[0].notes)
+          ? entries[0].notes
+          : values.notes
+
+        onChange({
+          ...values,
+          selectedDates: normalizeShiftScheduleDates([
+            ...values.selectedDates.filter((dateKey) => !monthDateSet.has(dateKey)),
+            ...storedDates,
+          ]),
+          dateShiftIds: nextDateShiftIds,
+          shiftId: values.shiftId || entries[0]?.shiftId || selectedEmployee?.defaultShiftId || "",
+          workLocationId: values.workLocationId || sameLocationId || selectedEmployee?.defaultWorkLocationId || "",
+          notes: values.notes || sameNotes || "",
+        })
+      })
+      .catch((error) => {
+        if (!cancelled) console.warn("Failed to load monthly shift schedules", error)
+      })
+      .finally(() => {
+        if (!cancelled) setMonthScheduleLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [open, schemaReady, selectedEmployee?.defaultShiftId, selectedEmployee?.defaultWorkLocationId, values.employeeId, values.mode, values.scheduleMonth])
 
   const handleEmployeeChange = (employeeId: string) => {
     const employee = rows.find((item) => item.employeeId === employeeId)
+    monthHydrationKeyRef.current = ""
     onChange({
       ...values,
       employeeId,
-      shiftId: values.shiftId || employee?.defaultShiftId || "",
-      workLocationId: values.workLocationId || employee?.defaultWorkLocationId || "",
+      selectedDates: values.mode === "month" ? [] : values.selectedDates,
+      dateShiftIds: values.mode === "month" ? {} : values.dateShiftIds,
+      shiftId: employee?.defaultShiftId || values.shiftId || "",
+      workLocationId: employee?.defaultWorkLocationId || values.workLocationId || "",
     })
+  }
+
+  const handleModeChange = (mode: ShiftScheduleDialogMode) => {
+    if (mode === values.mode) return
+
+    const scheduleMonth = getShiftScheduleMonthValue(values.scheduleDate)
+    const selectedDates = mode === "month" ? normalizeShiftScheduleDates(values.selectedDates.length ? values.selectedDates : [values.scheduleDate]) : [values.scheduleDate]
+    const dateShiftIds = mode === "month"
+      ? selectedDates.reduce<Record<string, string>>((acc, date) => {
+          acc[date] = values.dateShiftIds[date] || values.shiftId
+          return acc
+        }, {})
+      : { [values.scheduleDate]: values.dateShiftIds[values.scheduleDate] || values.shiftId }
+
+    onChange({
+      ...values,
+      mode,
+      scheduleMonth,
+      selectedDates,
+      dateShiftIds,
+    })
+  }
+
+  const handleScheduleDateChange = (scheduleDate: string) => {
+    onChange({
+      ...values,
+      scheduleDate,
+      scheduleMonth: getShiftScheduleMonthValue(scheduleDate),
+      selectedDates: [scheduleDate],
+      dateShiftIds: { [scheduleDate]: values.shiftId },
+    })
+  }
+
+  const handleScheduleMonthChange = (scheduleMonth: string) => {
+    monthHydrationKeyRef.current = ""
+    const nextDates = normalizeShiftScheduleDates(values.selectedDates.filter((date) => date.startsWith(`${scheduleMonth}-`)))
+    const nextShiftIds = nextDates.reduce<Record<string, string>>((acc, date) => {
+      if (values.dateShiftIds[date]) acc[date] = values.dateShiftIds[date]
+      return acc
+    }, {})
+
+    onChange({
+      ...values,
+      scheduleMonth,
+      selectedDates: nextDates,
+      dateShiftIds: nextShiftIds,
+    })
+  }
+
+  const handleShiftChange = (shiftId: string) => {
+    onChange({
+      ...values,
+      shiftId,
+      dateShiftIds: values.mode === "single" && values.scheduleDate
+        ? { ...values.dateShiftIds, [values.scheduleDate]: shiftId }
+        : values.dateShiftIds,
+    })
+  }
+
+  const toggleMonthDate = (dateKey: string) => {
+    if (!values.shiftId) return
+
+    const currentShiftId = values.dateShiftIds[dateKey]
+    const nextShiftIds = { ...values.dateShiftIds }
+    let nextDates = values.selectedDates
+
+    if (selectedDateSet.has(dateKey) && currentShiftId === values.shiftId) {
+      nextDates = values.selectedDates.filter((date) => date !== dateKey)
+      delete nextShiftIds[dateKey]
+    } else {
+      nextDates = selectedDateSet.has(dateKey) ? values.selectedDates : [...values.selectedDates, dateKey]
+      nextShiftIds[dateKey] = values.shiftId
+    }
+
+    onChange({ ...values, selectedDates: normalizeShiftScheduleDates(nextDates), dateShiftIds: nextShiftIds })
+  }
+
+  const selectMonthDates = (mode: "all" | "workdays" | "clear") => {
+    if (mode !== "clear" && !values.shiftId) return
+
+    const nextDates = mode === "clear"
+      ? []
+      : monthDates.filter((dateKey) => {
+          if (mode === "all") return true
+          const date = getShiftScheduleMonthDate(dateKey)
+          return date ? date.getDay() >= 1 && date.getDay() <= 6 : false
+        })
+    const nextShiftIds = { ...values.dateShiftIds }
+    monthDates.forEach((date) => delete nextShiftIds[date])
+    nextDates.forEach((date) => {
+      nextShiftIds[date] = values.shiftId
+    })
+    onChange({ ...values, selectedDates: nextDates, dateShiftIds: nextShiftIds })
   }
 
   return (
@@ -9134,13 +9455,13 @@ function ShiftScheduleDialog({
           </span>
           <div>
             <span>Jadwal Shift</span>
-            <h2 id="shift-schedule-dialog-title">{row?.scheduleId ? "Edit Jadwal Harian" : "Tambah Jadwal Harian"}</h2>
-            <p id="shift-schedule-dialog-description">Dipakai saat karyawan pindah shift/lokasi pada tanggal tertentu. Default karyawan tetap menjadi fallback.</p>
+            <h2 id="shift-schedule-dialog-title">{row?.scheduleId ? "Edit Jadwal Shift" : "Tambah Jadwal Shift"}</h2>
+            <p id="shift-schedule-dialog-description">Dipakai saat karyawan pindah shift/lokasi. Bisa satu tanggal atau banyak tanggal dalam satu bulan, default karyawan tetap menjadi fallback.</p>
           </div>
           <FoundationDialogCloseButton label="Tutup jadwal shift" onClose={onClose} disabled={saving} />
         </div>
 
-        <div className="shiftScheduleDialogBody">
+        <div className={clsx("shiftScheduleDialogBody", values.mode === "month" && "monthMode")}>
           {!schemaReady && (
             <div className="inlineAlert">
               Migration jadwal shift belum aktif, jadi perubahan belum bisa disimpan ke database.
@@ -9155,15 +9476,26 @@ function ShiftScheduleDialog({
             </div>
             <div>
               <small>Default karyawan</small>
-              <strong>{selectedEmployee?.defaultShiftName || "Belum ada shift"}</strong>
+              <strong>{getShiftScheduleDisplayShiftName(selectedEmployee?.defaultShiftName, "Belum ada shift")}</strong>
               <span>{selectedDefaultShiftTime}</span>
             </div>
             <div className="active">
-              <small>Jadwal tanggal ini</small>
-              <strong>{selectedShift?.name || "Belum pilih shift"}</strong>
-              <span>{selectedScheduleTime}</span>
+              <small>{values.mode === "month" ? "Jadwal bulanan" : "Jadwal tanggal ini"}</small>
+              <strong>{getShiftScheduleDisplayShiftName(selectedShift?.name)}</strong>
+              <span>{selectedScheduleTime} / {scheduleScopeLabel}</span>
             </div>
           </section>
+
+          <SegmentedFormField<ShiftScheduleDialogMode>
+            label="Mode Input"
+            value={values.mode}
+            columns={2}
+            onChange={handleModeChange}
+            options={[
+              { value: "single", label: "Satu Tanggal", description: "Override satu hari tertentu." },
+              { value: "month", label: "Bulanan", description: "Centang banyak tanggal dalam satu bulan." },
+            ]}
+          />
 
           <div className="shiftScheduleFormGrid">
             <FormField label="Karyawan" required>
@@ -9177,21 +9509,35 @@ function ShiftScheduleDialog({
                 disabled={saving}
               />
             </FormField>
-            <DateFormField
-              label="Tanggal Jadwal"
-              value={values.scheduleDate}
-              onChange={(scheduleDate) => onChange({ ...values, scheduleDate })}
-              required
-              disabled={saving}
-            />
+            {values.mode === "single" ? (
+              <DateFormField
+                label="Tanggal Jadwal"
+                value={values.scheduleDate}
+                onChange={handleScheduleDateChange}
+                required
+                disabled={saving}
+              />
+            ) : (
+              <FormField label="Bulan Jadwal" required helperText={`${selectedDateCount} tanggal akan disimpan sebagai jadwal harian.`}>
+                <div className="uiInput shiftScheduleMonthInput">
+                  <CalendarCheck2 size={16} />
+                  <input
+                    type="month"
+                    value={values.scheduleMonth}
+                    onChange={(event) => handleScheduleMonthChange(event.target.value)}
+                    disabled={saving}
+                  />
+                </div>
+              </FormField>
+            )}
             <FormField label="Shift" required>
               <FoundationSelect
-                label="Pilih shift harian"
+                label={values.mode === "month" ? "Pilih shift aktif untuk tanggal" : "Pilih shift harian"}
                 value={values.shiftId}
                 options={shiftOptions}
-                placeholder="Pilih shift"
+                placeholder={values.mode === "month" ? "Pilih shift aktif" : "Pilih shift"}
                 searchable={shiftOptions.length > 8}
-                onChange={(shiftId) => onChange({ ...values, shiftId })}
+                onChange={handleShiftChange}
                 disabled={saving}
               />
             </FormField>
@@ -9218,13 +9564,71 @@ function ShiftScheduleDialog({
               </FormField>
             </div>
           </div>
+          {values.mode === "month" && (
+            <section className="shiftScheduleBulkPanel" aria-label="Pilih tanggal jadwal bulanan">
+              <div className="shiftScheduleBulkHeader">
+                <div>
+                  <span>Checklist Bulanan</span>
+                  <strong>{formatShiftScheduleMonth(values.scheduleMonth)}</strong>
+                </div>
+                <div className="shiftScheduleBulkActions">
+                  <button type="button" onClick={() => selectMonthDates("all")} disabled={saving || monthScheduleLoading}>Semua</button>
+                  <button type="button" onClick={() => selectMonthDates("workdays")} disabled={saving || monthScheduleLoading}>Sen-Sab</button>
+                  <button type="button" onClick={() => selectMonthDates("clear")} disabled={saving || monthScheduleLoading}>Kosongkan</button>
+                </div>
+              </div>
+              <p className="shiftScheduleBulkHint">
+                {monthScheduleLoading ? "Membaca jadwal tersimpan dari database..." : "Pilih shift aktif, lalu klik tanggal. Tanggal kosong tetap memakai default shift karyawan."}
+              </p>
+              {monthlyShiftSummary.length > 0 && (
+                <div className="shiftScheduleBulkSummary" aria-label="Ringkasan jadwal bulanan">
+                  {monthlyShiftSummary.map(({ shift, count }) => (
+                    <span key={shift?.id || "missing"} style={getShiftScheduleToneStyle(shift?.id || "", shifts)}>
+                      <strong>{getShiftScheduleDisplayShiftName(shift?.name, "Shift belum dipilih")}</strong>
+                      {count} tanggal
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="shiftScheduleDayGrid">
+                {monthDates.map((dateKey) => {
+                  const checked = selectedDateSet.has(dateKey)
+                  const assignedShift = shifts.find((shift) => shift.id === values.dateShiftIds[dateKey])
+                  const defaultShift = shifts.find((shift) => shift.id === selectedEmployee?.defaultShiftId)
+                  const effectiveShift = assignedShift || defaultShift
+                  const defaultShiftLabel = getShiftScheduleDisplayShiftName(selectedEmployee?.defaultShiftName || defaultShift?.name, "Default shift")
+                  const dayShiftLabel = checked
+                    ? getShiftScheduleDisplayShiftName(assignedShift?.name, "Shift aktif")
+                    : "Default karyawan"
+                  return (
+                    <label
+                      className={clsx("shiftScheduleDayCheck", checked ? "selected" : "default")}
+                      key={dateKey}
+                      style={getShiftScheduleToneStyle(effectiveShift?.id || selectedEmployee?.defaultShiftId || "", shifts, checked ? "override" : "default")}
+                      title={checked ? `Jadwal khusus: ${dayShiftLabel}` : `Default karyawan: ${defaultShiftLabel}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleMonthDate(dateKey)}
+                        disabled={saving || monthScheduleLoading}
+                      />
+                      <span>{getShiftScheduleDayLabel(dateKey)}</span>
+                      <strong>{Number(dateKey.slice(-2))}</strong>
+                      <em>{checked ? dayShiftLabel : "Default karyawan"}</em>
+                    </label>
+                  )
+                })}
+              </div>
+            </section>
+          )}
         </div>
 
         <div className="dialogActions shiftScheduleDialogActions">
           <button className="secondaryButton" type="button" onClick={onClose} disabled={saving}>Batal</button>
-          <button className="primaryButton" type="submit" disabled={saving || !schemaReady}>
+          <button className="primaryButton" type="submit" disabled={saving || monthScheduleLoading || !schemaReady || (values.mode === "month" && selectedDateCount === 0)}>
             <FileCheck2 size={17} />
-            {saving ? "Menyimpan..." : "Simpan Jadwal"}
+            {saving ? "Menyimpan..." : values.mode === "month" ? `Simpan ${selectedDateCount || ""} Jadwal` : "Simpan Jadwal"}
           </button>
         </div>
       </form>
