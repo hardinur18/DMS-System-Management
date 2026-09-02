@@ -13314,6 +13314,33 @@ button {
   min-width: 92px;
 }
 
+.payrollStatusStack {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 126px;
+}
+
+.payrollCheckoutNote {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  border: 1px solid rgba(245, 158, 11, 0.24);
+  border-radius: 999px;
+  color: #a35c00;
+  background: #fff7ed;
+  font-size: 0.68rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.payrollCheckoutNote svg {
+  flex: 0 0 auto;
+}
+
 .statusPill {
   display: inline-flex;
   min-height: 28px;

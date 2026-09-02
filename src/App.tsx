@@ -12,6 +12,7 @@ import {
   CalendarCheck2,
   Camera,
   ClipboardList,
+  Clock3,
   ChevronDown,
   CreditCard,
   Crown,
@@ -185,6 +186,8 @@ interface AttendanceMonitorRow {
   payrollLockedAt: string
   payrollPaidAt: string
   payrollStatus: PayrollStatus
+  payrollNeedsCheckout: boolean
+  payrollCheckoutNote: string
   payrollAmount: number
   basePayrollAmount: number
   overtimeAmount: number
@@ -7511,6 +7514,16 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
     const payroll = (summaryPayrollId ? payrollById.get(summaryPayrollId) : undefined) || payrollByEmployee.get(employeeId)
     const cycleDays = Number(payroll?.work_days_count ?? employee.payroll_cycle_days ?? 0)
     const targetDays = Number(payroll?.target_work_days ?? 26)
+    const payrollPeriodClosedAt = String(payroll?.period_closed_at || "")
+    const payrollClosingSummary = payrollPeriodClosedAt ? summaryByEmployeeDate.get(`${employeeId}:${payrollPeriodClosedAt}`) : undefined
+    const payrollNeedsCheckout = Boolean(
+      payroll
+      && mapPayrollCycleStatus(payroll.status) === "ready"
+      && cycleDays >= targetDays
+      && payrollClosingSummary?.check_in_log_id
+      && !payrollClosingSummary?.check_out_log_id
+      && mapDailySummarySettlementStatus(payrollClosingSummary.settlement_status) === "missing_checkout",
+    )
     const salaryType = mapEmployeeSalaryType(payroll?.salary_type || employee.salary_type)
     const basePayrollAmount = Number(payroll?.gross_amount || 0)
     const overtimeAmount = Number(payroll?.overtime_amount || 0)
@@ -7623,11 +7636,13 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
       payrollCycleId: String(payroll?.id || summaryPayrollId || ""),
       payrollCycleNumber: Number(payroll?.cycle_number || 0),
       periodStartedAt: String(payroll?.period_started_at || ""),
-      periodClosedAt: String(payroll?.period_closed_at || ""),
+      periodClosedAt: payrollPeriodClosedAt,
       payrollReadyAt: String(payroll?.ready_at || ""),
       payrollLockedAt: String(payroll?.locked_at || ""),
       payrollPaidAt: String(payroll?.paid_at || ""),
       payrollStatus: mapPayrollCycleStatus(payroll?.status),
+      payrollNeedsCheckout,
+      payrollCheckoutNote: payrollNeedsCheckout ? "Hari ke-26 baru check-in. Checkout belum tercatat." : "",
       payrollAmount,
       basePayrollAmount,
       overtimeAmount,
@@ -19761,7 +19776,17 @@ function PayrollPreviewTable({
                       <td><TableText primary={row.overtimeAmount ? formatCurrency(row.overtimeAmount) : "-"} secondary={row.overtimeApprovedMinutes ? `${formatMinutesDuration(row.overtimeApprovedMinutes)} disetujui` : ""} /></td>
                       <td><TableText primary={row.payrollAmount ? formatCurrency(row.payrollAmount) : "-"} secondary={row.payrollStatus === "paid" ? "Masuk riwayat bayar" : row.payrollStatus === "locked" ? "Menunggu bayar" : ""} /></td>
                       <td><span className="cycleCell"><ProgressRing value={row.cycleDays} /><span>{row.cycleDays}/{row.targetDays}</span></span></td>
-                      <td><PayrollStatusBadge status={row.payrollStatus} /></td>
+                      <td>
+                        <div className="payrollStatusStack">
+                          <PayrollStatusBadge status={row.payrollStatus} />
+                          {row.payrollNeedsCheckout && (
+                            <span className="payrollCheckoutNote">
+                              <Clock3 size={13} />
+                              Menunggu pulang
+                            </span>
+                          )}
+                        </div>
+                      </td>
                       <td className="tableActionCell">
                         <RowActionMenu label={`Aksi payroll ${row.fullName}`}>
                           <RowActionMenuItem disabled={!row.payrollCycleId || row.payrollStatus !== "ready"} onClick={() => onProcess(row, "lock")}>
