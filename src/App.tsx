@@ -188,6 +188,9 @@ interface AttendanceMonitorRow {
   payrollStatus: PayrollStatus
   payrollNeedsCheckout: boolean
   payrollCheckoutNote: string
+  payrollEligible: boolean
+  employeePayPolicy: EmployeePayPolicy
+  employmentTypeName: string
   payrollAmount: number
   basePayrollAmount: number
   overtimeAmount: number
@@ -653,7 +656,16 @@ type PasswordDeliveryMode = "manual" | "email"
 type EmployeeStatus = "active" | "review" | "inactive"
 type EmployeeSalaryType = "daily" | "monthly"
 type EmployeePayrollMethod = "attendance_cycle" | "calendar_month" | "custom"
+type EmployeePayPolicy = "salary" | "allowance" | "unpaid" | "not_counted"
 type EmployeeDirectoryTab = "all" | EmployeeStatus | "archived"
+
+interface EmploymentTypeOption extends EmployeeOption {
+  description: string
+  payrollEligibleDefault: boolean
+  defaultPayPolicy: EmployeePayPolicy
+  allowanceAmount: number
+  requiresAttendance: boolean
+}
 
 interface EmployeeDirectoryRow {
   id: string
@@ -677,6 +689,13 @@ interface EmployeeDirectoryRow {
   monthlySalary: number
   payrollMethod: EmployeePayrollMethod
   prorateEnabled: boolean
+  employmentTypeId: string
+  employmentTypeCode: string
+  employmentTypeName: string
+  payrollEligible: boolean
+  employeePayPolicy: EmployeePayPolicy
+  allowanceAmount: number
+  attendanceRequired: boolean
   qrToken: string
   rfidUid: string
   attendancePolicyId: string
@@ -720,6 +739,12 @@ interface EmployeeFormValues {
   monthlySalary: string
   payrollMethod: EmployeePayrollMethod
   prorateEnabled: boolean
+  employmentTypeId: string
+  payrollEligible: boolean
+  employeePayPolicy: EmployeePayPolicy
+  allowanceAmount: string
+  attendanceRequired: boolean
+  employmentSchemaReady: boolean
   qrToken: string
   rfidUid: string
   attendancePolicyId: string
@@ -757,13 +782,14 @@ interface EmployeeDirectoryData {
   positions: EmployeeOption[]
   locations: EmployeeOption[]
   shifts: EmployeeOption[]
+  employmentTypes: EmploymentTypeOption[]
   policies: AttendancePolicyOption[]
   kioskSchemaReady: boolean
   payrollOpeningSchemaReady: boolean
 }
 
 function createEmptyEmployeeDirectoryData(): EmployeeDirectoryData {
-  return { rows: [], divisions: [], positions: [], locations: [], shifts: [], policies: [], kioskSchemaReady: true, payrollOpeningSchemaReady: true }
+  return { rows: [], divisions: [], positions: [], locations: [], shifts: [], employmentTypes: [], policies: [], kioskSchemaReady: true, payrollOpeningSchemaReady: true }
 }
 
 type ShiftScheduleStatus = "active" | "cancelled"
@@ -1163,7 +1189,7 @@ interface RolePermissionData {
   matrix: Record<string, Record<string, boolean>>
 }
 
-type MasterCategoryId = "all" | "roles" | "divisions" | "positions" | "shifts" | "locations" | "payroll-components"
+type MasterCategoryId = "all" | "roles" | "divisions" | "positions" | "shifts" | "locations" | "employment-types" | "payroll-components"
 
 interface MasterCategory {
   id: MasterCategoryId
@@ -1199,6 +1225,10 @@ interface MasterDataRow {
   overtimeBasis?: string
   autoDetectOvertime?: boolean
   requiresApproval?: boolean
+  payrollEligibleDefault?: boolean
+  defaultPayPolicy?: EmployeePayPolicy
+  allowanceAmount?: number
+  requiresAttendance?: boolean
   isSystem?: boolean
   sortOrder?: number
 }
@@ -1225,6 +1255,10 @@ interface MasterDataFormValues {
   overtimeBasis: OvertimeCalculationBasis
   autoDetectOvertime: boolean
   requiresApproval: boolean
+  payrollEligibleDefault: boolean
+  defaultPayPolicy: EmployeePayPolicy
+  allowanceAmount: string
+  requiresAttendance: boolean
   status: string
   sortOrder: string
 }
@@ -1898,6 +1932,7 @@ const masterCategories: MasterCategory[] = [
   { id: "positions", label: "Jabatan", description: "Level kerja", icon: UserRoundCheck },
   { id: "shifts", label: "Shift", description: "Jam operasional", icon: CalendarCheck2 },
   { id: "locations", label: "Lokasi Kerja", description: "Radius absensi", icon: LocateFixed },
+  { id: "employment-types", label: "Status Kerja", description: "Tetap, kontrak, PKL", icon: ClipboardList },
   { id: "payroll-components", label: "Komponen Gaji", description: "Payroll dan kasbon", icon: BadgeDollarSign },
 ]
 
@@ -1981,6 +2016,17 @@ const payrollPaymentStatusLabel: Record<PayrollPaymentStatus, string> = {
   reversed: "Dikoreksi",
 }
 
+const employeePayPolicyLabel: Record<EmployeePayPolicy, string> = {
+  salary: "Gaji reguler",
+  allowance: "Uang saku",
+  unpaid: "Tidak dibayar",
+  not_counted: "Tidak masuk payroll",
+}
+
+function isPayrollEligibleAttendanceRow(row: Pick<AttendanceMonitorRow, "payrollEligible" | "employeePayPolicy">) {
+  return row.payrollEligible && row.employeePayPolicy !== "unpaid" && row.employeePayPolicy !== "not_counted"
+}
+
 const overtimePaymentStatusLabel: Record<OvertimePaymentStatus, string> = {
   unpaid: "Belum dibayar",
   paid: "Terbayar",
@@ -2047,6 +2093,13 @@ const masterCategoryCopy: Record<Exclude<MasterCategoryId, "all">, {
     nameLabel: "Nama Komponen",
     namePlaceholder: "Contoh: Bonus Kehadiran",
   },
+  "employment-types": {
+    createTitle: "Tambah Status Kerja",
+    editTitle: "Edit Status Kerja",
+    description: "Status kerja menentukan apakah orang ikut payroll, hanya uang saku, atau hanya monitoring absensi.",
+    nameLabel: "Nama Status Kerja",
+    namePlaceholder: "Contoh: PKL / Magang",
+  },
 }
 
 const masterTableColumnsByCategory: Record<MasterCategoryId, MasterTableColumn[]> = {
@@ -2087,6 +2140,12 @@ const masterTableColumnsByCategory: Record<MasterCategoryId, MasterTableColumn[]
     { key: "usage", label: "Koordinat / Alamat", width: "360px" },
     { key: "status", label: "Status", width: "120px" },
   ],
+  "employment-types": [
+    { key: "name", label: "Status Kerja", width: "300px" },
+    { key: "detail", label: "Payroll", width: "260px" },
+    { key: "usage", label: "Absensi", width: "260px" },
+    { key: "status", label: "Status", width: "120px" },
+  ],
   "payroll-components": [
     { key: "name", label: "Komponen Gaji", width: "300px" },
     { key: "detail", label: "Jenis", width: "190px" },
@@ -2101,6 +2160,7 @@ const masterCodePrefixes: Record<Exclude<MasterCategoryId, "all">, string> = {
   positions: "POS",
   shifts: "SFT",
   locations: "LOC",
+  "employment-types": "EMPSTAT",
   "payroll-components": "PAY",
 }
 
@@ -2151,6 +2211,10 @@ function createEmptyMasterForm(categoryId: Exclude<MasterCategoryId, "all">): Ma
     overtimeBasis: "extra_after_shift",
     autoDetectOvertime: false,
     requiresApproval: true,
+    payrollEligibleDefault: true,
+    defaultPayPolicy: "salary",
+    allowanceAmount: "0",
+    requiresAttendance: true,
     status: "Aktif",
     sortOrder: "0",
   }
@@ -2199,22 +2263,28 @@ function buildMasterRow(
     overtimeBasis: row.overtime_basis === "full_duration" ? "full_duration" : "extra_after_shift",
     autoDetectOvertime: row.auto_detect_overtime === true,
     requiresApproval: row.requires_approval !== false,
+    payrollEligibleDefault: row.payroll_eligible_default !== false,
+    defaultPayPolicy: mapEmployeePayPolicy(row.default_pay_policy),
+    allowanceAmount: row.allowance_amount === null || row.allowance_amount === undefined ? 0 : Number(row.allowance_amount),
+    requiresAttendance: row.requires_attendance !== false,
     isSystem: Boolean(row.is_system),
     sortOrder: typeof row.sort_order === "number" ? row.sort_order : 0,
   }
 }
 
 async function loadMasterDataRows() {
-  const [roles, divisions, positions, locations, shifts, payrollComponents] = await Promise.all([
+  const [roles, divisions, positions, locations, shifts, employmentTypes, payrollComponents] = await Promise.all([
     supabase.from("roles").select("id, code, name, description, level, is_system, is_active, sort_order").order("sort_order", { ascending: true }).order("level", { ascending: true }),
     supabase.from("divisions").select("id, code, name, description, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
     supabase.from("positions").select("id, code, name, division_id, description, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
     supabase.from("work_locations").select("id, code, name, address, latitude, longitude, radius_m, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
     supabase.from("shifts").select("id, code, name, start_time, end_time, late_tolerance_minutes, early_leave_tolerance_minutes, description, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
+    supabase.from("employee_employment_types").select("id, code, name, description, payroll_eligible_default, default_pay_policy, allowance_amount, requires_attendance, is_system, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
     supabase.from("payroll_components").select("id, code, name, component_type, description, calculation_unit, rate_amount, day_type, overtime_basis, auto_detect_overtime, requires_approval, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
   ])
 
-  const error = roles.error || divisions.error || positions.error || locations.error || shifts.error || payrollComponents.error
+  const employmentTypeError = employmentTypes.error && !isMissingEmploymentTypeSchema(employmentTypes.error) ? employmentTypes.error : null
+  const error = roles.error || divisions.error || positions.error || locations.error || shifts.error || employmentTypeError || payrollComponents.error
 
   if (error) {
     throw error
@@ -2228,6 +2298,7 @@ async function loadMasterDataRows() {
     ...(positions.data || []).map((row) => buildMasterRow("positions", row, { manager: row.division_id ? divisionNameMap.get(String(row.division_id)) || "Belum pilih divisi" : "Belum pilih divisi", usedBy: row.description || "Karyawan, user" })),
     ...(locations.data || []).map((row) => buildMasterRow("locations", row, { manager: "HR", usedBy: `${row.address || "GPS absensi"}${row.latitude && row.longitude ? `, ${row.latitude}, ${row.longitude}` : ""}` })),
     ...(shifts.data || []).map((row) => buildMasterRow("shifts", row, { manager: "Operasional", usedBy: row.description || "Absensi" })),
+    ...(employmentTypes.error ? [] : (employmentTypes.data || []).map((row) => buildMasterRow("employment-types", row, { manager: "HR + Finance", usedBy: row.payroll_eligible_default === false ? "Absensi tanpa payroll" : "Absensi dan payroll" }))),
     ...(payrollComponents.data || []).map((row) => buildMasterRow("payroll-components", row, { manager: "Finance", usedBy: row.description || (row.component_type === "deduction" ? "Potongan payroll" : "Penambah payroll") })),
   ]
 }
@@ -2268,6 +2339,17 @@ function createMasterPayload(values: MasterDataFormValues, codeOverride?: string
     }
   }
 
+  if (values.categoryId === "employment-types") {
+    return {
+      ...basePayload,
+      payroll_eligible_default: values.payrollEligibleDefault,
+      default_pay_policy: values.payrollEligibleDefault ? values.defaultPayPolicy : "not_counted",
+      allowance_amount: Number(values.allowanceAmount || 0),
+      requires_attendance: values.requiresAttendance,
+      is_system: false,
+    }
+  }
+
   if (values.categoryId === "roles") {
     return { ...basePayload, level: Number(values.level || 100), is_system: false }
   }
@@ -2296,6 +2378,7 @@ function getMasterTableName(categoryId: Exclude<MasterCategoryId, "all">) {
     positions: "positions",
     shifts: "shifts",
     locations: "work_locations",
+    "employment-types": "employee_employment_types",
     "payroll-components": "payroll_components",
   }
 
@@ -2559,6 +2642,14 @@ function validateMasterForm(values: MasterDataFormValues) {
     if (values.autoDetectOvertime && values.dayType === "all" && values.overtimeBasis === "full_duration") errors.push("Basis Full Durasi Kerja tidak boleh dipakai untuk Semua Hari.")
   }
 
+  if (values.categoryId === "employment-types") {
+    const allowanceAmount = Number(values.allowanceAmount)
+
+    if (!values.defaultPayPolicy) errors.push("Policy pembayaran wajib dipilih.")
+    if (!Number.isFinite(allowanceAmount) || allowanceAmount < 0) errors.push("Nominal uang saku wajib angka 0 atau lebih.")
+    if (values.defaultPayPolicy === "allowance" && values.payrollEligibleDefault && allowanceAmount <= 0) errors.push("Uang saku wajib lebih dari 0 kalau policy Uang Saku aktif.")
+  }
+
   return errors
 }
 
@@ -2594,6 +2685,11 @@ function getMasterUsageWarnings(row: MasterDataRow, rows: MasterDataRow[]): Mast
     warnings.push({ label: "Rate", value: row.calculationUnit === "hour" ? `${formatCurrency(row.rateAmount || 0)} / jam` : getPayrollCalculationLabel(row.calculationUnit) })
     if (row.autoDetectOvertime) warnings.push({ label: "Auto Lembur", value: getPayrollDayTypeLabel(row.dayType) })
     if (row.autoDetectOvertime) warnings.push({ label: "Basis Hitung", value: getOvertimeBasisLabel(row.overtimeBasis) })
+  }
+
+  if (row.categoryId === "employment-types") {
+    warnings.push({ label: "Payroll default", value: row.payrollEligibleDefault ? employeePayPolicyLabel[row.defaultPayPolicy || "salary"] : "Tidak ikut payroll" })
+    warnings.push({ label: "Absensi", value: row.requiresAttendance ? "Wajib absensi Biofinger" : "Opsional absensi" })
   }
 
   return warnings
@@ -2658,6 +2754,15 @@ function getMasterDetailFields(row: MasterDataRow): MasterDetailField[] {
       { label: "Auto Detect Lembur", value: row.autoDetectOvertime ? "Aktif" : "Tidak" },
       { label: "Perlu Approval", value: row.requiresApproval ? "Ya" : "Tidak" },
       { label: "Dipakai Di", value: getMasterUsage(row) },
+    )
+  }
+
+  if (row.categoryId === "employment-types") {
+    fields.push(
+      { label: "Payroll default", value: row.payrollEligibleDefault ? employeePayPolicyLabel[row.defaultPayPolicy || "salary"] : "Tidak ikut payroll" },
+      { label: "Uang saku", value: formatCurrency(row.allowanceAmount || 0) },
+      { label: "Wajib absensi", value: row.requiresAttendance ? "Ya" : "Tidak" },
+      { label: "Status sistem", value: row.isSystem ? "Default sistem" : "Custom" },
     )
   }
 
@@ -2731,6 +2836,11 @@ function getMasterDetail(row: MasterDataRow) {
     if (row.calculationUnit === "hour") return `${getPayrollComponentLabel(row.componentType)} / ${formatCurrency(row.rateAmount || 0)}/jam`
     return `${getPayrollComponentLabel(row.componentType)} / ${getPayrollCalculationLabel(row.calculationUnit)}`
   }
+  if (row.categoryId === "employment-types") {
+    return row.payrollEligibleDefault
+      ? `${employeePayPolicyLabel[row.defaultPayPolicy || "salary"]}${row.defaultPayPolicy === "allowance" ? ` / ${formatCurrency(row.allowanceAmount || 0)}` : ""}`
+      : "Tidak ikut payroll"
+  }
   return row.description || row.usedBy || "-"
 }
 
@@ -2739,6 +2849,7 @@ function getMasterUsage(row: MasterDataRow) {
   if (row.categoryId === "positions") return row.usedBy || "Karyawan, user"
   if (row.categoryId === "shifts") return row.description || formatShiftTolerance(row)
   if (row.categoryId === "locations") return formatMasterCoordinate(row)
+  if (row.categoryId === "employment-types") return row.requiresAttendance ? "Wajib absensi Biofinger" : "Absensi opsional"
   return row.usedBy || "-"
 }
 
@@ -4460,7 +4571,20 @@ async function getNextEmployeeCode(rows: EmployeeDirectoryRow[]) {
 }
 
 function getEmployeeSalaryAmount(row: EmployeeDirectoryRow) {
+  if (row.employeePayPolicy === "allowance") return row.allowanceAmount
+  if (!row.payrollEligible || row.employeePayPolicy === "unpaid" || row.employeePayPolicy === "not_counted") return 0
   return row.salaryType === "monthly" ? row.monthlySalary : row.dailySalary
+}
+
+function mapEmployeePayPolicy(value: unknown): EmployeePayPolicy {
+  if (value === "allowance" || value === "unpaid" || value === "not_counted") return value
+  return "salary"
+}
+
+function getEmploymentTypeSummary(row: Pick<EmployeeDirectoryRow, "payrollEligible" | "employeePayPolicy" | "allowanceAmount" | "attendanceRequired">) {
+  const payrollLabel = row.payrollEligible ? employeePayPolicyLabel[row.employeePayPolicy] : "Tidak ikut payroll"
+  const allowanceLabel = row.employeePayPolicy === "allowance" ? ` ${formatCurrency(row.allowanceAmount)}` : ""
+  return `${payrollLabel}${allowanceLabel} · Absensi ${row.attendanceRequired ? "wajib" : "opsional"}`
 }
 
 function getEmployeePhotoPublicUrl(path: string) {
@@ -4515,6 +4639,12 @@ function createEmptyEmployeeForm(rows: EmployeeDirectoryRow[] = []): EmployeeFor
     monthlySalary: "0",
     payrollMethod: "attendance_cycle",
     prorateEnabled: true,
+    employmentTypeId: "",
+    payrollEligible: true,
+    employeePayPolicy: "salary",
+    allowanceAmount: "0",
+    attendanceRequired: true,
+    employmentSchemaReady: true,
     qrToken: generateEmployeeQrToken(employeeCode),
     rfidUid: "",
     attendancePolicyId: "",
@@ -4780,6 +4910,22 @@ function isMissingKioskEmployeeSchema(error: unknown) {
   ]
 
   return optionalKioskSchemaHints.some((hint) => message.includes(hint))
+}
+
+function isMissingEmploymentTypeSchema(error: unknown) {
+  const errorObject = error && typeof error === "object" ? error as { message?: unknown; details?: unknown; hint?: unknown } : null
+  const message = `${String(errorObject?.message || "")} ${String(errorObject?.details || "")} ${String(errorObject?.hint || "")}`.toLowerCase()
+
+  return [
+    "employee_employment_types",
+    "employment_type_id",
+    "payroll_eligible",
+    "employee_pay_policy",
+    "allowance_amount",
+    "attendance_required",
+    "schema cache",
+    "relationship",
+  ].some((hint) => message.includes(hint))
 }
 
 function isMissingBiofingerSchema(error: unknown) {
@@ -5624,12 +5770,15 @@ function mapEmployeeRow(
   faceProfileMap = new Map<string, Record<string, unknown>>(),
   faceUrlMap = new Map<string, string>(),
   biofingerLinkMap = new Map<string, EmployeeBiofingerLink[]>(),
+  employmentTypeMap = new Map<string, EmploymentTypeOption>(),
 ): EmployeeDirectoryRow {
   const divisionId = row.division_id ? String(row.division_id) : ""
   const positionId = row.position_id ? String(row.position_id) : ""
   const workLocationId = row.work_location_id ? String(row.work_location_id) : ""
   const shiftId = row.shift_id ? String(row.shift_id) : ""
   const attendancePolicyId = row.attendance_policy_id ? String(row.attendance_policy_id) : ""
+  const employmentTypeId = row.employment_type_id ? String(row.employment_type_id) : ""
+  const employmentType = employmentTypeMap.get(employmentTypeId)
   const faceProfile = faceProfileMap.get(String(row.id))
   const referenceImagePath = String(faceProfile?.reference_image_path || "")
 
@@ -5655,6 +5804,13 @@ function mapEmployeeRow(
     monthlySalary: Number(row.monthly_salary || 0),
     payrollMethod: mapEmployeePayrollMethod(row.payroll_method),
     prorateEnabled: row.prorate_enabled !== false,
+    employmentTypeId,
+    employmentTypeCode: employmentType?.code || "",
+    employmentTypeName: employmentType?.name || "Karyawan Tetap",
+    payrollEligible: row.payroll_eligible !== false,
+    employeePayPolicy: mapEmployeePayPolicy(row.employee_pay_policy),
+    allowanceAmount: Number(row.allowance_amount || 0),
+    attendanceRequired: row.attendance_required !== false,
     qrToken: String(row.qr_token || ""),
     rfidUid: String(row.rfid_uid || ""),
     attendancePolicyId,
@@ -5683,15 +5839,18 @@ function mapEmployeeRow(
 async function loadEmployeeData(): Promise<EmployeeDirectoryData> {
   const legacyEmployeeSelect = "id, employee_code, full_name, photo_path, nik, phone, email, division_id, position_id, work_location_id, shift_id, salary_type, daily_salary, monthly_salary, payroll_method, prorate_enabled, join_date, payroll_cycle_days, status, notes, deleted_at, created_at"
   const baseEmployeeSelect = `${legacyEmployeeSelect}, payroll_cycle_opening_date`
+  const employmentEmployeeSelect = `${baseEmployeeSelect}, employment_type_id, payroll_eligible, employee_pay_policy, allowance_amount, attendance_required`
   const legacyKioskEmployeeSelect = `${legacyEmployeeSelect}, qr_token, rfid_uid, attendance_policy_id, kiosk_access_enabled, last_card_issued_at`
   const kioskEmployeeSelect = `${baseEmployeeSelect}, qr_token, rfid_uid, attendance_policy_id, kiosk_access_enabled, last_card_issued_at`
-  const employeeQuery = supabase.from("employees").select(kioskEmployeeSelect).order("employee_code", { ascending: true })
-  const [initialEmployeesResult, divisions, positions, locations, shifts, faceProfiles, policies, biofingerLinksResult, biofingerDevicesResult] = await Promise.all([
+  const employmentKioskEmployeeSelect = `${employmentEmployeeSelect}, qr_token, rfid_uid, attendance_policy_id, kiosk_access_enabled, last_card_issued_at`
+  const employeeQuery = supabase.from("employees").select(employmentKioskEmployeeSelect).order("employee_code", { ascending: true })
+  const [initialEmployeesResult, divisions, positions, locations, shifts, employmentTypesResult, faceProfiles, policies, biofingerLinksResult, biofingerDevicesResult] = await Promise.all([
     employeeQuery,
     supabase.from("divisions").select("id, code, name, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
     supabase.from("positions").select("id, code, name, division_id, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
     supabase.from("work_locations").select("id, code, name, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
     supabase.from("shifts").select("id, code, name, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
+    supabase.from("employee_employment_types").select("id, code, name, description, payroll_eligible_default, default_pay_policy, allowance_amount, requires_attendance, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
     supabase.from("employee_face_profiles").select("id, employee_id, status, verification_required, face_score_threshold, reference_image_path, submitted_at, reviewed_at, review_notes"),
     supabase.from("attendance_policies").select("id, code, name, allowed_media, require_face, require_location, status").order("code", { ascending: true }),
     supabase.from("employee_attendance_device_links").select("id, employee_id, attendance_device_id, external_user_id, external_uid, external_name, status, matched_by, last_seen_at, last_synced_at"),
@@ -5699,13 +5858,21 @@ async function loadEmployeeData(): Promise<EmployeeDirectoryData> {
   ])
   let kioskSchemaReady = true
   let payrollOpeningSchemaReady = true
+  let employmentSchemaReady = true
   let employeesResult = initialEmployeesResult as {
     data: Array<Record<string, unknown>> | null
     error: unknown | null
   }
 
   if (initialEmployeesResult.error) {
-    if (isMissingPayrollOpeningSchema(initialEmployeesResult.error)) {
+    if (isMissingEmploymentTypeSchema(initialEmployeesResult.error)) {
+      employmentSchemaReady = false
+      employeesResult = await supabase.from("employees").select(kioskEmployeeSelect).order("employee_code", { ascending: true })
+      if (employeesResult.error && isMissingKioskEmployeeSchema(employeesResult.error)) {
+        kioskSchemaReady = false
+        employeesResult = await supabase.from("employees").select(baseEmployeeSelect).order("employee_code", { ascending: true })
+      }
+    } else if (isMissingPayrollOpeningSchema(initialEmployeesResult.error)) {
       payrollOpeningSchemaReady = false
       employeesResult = await supabase.from("employees").select(legacyKioskEmployeeSelect).order("employee_code", { ascending: true })
 
@@ -5723,7 +5890,8 @@ async function loadEmployeeData(): Promise<EmployeeDirectoryData> {
       }
     }
   }
-  const error = employeesResult.error || divisions.error || positions.error || locations.error || shifts.error || faceProfiles.error
+  const employmentTypeError = employmentTypesResult.error && !isMissingEmploymentTypeSchema(employmentTypesResult.error) ? employmentTypesResult.error : null
+  const error = employeesResult.error || divisions.error || positions.error || locations.error || shifts.error || employmentTypeError || faceProfiles.error
 
   if (error) throw error
 
@@ -5746,6 +5914,17 @@ async function loadEmployeeData(): Promise<EmployeeDirectoryData> {
     name: String(row.name || ""),
     isActive: row.is_active !== false,
   }))
+  const employmentTypes = employmentTypesResult.error ? [] : (employmentTypesResult.data || []).map((row) => ({
+    id: String(row.id),
+    code: String(row.code || ""),
+    name: String(row.name || ""),
+    description: String(row.description || ""),
+    payrollEligibleDefault: row.payroll_eligible_default !== false,
+    defaultPayPolicy: mapEmployeePayPolicy(row.default_pay_policy),
+    allowanceAmount: Number(row.allowance_amount || 0),
+    requiresAttendance: row.requires_attendance !== false,
+    isActive: row.is_active !== false,
+  }))
   const shiftOptions = (shifts.data || []).map((row) => ({
     id: String(row.id),
     code: String(row.code || ""),
@@ -5765,6 +5944,7 @@ async function loadEmployeeData(): Promise<EmployeeDirectoryData> {
   const positionMap = new Map(positionOptions.map((item) => [item.id, item]))
   const locationMap = new Map(locationOptions.map((item) => [item.id, item]))
   const shiftMap = new Map(shiftOptions.map((item) => [item.id, item]))
+  const employmentTypeMap = new Map(employmentTypes.map((item) => [item.id, item]))
   const policyMap = new Map(policyOptions.map((item) => [item.id, item]))
   const faceProfileMap = new Map(((faceProfiles.data || []) as Array<Record<string, unknown>>).map((row) => [String(row.employee_id || ""), row]))
   const faceReferencePaths = Array.from(new Set(((faceProfiles.data || []) as Array<Record<string, unknown>>).map((row) => String(row.reference_image_path || "")).filter(Boolean)))
@@ -5797,11 +5977,12 @@ async function loadEmployeeData(): Promise<EmployeeDirectoryData> {
   })
 
   return {
-    rows: (employeesResult.data || []).map((row) => mapEmployeeRow(row, divisionMap, positionMap, locationMap, shiftMap, policyMap, faceProfileMap, faceUrlMap, biofingerLinkMap)),
+    rows: (employeesResult.data || []).map((row) => mapEmployeeRow(row, divisionMap, positionMap, locationMap, shiftMap, policyMap, faceProfileMap, faceUrlMap, biofingerLinkMap, employmentTypeMap)),
     divisions: divisionOptions,
     positions: positionOptions,
     locations: locationOptions,
     shifts: shiftOptions,
+    employmentTypes,
     policies: policyOptions,
     kioskSchemaReady,
     payrollOpeningSchemaReady,
@@ -6186,6 +6367,14 @@ function createEmployeePayload(values: EmployeeFormValues, photoPath = values.ph
     payload.payroll_cycle_opening_date = usesAttendanceCycle ? values.payrollCycleOpeningDate || null : null
   }
 
+  if (values.employmentSchemaReady) {
+    payload.employment_type_id = values.employmentTypeId || null
+    payload.payroll_eligible = values.payrollEligible
+    payload.employee_pay_policy = values.payrollEligible ? values.employeePayPolicy : "not_counted"
+    payload.allowance_amount = Number(values.allowanceAmount || 0)
+    payload.attendance_required = values.attendanceRequired
+  }
+
   if (values.kioskSchemaReady) {
     payload.qr_token = values.qrToken.trim().toUpperCase() || null
     payload.rfid_uid = values.rfidUid.trim() || null
@@ -6217,6 +6406,10 @@ function validateEmployeeForm(values: EmployeeFormValues) {
   if (values.salaryType === "daily" && Number.isFinite(dailySalary) && dailySalary > maxEmployeeDailySalary) errors.push(`Gaji harian maksimal ${formatCurrency(maxEmployeeDailySalary)}.`)
   if (values.salaryType === "monthly" && (!Number.isFinite(monthlySalary) || monthlySalary < 0)) errors.push("Gaji bulanan wajib angka 0 atau lebih.")
   if (values.salaryType === "monthly" && Number.isFinite(monthlySalary) && monthlySalary > maxEmployeeMonthlySalary) errors.push(`Gaji bulanan maksimal ${formatCurrency(maxEmployeeMonthlySalary)}.`)
+  if (values.employeePayPolicy === "allowance" && values.payrollEligible) {
+    const allowanceAmount = Number(values.allowanceAmount)
+    if (!Number.isFinite(allowanceAmount) || allowanceAmount <= 0) errors.push("Nominal uang saku wajib lebih dari 0.")
+  }
   if (values.payrollMethod === "attendance_cycle") {
     if (!Number.isFinite(payrollCycleDays) || payrollCycleDays < 0 || payrollCycleDays > 26) errors.push("Saldo awal cycle harus 0 sampai 26 hari.")
     if (values.payrollOpeningSchemaReady && payrollCycleDays > 0 && !values.payrollCycleOpeningDate) errors.push("Tanggal awal cycle wajib diisi saat saldo awal lebih dari 0.")
@@ -6339,7 +6532,7 @@ async function restoreEmployee(row: EmployeeDirectoryRow) {
 }
 
 function exportEmployeeCsv(rows: EmployeeDirectoryRow[]) {
-  const header = ["No", "Kode", "Nama", "Foto Path", "NIK", "Phone", "Email", "Divisi", "Jabatan", "Lokasi", "Shift", "Biofinger User ID", "Biofinger Device", "Biofinger Status", "Tipe Gaji", "Gaji Harian", "Gaji Bulanan", "Metode Payroll", "Hitung Proporsional", "Tanggal Masuk", "Saldo Awal Cycle", "Tanggal Awal Cycle", "Status", "Catatan"]
+  const header = ["No", "Kode", "Nama", "Foto Path", "NIK", "Phone", "Email", "Divisi", "Jabatan", "Lokasi", "Shift", "Status Kerja", "Ikut Payroll", "Policy Pembayaran", "Uang Saku", "Wajib Absensi", "Biofinger User ID", "Biofinger Device", "Biofinger Status", "Tipe Gaji", "Gaji Harian", "Gaji Bulanan", "Metode Payroll", "Hitung Proporsional", "Tanggal Masuk", "Saldo Awal Cycle", "Tanggal Awal Cycle", "Status", "Catatan"]
   const body = rows.map((row, index) => [
     index + 1,
     row.employeeCode,
@@ -6352,6 +6545,11 @@ function exportEmployeeCsv(rows: EmployeeDirectoryRow[]) {
     row.positionName,
     row.workLocationName,
     row.shiftName,
+    row.employmentTypeName,
+    row.payrollEligible ? "Ya" : "Tidak",
+    employeePayPolicyLabel[row.employeePayPolicy],
+    row.allowanceAmount,
+    row.attendanceRequired ? "Ya" : "Tidak",
     getPrimaryEmployeeBiofingerLink(row)?.externalUserId || "",
     getPrimaryEmployeeBiofingerLink(row)?.deviceName || "",
     getPrimaryEmployeeBiofingerLink(row) ? employeeBiofingerStatusLabel[getPrimaryEmployeeBiofingerLink(row)!.status] : "",
@@ -7364,7 +7562,7 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
   const [employeeResult, divisionResult, locationResult, shiftResult, attendanceRows, dailySummaryRows, reviewAttendanceResult, payrollRows, overtimeResult, payrollComponentResult, appUserResult, faceProfileResult, leaveResult, payrollPaymentResult, overtimePaymentResult] = await Promise.all([
     supabase
       .from("employees")
-      .select("id, employee_code, full_name, photo_path, division_id, work_location_id, shift_id, salary_type, daily_salary, monthly_salary, payroll_cycle_days, status, deleted_at")
+      .select("id, employee_code, full_name, photo_path, division_id, work_location_id, shift_id, salary_type, daily_salary, monthly_salary, payroll_cycle_days, payroll_eligible, employee_pay_policy, allowance_amount, employment_type_id, status, deleted_at")
       .is("deleted_at", null)
       .order("employee_code", { ascending: true }),
     supabase.from("divisions").select("id, name"),
@@ -7531,6 +7729,8 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
     const basePayrollAmount = Number(payroll?.gross_amount || 0)
     const overtimeAmount = Number(payroll?.overtime_amount || 0)
     const payrollAmount = Number(payroll?.net_amount || 0) || basePayrollAmount + overtimeAmount
+    const payrollEligible = employee.payroll_eligible !== false
+    const employeePayPolicy = mapEmployeePayPolicy(employee.employee_pay_policy)
     const attendanceStatus = summary
       ? mapDailySummaryAttendanceStatus(summary.attendance_status)
       : getDailyAttendanceMonitorStatus(attendance, checkOut)
@@ -7646,6 +7846,9 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
       payrollStatus: mapPayrollCycleStatus(payroll?.status),
       payrollNeedsCheckout,
       payrollCheckoutNote: payrollNeedsCheckout ? "Hari ke-26 baru check-in. Checkout belum tercatat." : "",
+      payrollEligible,
+      employeePayPolicy,
+      employmentTypeName: "",
       payrollAmount,
       basePayrollAmount,
       overtimeAmount,
@@ -8656,7 +8859,7 @@ function EmployeesPage({
     revalidateOnCache: true,
   })
   const canManage = hasPermission(profile, "employees.manage")
-  const { rows, divisions, positions, locations, shifts, policies, kioskSchemaReady, payrollOpeningSchemaReady } = employeeData
+  const { rows, divisions, positions, locations, shifts, employmentTypes, policies, kioskSchemaReady, payrollOpeningSchemaReady } = employeeData
 
   const fetchRows = async (options: { silent?: boolean } = {}) => {
     setErrorMessage("")
@@ -8682,7 +8885,7 @@ function EmployeesPage({
   const filteredRows = visibleRows.filter((row) => {
     const normalizedTerm = searchTerm.trim().toLowerCase()
     const matchesSearch = normalizedTerm
-      ? [row.employeeCode, row.fullName, row.nik, row.phone, row.email, row.divisionName, row.positionName, row.workLocationName, row.shiftName, row.notes, row.deletedAt].join(" ").toLowerCase().includes(normalizedTerm)
+      ? [row.employeeCode, row.fullName, row.nik, row.phone, row.email, row.divisionName, row.positionName, row.workLocationName, row.shiftName, row.employmentTypeName, row.notes, row.deletedAt].join(" ").toLowerCase().includes(normalizedTerm)
       : true
     const matchesDivision = divisionFilter === "all" || row.divisionId === divisionFilter
     const matchesStatus = statusFilter === "all" || row.status === statusFilter
@@ -8741,8 +8944,17 @@ function EmployeesPage({
   const openCreateDialog = () => {
     setEditingRow(null)
     const fallbackValues = createEmptyEmployeeForm(rows)
+    const defaultEmploymentType = employmentTypes.find((item) => item.code === "EMPSTAT-TETAP") || employmentTypes.find((item) => item.isActive) || employmentTypes[0]
+    if (defaultEmploymentType) {
+      fallbackValues.employmentTypeId = defaultEmploymentType.id
+      fallbackValues.payrollEligible = defaultEmploymentType.payrollEligibleDefault
+      fallbackValues.employeePayPolicy = defaultEmploymentType.defaultPayPolicy
+      fallbackValues.allowanceAmount = String(defaultEmploymentType.allowanceAmount || 0)
+      fallbackValues.attendanceRequired = defaultEmploymentType.requiresAttendance
+    }
     fallbackValues.kioskSchemaReady = kioskSchemaReady
     fallbackValues.payrollOpeningSchemaReady = payrollOpeningSchemaReady
+    fallbackValues.employmentSchemaReady = employmentTypes.length > 0
     setDialogInitialValues(fallbackValues)
     setDialogOpen(true)
     void getNextEmployeeCode(rows).then((employeeCode) => {
@@ -8778,6 +8990,12 @@ function EmployeesPage({
       monthlySalary: String(row.monthlySalary),
       payrollMethod: row.payrollMethod,
       prorateEnabled: row.prorateEnabled,
+      employmentTypeId: row.employmentTypeId,
+      payrollEligible: row.payrollEligible,
+      employeePayPolicy: row.employeePayPolicy,
+      allowanceAmount: String(row.allowanceAmount || 0),
+      attendanceRequired: row.attendanceRequired,
+      employmentSchemaReady: employmentTypes.length > 0,
       qrToken: row.qrToken || generateEmployeeQrToken(row.employeeCode),
       rfidUid: row.rfidUid,
       attendancePolicyId: row.attendancePolicyId,
@@ -9089,9 +9307,9 @@ function EmployeesPage({
                       <EmployeeIdentityCell fullName={row.fullName} code={row.employeeCode} photoUrl={row.photoUrl} onOpen={() => setDetailRow(row)} />
                     </td>
                     <td><TableText primary={row.divisionName} secondary={row.nik || "NIK belum diisi"} /></td>
-                    <td><TableText primary={row.positionName} secondary={row.phone || "No HP belum diisi"} /></td>
+                    <td><TableText primary={row.positionName} secondary={row.employmentTypeName} /></td>
                     <td><TableText primary={row.workLocationName} secondary={row.shiftName} /></td>
-                    <td><TableText primary={formatCurrency(getEmployeeSalaryAmount(row))} secondary={`${employeeSalaryTypeLabel[row.salaryType]} · Masuk ${formatEmployeeDate(row.joinDate)}`} /></td>
+                    <td><TableText primary={formatCurrency(getEmployeeSalaryAmount(row))} secondary={`${getEmploymentTypeSummary(row)} · Masuk ${formatEmployeeDate(row.joinDate)}`} /></td>
                     <td>
                       {row.payrollMethod === "attendance_cycle" ? (
                         <span className="cycleCell">
@@ -9172,6 +9390,7 @@ function EmployeesPage({
         positions={positions}
         locations={locations}
         shifts={shifts}
+        employmentTypes={employmentTypes}
         policies={policies}
         saving={saving}
         onClose={() => {
@@ -12326,6 +12545,7 @@ function EmployeeDialog({
   positions,
   locations,
   shifts,
+  employmentTypes,
   policies,
   saving,
   onClose,
@@ -12338,6 +12558,7 @@ function EmployeeDialog({
   positions: EmployeeOption[]
   locations: EmployeeOption[]
   shifts: EmployeeOption[]
+  employmentTypes: EmploymentTypeOption[]
   policies: AttendancePolicyOption[]
   saving: boolean
   onClose: () => void
@@ -12384,6 +12605,7 @@ function EmployeeDialog({
   ))
   const activeLocations = locations.filter((location) => location.isActive || location.id === values.workLocationId)
   const activeShifts = shifts.filter((shift) => shift.isActive || shift.id === values.shiftId)
+  const activeEmploymentTypes = employmentTypes.filter((item) => item.isActive || item.id === values.employmentTypeId)
   const activePolicies = policies.filter((policy) => policy.isActive || policy.id === values.attendancePolicyId)
   const selectedPolicy = activePolicies.find((policy) => policy.id === values.attendancePolicyId)
   const photoPreview = values.removePhoto ? "" : localPhotoPreview || values.photoUrl
@@ -12602,6 +12824,76 @@ function EmployeeDialog({
                 <option value={shift.id} key={shift.id}>{shift.name}</option>
               ))}
             </SelectFormField>
+            <SelectFormField
+              label="Status Kerja"
+              value={values.employmentTypeId}
+              onChange={(event) => {
+                const employmentTypeId = event.target.value
+                const employmentType = activeEmploymentTypes.find((item) => item.id === employmentTypeId)
+                setValues((current) => ({
+                  ...current,
+                  employmentTypeId,
+                  payrollEligible: employmentType?.payrollEligibleDefault ?? current.payrollEligible,
+                  employeePayPolicy: employmentType?.defaultPayPolicy ?? current.employeePayPolicy,
+                  allowanceAmount: String(employmentType?.allowanceAmount ?? Number(current.allowanceAmount || 0)),
+                  attendanceRequired: employmentType?.requiresAttendance ?? current.attendanceRequired,
+                }))
+              }}
+              disabled={!values.employmentSchemaReady}
+              required
+            >
+              <option value="">Karyawan Tetap</option>
+              {activeEmploymentTypes.map((item) => (
+                <option value={item.id} key={item.id}>{item.name}</option>
+              ))}
+            </SelectFormField>
+            <SwitchFormField
+              label="Wajib Absensi"
+              checked={values.attendanceRequired}
+              onChange={(attendanceRequired) => setValues((current) => ({ ...current, attendanceRequired }))}
+              onLabel="Wajib"
+              offLabel="Opsional"
+              onDescription="Masuk monitoring Biofinger dan rekap absensi."
+              offDescription="Disimpan sebagai data orang, absensi tidak wajib."
+              disabled={!values.employmentSchemaReady}
+            />
+            <SwitchFormField
+              label="Ikut Payroll"
+              checked={values.payrollEligible}
+              onChange={(payrollEligible) => setValues((current) => ({
+                ...current,
+                payrollEligible,
+                employeePayPolicy: payrollEligible ? (current.employeePayPolicy === "not_counted" ? "salary" : current.employeePayPolicy) : "not_counted",
+              }))}
+              onLabel="Ikut"
+              offLabel="Tidak"
+              onDescription="Cycle gaji dibuat dari hari kerja valid."
+              offDescription="Tetap bisa absen, tapi tidak masuk payroll."
+              disabled={!values.employmentSchemaReady}
+            />
+            <SelectFormField
+              label="Policy Pembayaran"
+              value={values.employeePayPolicy}
+              onChange={(event) => setValues((current) => ({ ...current, employeePayPolicy: event.target.value as EmployeePayPolicy }))}
+              disabled={!values.employmentSchemaReady || !values.payrollEligible}
+              required
+            >
+              <option value="salary">Gaji reguler</option>
+              <option value="allowance">Uang saku</option>
+              <option value="unpaid">Tidak dibayar</option>
+              <option value="not_counted">Tidak masuk payroll</option>
+            </SelectFormField>
+            {values.employeePayPolicy === "allowance" && (
+              <TextFormField
+                label="Nominal Uang Saku"
+                type="text"
+                inputMode="numeric"
+                value={formatIntegerInput(values.allowanceAmount)}
+                onChange={(event) => setValues((current) => ({ ...current, allowanceAmount: normalizeIntegerInput(event.target.value, maxEmployeeMonthlySalary) }))}
+                placeholder="500.000"
+                required
+              />
+            )}
             <div className="employeeFormFull">
               <SegmentedFormField<EmployeeSalaryType>
                 label="Tipe Gaji"
@@ -12768,10 +13060,15 @@ function EmployeeDetailDialog({
   const structureRows = [
     { label: "Divisi", value: row.divisionName },
     { label: "Jabatan", value: row.positionName },
+    { label: "Status kerja", value: row.employmentTypeName },
     { label: "Lokasi kerja", value: row.workLocationName },
     { label: "Shift", value: row.shiftName },
+    { label: "Wajib absensi", value: row.attendanceRequired ? "Ya" : "Opsional" },
   ]
   const payrollRows = [
+    { label: "Ikut payroll", value: row.payrollEligible ? "Ya" : "Tidak" },
+    { label: "Policy pembayaran", value: employeePayPolicyLabel[row.employeePayPolicy] },
+    ...(row.employeePayPolicy === "allowance" ? [{ label: "Uang saku", value: formatCurrency(row.allowanceAmount) }] : []),
     { label: "Tipe gaji", value: employeeSalaryTypeLabel[row.salaryType] },
     { label: "Nominal gaji", value: formatCurrency(getEmployeeSalaryAmount(row)) },
     { label: "Metode payroll", value: employeePayrollMethodLabel[row.payrollMethod] },
@@ -14972,6 +15269,10 @@ function MasterDataPage({ activeView }: { activeView: ViewId }) {
       overtimeBasis: row.overtimeBasis === "full_duration" ? "full_duration" : "extra_after_shift",
       autoDetectOvertime: row.autoDetectOvertime === true,
       requiresApproval: row.requiresApproval !== false,
+      payrollEligibleDefault: row.payrollEligibleDefault !== false,
+      defaultPayPolicy: row.defaultPayPolicy || "salary",
+      allowanceAmount: String(row.allowanceAmount || 0),
+      requiresAttendance: row.requiresAttendance !== false,
       status: row.status,
       sortOrder: String(row.sortOrder || 0),
     })
@@ -15577,6 +15878,45 @@ function MasterDataDialog({
                 onChange={(checked) => setValues((current) => ({ ...current, requiresApproval: checked }))}
               />
               <TextFormField label="Deskripsi Komponen" value={values.description} onChange={(event) => setValues((current) => ({ ...current, description: event.target.value }))} placeholder="Aturan penggunaan komponen gaji" />
+            </>
+          )}
+          {values.categoryId === "employment-types" && (
+            <>
+              <SwitchFormField
+                label="Ikut Payroll Default"
+                checked={values.payrollEligibleDefault}
+                onChange={(payrollEligibleDefault) => setValues((current) => ({
+                  ...current,
+                  payrollEligibleDefault,
+                  defaultPayPolicy: payrollEligibleDefault ? current.defaultPayPolicy : "not_counted",
+                }))}
+              />
+              <SelectFormField
+                label="Policy Pembayaran Default"
+                value={values.defaultPayPolicy}
+                onChange={(event) => setValues((current) => ({ ...current, defaultPayPolicy: event.target.value as EmployeePayPolicy }))}
+                disabled={!values.payrollEligibleDefault}
+                required
+              >
+                <option value="salary">Gaji reguler</option>
+                <option value="allowance">Uang saku</option>
+                <option value="unpaid">Tidak dibayar</option>
+                <option value="not_counted">Tidak masuk payroll</option>
+              </SelectFormField>
+              <TextFormField
+                label="Nominal Uang Saku"
+                type="number"
+                min={0}
+                value={values.allowanceAmount}
+                onChange={(event) => setValues((current) => ({ ...current, allowanceAmount: event.target.value }))}
+                placeholder="0"
+              />
+              <SwitchFormField
+                label="Wajib Absensi"
+                checked={values.requiresAttendance}
+                onChange={(requiresAttendance) => setValues((current) => ({ ...current, requiresAttendance }))}
+              />
+              <TextFormField label="Deskripsi Status" value={values.description} onChange={(event) => setValues((current) => ({ ...current, description: event.target.value }))} placeholder="Aturan status kerja ini" />
             </>
           )}
           <SwitchFormField
@@ -17052,6 +17392,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
   const latestFirstRows = activeView === "attendance-live"
     ? [...filteredRows].sort(compareAttendanceRowsByLatestActivity)
     : filteredRows
+  const payrollProcessRows = filteredRows.filter(isPayrollEligibleAttendanceRow)
   const filteredReviewRows = data.reviews.filter((row) => {
     const matchesDate = attendanceDateMode === "all"
       || (row.attendanceDate >= attendanceDateRange.start && row.attendanceDate <= attendanceDateRange.end)
@@ -17131,10 +17472,11 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
 
     return matchesDivision && matchesSearch && matchesStatus
   })
-  const readyPayrollRows = data.rows.filter((row) => row.payrollStatus === "ready")
-  const lockedPayrollRows = data.rows.filter((row) => row.payrollStatus === "locked")
-  const paidPayrollRows = data.rows.filter((row) => row.payrollStatus === "paid")
-  const voidPayrollRows = data.rows.filter((row) => row.payrollStatus === "void")
+  const payrollMetricRows = data.rows.filter(isPayrollEligibleAttendanceRow)
+  const readyPayrollRows = payrollMetricRows.filter((row) => row.payrollStatus === "ready")
+  const lockedPayrollRows = payrollMetricRows.filter((row) => row.payrollStatus === "locked")
+  const paidPayrollRows = payrollMetricRows.filter((row) => row.payrollStatus === "paid")
+  const voidPayrollRows = payrollMetricRows.filter((row) => row.payrollStatus === "void")
   const reviewRows = data.rows.filter((row) => row.attendanceStatus === "pending" || row.attendanceStatus === "failed")
   const gpsReadyLocations = data.locations.filter((location) => location.isReady)
   const fieldReadyRows = data.fieldReadiness.filter((row) => row.ready)
@@ -17553,7 +17895,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
         </>
       ) : activeView === "payroll" ? (
         <PayrollPreviewTable
-          rows={filteredRows}
+          rows={payrollProcessRows}
           payments={filteredPayrollPayments}
           overtimeRows={payrollOvertimeRows}
           overtimePayments={filteredOvertimePayments}
