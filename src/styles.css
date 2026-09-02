@@ -8897,11 +8897,92 @@ button {
 .leaveRequestPreview {
   padding: 18px;
   border: 1px solid rgba(34, 174, 202, 0.17);
-  border-radius: 22px;
+  border-radius: 18px;
   background:
-    radial-gradient(circle at 0% 0%, rgba(34, 174, 202, 0.12), transparent 42%),
-    linear-gradient(145deg, rgba(237, 252, 255, 0.86), rgba(255, 255, 255, 0.98));
+    linear-gradient(180deg, rgba(237, 252, 255, 0.82), rgba(255, 255, 255, 0.98));
   box-shadow: 0 24px 48px -42px rgba(7, 24, 74, 0.66);
+}
+
+.leaveRequestPreview .overtimeRequestPreviewHeader {
+  align-items: center;
+  gap: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.leaveRequestPreview .overtimeRequestPreviewHeader > span {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+}
+
+.leaveRequestPreview .overtimeRequestPreviewHeader small {
+  display: block;
+  margin-bottom: 3px;
+  color: #7b8aa4;
+  font-size: 0.76rem;
+  font-weight: var(--fw-ui);
+}
+
+.leaveRequestPreview .overtimeRequestPreviewHeader strong {
+  display: block;
+  color: var(--ops-ink);
+  font-size: clamp(1.3rem, 2vw, 1.7rem);
+  line-height: 1.05;
+}
+
+.leaveRequestPreviewFacts {
+  display: grid;
+  gap: 10px;
+  margin: 2px 0 0;
+}
+
+.leaveRequestPreviewFacts div {
+  display: grid;
+  grid-template-columns: minmax(92px, 0.48fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 14px;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.leaveRequestPreviewFacts div:last-child {
+  border-bottom: 0;
+}
+
+.leaveRequestPreviewFacts dt,
+.leaveRequestPreviewFacts dd {
+  margin: 0;
+  min-width: 0;
+}
+
+.leaveRequestPreviewFacts dt {
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: var(--fw-ui);
+  line-height: 1.35;
+}
+
+.leaveRequestPreviewFacts dd {
+  color: var(--ops-ink);
+  font-size: 0.9rem;
+  font-weight: 800;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.leaveRequestPreview .overtimeRequestNotice {
+  align-items: flex-start;
+  margin-top: 8px;
+  padding: 14px;
+  border-radius: 16px;
+  background: rgba(237, 252, 255, 0.74);
+}
+
+.leaveRequestPreview .overtimeRequestNotice span {
+  font-size: 0.84rem;
+  line-height: 1.42;
 }
 
 .leaveReviewTableScroller table {

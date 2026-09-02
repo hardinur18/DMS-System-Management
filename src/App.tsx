@@ -20876,7 +20876,7 @@ function LeaveRequestDialog({
                 <strong>{selectedTypeOption?.label || "Izin"}</strong>
               </div>
             </div>
-            <dl>
+            <dl className="leaveRequestPreviewFacts">
               <div>
                 <dt>Karyawan</dt>
                 <dd>{selectedEmployee ? selectedEmployee.fullName : "Belum dipilih"}</dd>
