@@ -1274,6 +1274,8 @@ interface GuideArticle {
 
 const accessProfileCacheKey = "dms.management.accessProfile.v4"
 const accessProfileCacheMaxAgeMs = 1000 * 60 * 60 * 12
+const ENABLE_KIOSK_ATTENDANCE_FLOW = false
+const ENABLE_FIELD_ATTENDANCE_FLOW = false
 
 const navItems: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, group: "" },
@@ -1299,13 +1301,11 @@ const navItems: NavItem[] = [
 const productionReadyViews = new Set<ViewId>([
   "dashboard",
   "attendance-live",
-  "kiosk-mode",
   "biofinger",
   "employees",
   "shift-schedules",
   "attendance-requests",
   "attendance-review",
-  "field-monitoring",
   "payroll",
   "master-data",
   "users",
@@ -1314,6 +1314,9 @@ const productionReadyViews = new Set<ViewId>([
   "guide",
   "profile",
 ])
+
+if (ENABLE_KIOSK_ATTENDANCE_FLOW) productionReadyViews.add("kiosk-mode")
+if (ENABLE_FIELD_ATTENDANCE_FLOW) productionReadyViews.add("field-monitoring")
 
 const guideArticles: GuideArticle[] = [
   {
@@ -9115,10 +9118,12 @@ function EmployeesPage({
                                 <Pencil size={14} />
                                 Edit
                               </RowActionMenuItem>
-                              <RowActionMenuItem disabled={saving} onClick={() => setNametagRow(row)}>
-                                <CreditCard size={14} />
-                                Cetak Nametag
-                              </RowActionMenuItem>
+                              {ENABLE_KIOSK_ATTENDANCE_FLOW && (
+                                <RowActionMenuItem disabled={saving} onClick={() => setNametagRow(row)}>
+                                  <CreditCard size={14} />
+                                  Cetak Nametag
+                                </RowActionMenuItem>
+                              )}
                               <RowActionMenuItem disabled={!onOpenShiftSchedule || saving} onClick={() => onOpenShiftSchedule?.(row.id)}>
                                 <CalendarCheck2 size={14} />
                                 Jadwal Shift
@@ -12405,7 +12410,7 @@ function EmployeeDialog({
         <div className="dialogCompactHeader">
           <div>
             <h2 id="employee-dialog-title">{mode === "edit" ? "Edit Karyawan" : "Tambah Karyawan"}</h2>
-            <p id="employee-dialog-description">Data karyawan ini akan dipakai modul absensi, app lapangan, dan payroll cycle.</p>
+            <p id="employee-dialog-description">Data karyawan ini akan dipakai modul Biofinger, jadwal shift, rekap absensi, dan payroll cycle.</p>
           </div>
           <button className="iconButton dialogClose" type="button" aria-label="Tutup dialog" onClick={onClose}>
             <X size={18} />
@@ -12504,6 +12509,7 @@ function EmployeeDialog({
             <TextFormField label="NIK" value={values.nik} onChange={(event) => setValues((current) => ({ ...current, nik: event.target.value }))} placeholder="Nomor identitas karyawan" />
             <TextFormField label="No HP" value={values.phone} onChange={(event) => setValues((current) => ({ ...current, phone: event.target.value }))} placeholder="08xxxxxxxxxx" />
             <TextFormField label="Email" type="email" value={values.email} onChange={(event) => setValues((current) => ({ ...current, email: event.target.value }))} placeholder="nama@dms.local" />
+            {ENABLE_KIOSK_ATTENDANCE_FLOW && (
             <div className="employeeKioskAccessPanel employeeFormFull">
               <div className="employeeKioskAccessHeader">
                 <span className="employeeKioskIcon">
@@ -12571,6 +12577,7 @@ function EmployeeDialog({
                 </button>
               </div>
             </div>
+            )}
             <SelectFormField label="Divisi" value={values.divisionId} onChange={(event) => setValues((current) => ({ ...current, divisionId: event.target.value, positionId: "" }))} required>
               <option value="">Pilih divisi</option>
               {activeDivisions.map((division) => (
@@ -12817,7 +12824,7 @@ function EmployeeDetailDialog({
             <div>
               <span>Karyawan</span>
               <h2 id="employee-detail-title">{row.fullName}</h2>
-              <p>Detail data karyawan yang dipakai modul absensi, app lapangan, dan payroll.</p>
+              <p>Detail data karyawan yang dipakai modul Biofinger, rekap absensi, jadwal shift, dan payroll.</p>
               {row.deletedAt && <em className="masterDetailArchivedFlag">Diarsipkan {formatUserDateTime(row.deletedAt, "-")}</em>}
             </div>
           </div>
@@ -12830,8 +12837,8 @@ function EmployeeDetailDialog({
           <section className="employeeProfileBrief">
             <p>
               <strong>{row.fullName}</strong> adalah karyawan {row.positionName} di divisi {row.divisionName},
-              ditempatkan di {row.workLocationName} untuk shift {row.shiftName}. Data ini menjadi acuan absensi
-              lapangan, Biofinger, radius GPS, face verification, dan perhitungan payroll.
+              ditempatkan di {row.workLocationName} untuk shift {row.shiftName}. Data ini menjadi acuan Biofinger,
+              rekap absensi, validasi shift, dan perhitungan payroll.
             </p>
           </section>
 
@@ -12872,6 +12879,7 @@ function EmployeeDetailDialog({
               </div>
             </section>
 
+            {ENABLE_KIOSK_ATTENDANCE_FLOW && (
             <section className="employeeDetailSection wide">
               <h3>Akses Kiosk</h3>
               <div className="employeeDetailList compact employeeKioskDetailList">
@@ -12883,6 +12891,7 @@ function EmployeeDetailDialog({
                 ))}
               </div>
             </section>
+            )}
 
             <section className="employeeDetailSection wide">
               <h3>Biofinger</h3>
@@ -12957,10 +12966,12 @@ function EmployeeDetailDialog({
 
         <div className="masterDetailActions">
           <button className="secondaryButton" type="button" onClick={onClose}>Tutup</button>
-          <button className="secondaryButton" type="button" onClick={() => onNametag(row)}>
-            <Printer size={16} />
-            Nametag
-          </button>
+          {ENABLE_KIOSK_ATTENDANCE_FLOW && (
+            <button className="secondaryButton" type="button" onClick={() => onNametag(row)}>
+              <Printer size={16} />
+              Nametag
+            </button>
+          )}
           <button className="secondaryButton" type="button" disabled={!onShiftSchedule || Boolean(row.deletedAt)} onClick={() => onShiftSchedule?.(row.id)}>
             <CalendarCheck2 size={16} />
             Jadwal Shift
@@ -13773,7 +13784,14 @@ function UserAccessDialog({
               status: initialValues.status,
             }
             : values
-          const nextErrors = validateUserAccessForm(protectedValues, employees, currentUserId)
+          const productionValues = ENABLE_FIELD_ATTENDANCE_FLOW
+            ? protectedValues
+            : {
+              ...protectedValues,
+              appScope: "management" as AppScope,
+              employeeId: "",
+            }
+          const nextErrors = validateUserAccessForm(productionValues, employees, currentUserId)
 
           if (nextErrors.length > 0) {
             setFormErrors(nextErrors)
@@ -13783,7 +13801,7 @@ function UserAccessDialog({
 
           setFormErrors([])
           setSubmitError("")
-          void onSubmit(protectedValues).catch((error) => {
+          void onSubmit(productionValues).catch((error) => {
             setSubmitError(getFriendlySupabaseError(error, "Gagal menyimpan user."))
           })
         }}>
@@ -13820,25 +13838,27 @@ function UserAccessDialog({
               <option value={division.id} key={division.id}>{division.name}</option>
             ))}
           </SelectFormField>
-          <SelectFormField label="Scope App" value={values.appScope} onChange={(event) => setValues((current) => ({ ...current, appScope: event.target.value as AppScope }))} required>
+          <SelectFormField label="Scope App" value={ENABLE_FIELD_ATTENDANCE_FLOW ? values.appScope : "management"} onChange={(event) => setValues((current) => ({ ...current, appScope: event.target.value as AppScope }))} disabled={!ENABLE_FIELD_ATTENDANCE_FLOW} required>
             <option value="management">Management</option>
-            <option value="field">Lapangan</option>
-            <option value="both">Management + Lapangan</option>
+            {ENABLE_FIELD_ATTENDANCE_FLOW && <option value="field">Lapangan</option>}
+            {ENABLE_FIELD_ATTENDANCE_FLOW && <option value="both">Management + Lapangan</option>}
           </SelectFormField>
-          <SelectFormField label="Karyawan Terkait" value={values.employeeId} onChange={(event) => handleEmployeeChange(event.target.value)} required={values.appScope === "field" || values.appScope === "both"}>
-            <option value="">Belum dikaitkan</option>
-            {activeEmployees.map((employee) => {
-              const linkedToOtherUser = Boolean(employee.linkedUserId && employee.linkedUserId !== currentUserId)
-              const linkedLabel = linkedToOtherUser ? ` • sudah dipakai ${employee.linkedUserName || employee.linkedUserEmail}` : ""
+          {ENABLE_FIELD_ATTENDANCE_FLOW && (
+            <SelectFormField label="Karyawan Terkait" value={values.employeeId} onChange={(event) => handleEmployeeChange(event.target.value)} required={values.appScope === "field" || values.appScope === "both"}>
+              <option value="">Belum dikaitkan</option>
+              {activeEmployees.map((employee) => {
+                const linkedToOtherUser = Boolean(employee.linkedUserId && employee.linkedUserId !== currentUserId)
+                const linkedLabel = linkedToOtherUser ? ` • sudah dipakai ${employee.linkedUserName || employee.linkedUserEmail}` : ""
 
-              return (
-                <option value={employee.id} key={employee.id} disabled={linkedToOtherUser}>
-                  {employee.code} - {employee.name}{linkedLabel}
-                </option>
-              )
-            })}
-          </SelectFormField>
-          {selectedEmployee && (
+                return (
+                  <option value={employee.id} key={employee.id} disabled={linkedToOtherUser}>
+                    {employee.code} - {employee.name}{linkedLabel}
+                  </option>
+                )
+              })}
+            </SelectFormField>
+          )}
+          {ENABLE_FIELD_ATTENDANCE_FLOW && selectedEmployee && (
             <div className="linkedEmployeeAutofill">
               <UserRoundCheck size={16} />
               <span>
@@ -17384,7 +17404,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
                 Request Lembur
               </button>
             )}
-            {activeView === "attendance-live" && (
+            {activeView === "attendance-live" && ENABLE_FIELD_ATTENDANCE_FLOW && (
               <>
                 <button className="secondaryButton" type="button" onClick={() => setFaceEnrollmentOpen(true)}>
                   <ScanFace size={17} />
@@ -23541,7 +23561,7 @@ export function App() {
     )
   }
 
-  if (accessProfile.appScope === "field") {
+  if (accessProfile.appScope === "field" && ENABLE_FIELD_ATTENDANCE_FLOW) {
     return <EmployeePwaApp profile={accessProfile} onLogout={handleLogout} />
   }
 
