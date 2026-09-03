@@ -514,6 +514,7 @@ interface AttendanceLoadOptions {
   startDate?: string
   endDate?: string
   refreshBackend?: boolean
+  refreshOvertime?: boolean
   refreshPayroll?: boolean
   scope?: AttendanceLoadScope
   overtimeDateScoped?: boolean
@@ -7550,10 +7551,12 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
     if (summaryRefresh.error) throw summaryRefresh.error
   }
 
-  if (options.refreshPayroll) {
+  if (options.refreshOvertime || options.refreshPayroll) {
     const overtimeDetect = await supabase.rpc("detect_all_overtime_requests")
     if (overtimeDetect.error) throw overtimeDetect.error
+  }
 
+  if (options.refreshPayroll) {
     const payrollRefresh = await supabase.rpc("refresh_all_employee_payroll_cycles")
     if (payrollRefresh.error) throw payrollRefresh.error
   }
@@ -16854,6 +16857,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
         load: () => loadOperationsFoundationData(selectedDate, {
           ...dataLoadRange,
           refreshBackend: true,
+          refreshOvertime: activeView === "attendance-live" || activeView === "attendance-requests",
           refreshPayroll: activeView === "payroll" || (activeView === "attendance-review" && activeApprovalTab === "overtime"),
           scope: loadScope,
           overtimeDateScoped: activeView !== "payroll",
