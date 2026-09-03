@@ -16858,7 +16858,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
           ...dataLoadRange,
           refreshBackend: true,
           refreshOvertime: activeView === "attendance-live" || activeView === "attendance-requests",
-          refreshPayroll: activeView === "payroll" || (activeView === "attendance-review" && activeApprovalTab === "overtime"),
+          refreshPayroll: activeView === "attendance-live" || activeView === "attendance-requests" || activeView === "payroll" || (activeView === "attendance-review" && activeApprovalTab === "overtime"),
           scope: loadScope,
           overtimeDateScoped: activeView !== "payroll",
           includePayrollPayments: activeView === "payroll",
