@@ -5623,10 +5623,10 @@ async function updateBiofingerUserLink(row: BiofingerUserLinkRow, employeeId: st
   }).catch(() => undefined)
 }
 
-async function convertBiofingerAttendanceEvents(deviceId: string) {
+async function convertBiofingerAttendanceEvents(deviceId: string, limit = 1000) {
   const { data, error } = await supabase.rpc("convert_biofinger_attendance_events", {
     target_device_id: deviceId && deviceId !== BIOFINGER_ALL_DEVICES ? deviceId : null,
-    target_limit: 1000,
+    target_limit: limit,
   })
 
   if (error) throw error
@@ -16844,6 +16844,11 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
     setErrorMessage("")
 
     try {
+      const shouldRepairBiofinger = activeView === "attendance-live" || activeView === "attendance-requests"
+      const conversionSummary = shouldRepairBiofinger
+        ? await convertBiofingerAttendanceEvents(BIOFINGER_ALL_DEVICES, 5000)
+        : null
+
       await reloadAttendanceData({
         silent: !loading,
         load: () => loadOperationsFoundationData(selectedDate, {
@@ -16856,6 +16861,14 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
           includeOvertimePayments: activeView === "payroll",
         }),
       })
+
+      if (conversionSummary && (conversionSummary.eventsConverted > 0 || conversionSummary.attendanceLogsUpserted > 0)) {
+        showToast({
+          tone: "success",
+          title: "Data Biofinger diperbaiki",
+          description: `${conversionSummary.eventsConverted} event diproses, ${conversionSummary.attendanceLogsUpserted} log absensi diperbarui.`,
+        })
+      }
     } catch (error) {
       setErrorMessage(getFriendlySupabaseError(error, "Gagal mengambil foundation absensi dan payroll."))
     }
