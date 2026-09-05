@@ -112,6 +112,7 @@ type PayrollCycleTab = "active" | "ready" | "locked" | "void" | "all"
 type PayrollWorkspaceTab = "cycle" | "overtime" | "history"
 type PayrollPaymentSource = "salary" | "overtime"
 type OvertimePaymentStatus = "unpaid" | "paid" | "void"
+type OvertimePaymentPolicy = "separate" | "salary_cycle"
 type AttendanceLogStatus = "valid" | "review" | "rejected"
 type AttendanceGpsStatus = "valid" | "out_of_radius" | "missing"
 type AttendanceFaceStatus = "verified" | "review" | "failed" | "not_required"
@@ -339,7 +340,10 @@ interface OvertimeReviewRow {
   overtimeDate: string
   shiftStartTime: string
   shiftEndTime: string
+  actualCheckInAt: string
   actualCheckOutAt: string
+  preShiftMinutes: number
+  postShiftMinutes: number
   overtimeMinutes: number
   approvedMinutes: number
   rateAmount: number
@@ -358,6 +362,7 @@ interface OvertimeReviewRow {
   payrollCycleNumber: number
   payrollStatus: PayrollStatus
   overtimePaymentStatus: OvertimePaymentStatus
+  overtimePaymentPolicy: OvertimePaymentPolicy
   overtimePaymentId: string
   overtimePaidAt: string
   overtimePaymentNote: string
@@ -370,6 +375,7 @@ interface OvertimeRequestSubmitPayload {
   overtimeDate: string
   plannedStartTime: string
   plannedEndTime: string
+  paymentPolicy: OvertimePaymentPolicy
   reason: string
 }
 
@@ -1359,24 +1365,24 @@ const guideArticles: GuideArticle[] = [
     viewId: "dashboard",
     title: "Dashboard Operasional",
     group: "Overview",
-    summary: "Membaca kondisi harian DMS dari KPI, aktivitas absensi, payroll, dan sinyal risiko.",
+    summary: "Membaca kondisi harian DMS dari KPI, aktivitas absensi, gaji, dan sinyal risiko.",
     icon: LayoutDashboard,
     audience: "Owner, HR, Supervisor",
     frequency: "Awal hari dan akhir shift",
     tags: ["kpi", "monitoring", "ringkasan"],
     steps: [
       "Buka Dashboard setelah login untuk melihat ringkasan aktivitas utama.",
-      "Cek KPI absensi, karyawan aktif, payroll, dan antrian review.",
+      "Cek KPI absensi, karyawan aktif, gaji, dan antrian review.",
       "Prioritaskan kartu yang menunjukkan pending, review, atau error.",
       "Masuk ke modul terkait dari sidebar untuk tindak lanjut data yang bermasalah.",
     ],
     checks: [
-      "Angka pending absensi sudah turun sebelum payroll diproses.",
+      "Angka pending absensi sudah turun sebelum gaji diproses.",
       "Tidak ada antrian review kritis yang tertinggal.",
       "Data hari ini sudah sinkron dari sumber absensi mobile dan Biofinger.",
     ],
     pitfalls: [
-      "Jangan mengambil keputusan payroll hanya dari dashboard tanpa membuka detail.",
+      "Jangan mengambil keputusan gaji hanya dari dashboard tanpa membuka detail.",
       "Jika angka terlihat stale, refresh modul sumbernya lebih dulu.",
     ],
     related: ["attendance-live", "attendance-review", "payroll"],
@@ -1401,14 +1407,14 @@ const guideArticles: GuideArticle[] = [
     checks: [
       "Karyawan shift aktif sudah punya check-in valid.",
       "Shift karyawan sudah punya jam mulai dan jam selesai di Master Data.",
-      "Kurang jam masuk indikator review operasional sebelum dijadikan potongan payroll.",
+      "Kurang jam masuk indikator review operasional sebelum dijadikan potongan gaji.",
       "Log out-of-radius punya alasan atau masuk antrian review.",
       "Check-out kosong dipantau sebelum akhir hari.",
     ],
     pitfalls: [
       "Jangan koreksi absensi tanpa catatan yang bisa diaudit.",
       "Pastikan tanggal filter benar sebelum mengambil keputusan.",
-      "Jangan jadikan kurang jam sebagai potongan otomatis sebelum policy payroll disetujui.",
+      "Jangan jadikan kurang jam sebagai potongan otomatis sebelum aturan gaji disetujui.",
     ],
     related: ["attendance-review", "field-monitoring", "payroll"],
   },
@@ -1457,7 +1463,7 @@ const guideArticles: GuideArticle[] = [
       "Setelah user/finger baru dibuat di mesin, lakukan scan jari sekali agar User ID terkirim dan muncul di Mapping User.",
       "Jika nama user dari mesin belum ikut masuk, klik Sync User Mesin untuk meminta AT-301 mengirim USERINFO lewat ADMS.",
       "Klik Refresh Data di DMS untuk menarik ulang data yang sudah masuk ke Supabase.",
-      "Mapping User ID mesin ke karyawan DMS sebelum raw event dipakai sebagai absensi payroll.",
+      "Mapping User ID mesin ke karyawan DMS sebelum raw event dipakai sebagai sumber absensi gaji.",
       "Receiver VPS otomatis mengubah event mapped menjadi attendance final. Gunakan Proses Absensi hanya untuk fallback manual.",
       "Jika auto-sync user di receiver diaktifkan, receiver akan meminta USERINFO berkala saat mesin polling ADMS.",
     ],
@@ -1466,7 +1472,7 @@ const guideArticles: GuideArticle[] = [
       "Device status Active atau Maintenance agar receiver mengizinkan push.",
       "Last Seen, User ID mesin, dan Raw Event bertambah setelah mesin online dan user melakukan scan.",
       "Setiap User ID aktif sudah dipetakan ke satu karyawan DMS.",
-      "Raw Event berstatus converted mulai terlihat di Live Absensi dan Payroll cycle.",
+      "Raw Event berstatus converted mulai terlihat di Live Absensi dan cycle gaji.",
     ],
     pitfalls: [
       "Jangan menukar Serial Number dengan User ID fingerprint.",
@@ -1492,16 +1498,16 @@ const guideArticles: GuideArticle[] = [
     steps: [
       "Tambah karyawan dari modul Karyawan dengan data identitas utama.",
       "Hubungkan divisi, jabatan, lokasi kerja, shift, dan tipe gaji.",
-      "Jika karyawan memakai metode Cycle 26 Hari dan masuk DMS di tengah periode payroll, isi Saldo Awal Cycle dan Tanggal Awal Cycle agar progress tidak mulai dari nol.",
+      "Jika karyawan memakai metode Cycle 26 Hari dan masuk DMS di tengah periode gaji, isi Saldo Awal Cycle dan Tanggal Awal Cycle agar progress tidak mulai dari nol.",
       "Lengkapi profil wajah jika karyawan memakai absensi mobile face verification.",
-      "Pastikan status aktif sebelum karyawan dipakai di absensi, Biofinger, atau payroll.",
+      "Pastikan status aktif sebelum karyawan dipakai di absensi, Biofinger, atau gaji.",
     ],
     checks: [
       "Kode karyawan unik dan konsisten.",
       "Lokasi kerja serta shift sudah dipilih.",
       "Tipe gaji harian/bulanan sudah sesuai kebijakan.",
-      "Saldo awal cycle hanya diisi untuk metode Cycle 26 Hari saat transisi payroll berjalan; karyawan baru tetap 0/26.",
-      "Karyawan nonaktif tidak ikut payroll aktif.",
+      "Saldo awal cycle hanya diisi untuk metode Cycle 26 Hari saat transisi gaji berjalan; karyawan baru tetap 0/26.",
+      "Karyawan nonaktif tidak ikut gaji aktif.",
     ],
     pitfalls: [
       "Jangan mapping Biofinger ke karyawan yang belum final datanya.",
@@ -1525,7 +1531,7 @@ const guideArticles: GuideArticle[] = [
       "Pilih tanggal kerja yang ingin diatur.",
       "Cari karyawan atau filter divisi agar daftar lebih fokus.",
       "Klik Atur Jadwal, lalu pilih shift dan lokasi kerja untuk tanggal tersebut.",
-      "Simpan jadwal harian. DMS akan refresh summary absensi tanggal itu dan payroll cycle terkait.",
+      "Simpan jadwal harian. DMS akan refresh summary absensi tanggal itu dan cycle gaji terkait.",
       "Jika jadwal khusus dibatalkan, DMS kembali memakai default shift dari data karyawan.",
     ],
     checks: [
@@ -1546,16 +1552,16 @@ const guideArticles: GuideArticle[] = [
     viewId: "attendance-requests",
     title: "Rekap Absensi",
     group: "Absensi",
-    summary: "Membaca rekap kehadiran per tanggal/range sebelum dipakai untuk review dan payroll.",
+    summary: "Membaca rekap kehadiran per tanggal/range sebelum dipakai untuk review dan gaji.",
     icon: CalendarCheck2,
     audience: "HR, Finance",
-    frequency: "Harian dan sebelum closing payroll",
+    frequency: "Harian dan sebelum closing gaji",
     tags: ["rekap", "cycle", "attendance"],
     steps: [
       "Pilih tanggal atau range yang ingin direkap.",
       "Filter karyawan, divisi, atau lokasi jika ingin audit area tertentu.",
       "Cek status masuk, pulang, jam kerja, keterlambatan, dan catatan review.",
-      "Koreksi data yang belum valid sebelum dipakai payroll.",
+      "Koreksi data yang belum valid sebelum dipakai hitungan gaji.",
     ],
     checks: [
       "Tanggal/range filter sesuai periode yang dicek.",
@@ -1563,7 +1569,7 @@ const guideArticles: GuideArticle[] = [
       "Data rekap tidak bertentangan dengan raw event Biofinger.",
     ],
     pitfalls: [
-      "Jangan memproses payroll sebelum rekap periode bersih.",
+      "Jangan memproses gaji sebelum rekap periode bersih.",
       "Jangan mengabaikan check-out kosong pada karyawan aktif.",
     ],
     related: ["attendance-live", "attendance-review", "payroll"],
@@ -1573,27 +1579,27 @@ const guideArticles: GuideArticle[] = [
     viewId: "attendance-review",
     title: "Izin, Sakit, Cuti, Alpha",
     group: "Absensi",
-    summary: "Mencatat ketidakhadiran agar monitoring dan payroll tidak menebak dari absen kosong.",
+    summary: "Mencatat ketidakhadiran agar monitoring dan gaji tidak menebak dari absen kosong.",
     icon: CalendarCheck2,
     audience: "HR, Supervisor, Finance",
     frequency: "Saat ada info karyawan tidak masuk atau tugas luar",
     tags: ["izin", "sakit", "cuti", "alpha", "payroll"],
     steps: [
       "Klik Input Izin/Cuti dari Live Absensi, Rekap Absensi, Approval, atau Payroll.",
-      "Pilih karyawan, tanggal mulai, tanggal selesai, jenis ketidakhadiran, dan policy payroll.",
-      "Simpan request. Status awal menjadi Pending dan belum mengubah payroll final.",
+      "Pilih karyawan, tanggal mulai, tanggal selesai, jenis ketidakhadiran, dan aturan gaji.",
+      "Simpan request. Status awal menjadi Pending dan belum mengubah gaji final.",
       "Buka Approval > Izin/Cuti untuk setujui, tolak, atau batalkan request.",
       "Setelah approved, Live Absensi dan Rekap Absensi berubah dari Belum Absen menjadi Izin, Sakit, Cuti, Tugas Luar, Alpha, atau Libur.",
-      "Payroll hanya menghitung request approved dengan policy Dibayar sebagai hari kerja.",
+      "Gaji hanya menghitung request approved dengan aturan Dibayar sebagai hari kerja.",
     ],
     checks: [
       "Tanggal request tidak salah range.",
-      "Policy payroll sesuai aturan perusahaan.",
-      "Request rejected/cancelled tetap menjadi history audit dan tidak mengubah payroll.",
+      "Aturan gaji sesuai kebijakan perusahaan.",
+      "Request rejected/cancelled tetap menjadi history audit dan tidak mengubah hitungan gaji.",
       "Kalender Kehadiran dipakai untuk melihat pola hadir, izin, cuti, alpha, dan belum absen per bulan.",
     ],
     pitfalls: [
-      "Jangan menghapus request yang sudah approved dan masuk payroll cycle.",
+      "Jangan menghapus request yang sudah approved dan masuk cycle gaji.",
       "Jangan mengubah alpha menjadi izin tanpa catatan HR.",
       "Request tidak menggantikan data check-in/check-out yang sudah valid; jika karyawan tetap absen, settlement mengikuti log absensi.",
     ],
@@ -1604,7 +1610,7 @@ const guideArticles: GuideArticle[] = [
     viewId: "attendance-review",
     title: "Approval",
     group: "Absensi",
-    summary: "Menyelesaikan absensi bermasalah, izin/cuti, dan approval lembur sebelum data masuk payroll.",
+    summary: "Menyelesaikan absensi bermasalah, izin/cuti, dan approval lembur sebelum data masuk hitungan gaji.",
     icon: ClipboardList,
     audience: "HR, Supervisor",
     frequency: "Setiap ada antrian review",
@@ -1612,7 +1618,7 @@ const guideArticles: GuideArticle[] = [
     steps: [
       "Buka Approval, lalu pilih tab Absensi Review, Izin/Cuti, atau Lembur.",
       "Untuk absensi, baca detail bukti GPS, waktu, catatan, dan sumber event.",
-      "Untuk izin/cuti, cek jenis ketidakhadiran, range tanggal, policy payroll, dan catatan HR.",
+      "Untuk izin/cuti, cek jenis ketidakhadiran, range tanggal, aturan gaji, dan catatan HR.",
       "Untuk lembur, cek rencana, realisasi checkout, basis hitung, menit payable, dan estimasi bayar.",
       "Approve hanya jika bukti cukup; reject atau pending jika perlu klarifikasi.",
       "Tambahkan catatan audit agar keputusan bisa ditelusuri.",
@@ -1620,8 +1626,8 @@ const guideArticles: GuideArticle[] = [
     checks: [
       "Setiap reject punya alasan yang jelas.",
       "Keputusan supervisor sesuai kebijakan HR.",
-      "Request lembur final tidak diproses ulang tanpa koreksi payroll terpisah.",
-      "Item critical selesai sebelum payroll lock.",
+      "Request lembur final tidak diproses ulang tanpa koreksi pembayaran terpisah.",
+      "Item critical selesai sebelum gaji dikunci.",
     ],
     pitfalls: [
       "Jangan approve massal tanpa cek issue detail.",
@@ -1648,7 +1654,7 @@ const guideArticles: GuideArticle[] = [
     checks: [
       "Koordinat lokasi kerja sudah terisi.",
       "Radius tidak terlalu sempit atau terlalu longgar.",
-      "Outlier GPS masuk review sebelum dipakai payroll.",
+      "Outlier GPS masuk review sebelum dipakai hitungan gaji.",
     ],
     pitfalls: [
       "Jangan mengubah radius tanpa koordinasi operasional.",
@@ -1669,7 +1675,7 @@ const guideArticles: GuideArticle[] = [
     steps: [
       "Pastikan rekap absensi dan approval periode sudah bersih.",
       "Pastikan komponen Lembur Weekday/Minggu aktif, unit Per Jam, dan Auto Detect Lembur menyala di Master Data > Komponen Gaji.",
-      "Set basis hitung lembur: Weekday memakai Setelah Shift, sedangkan Minggu/Hari Libur memakai Full Durasi Kerja.",
+      "Set basis hitung lembur: Weekday memakai Di Luar Shift, sedangkan Minggu/Hari Libur memakai Full Durasi Kerja.",
       "Untuk lembur terencana, buka Approval > Lembur > Request Lembur, pilih karyawan, tanggal, jam rencana, dan alasan.",
       "Request lembur hanya menandai rencana; pembayaran tetap menunggu checkout real dan settlement absensi.",
       "Untuk Minggu/libur, karyawan tetap scan masuk dan pulang. Payable dihitung dari durasi kerja aktual.",
@@ -1679,26 +1685,26 @@ const guideArticles: GuideArticle[] = [
       "Untuk bayar lembur mingguan/custom, buka Payroll > Bayar Lembur, pilih lembur approved, lalu simpan pembayaran.",
       "Lembur yang sudah dibayar terpisah masuk Riwayat Bayar dan tidak ikut lagi ke gaji 26 hari.",
       "Cek komponen gaji, bonus, potongan, dan kasbon.",
-      "Untuk metode lama, biarkan lembur approved tetap belum dibayar terpisah agar ikut total gaji saat cycle 26 hari selesai.",
+      "Untuk metode lama, pilih Ikut Gaji 26 Hari saat request/review lembur agar nominalnya masuk total gaji cycle 26 hari.",
       "Review draft gaji per karyawan sebelum final.",
       "Finalkan gaji hanya setelah HR/Finance setuju.",
       "Tandai terbayar setelah pembayaran benar-benar dilakukan.",
     ],
     checks: [
-      "Tidak ada absensi pending di periode payroll.",
+      "Tidak ada absensi pending di periode gaji.",
       "Komponen gaji aktif sesuai master data.",
       "Request lembur terencana sudah punya realisasi checkout atau sudah ditolak bila batal.",
       "Request Minggu/libur sudah terbaca sebagai full durasi kerja aktual.",
-      "Lembur pending sudah di-approve atau reject sebelum lock payroll.",
+      "Lembur pending sudah di-approve atau reject sebelum gaji dikunci.",
       "Lembur yang dibayar mingguan/custom tidak muncul lagi sebagai tambahan di cycle gaji 26 hari.",
       "Kasbon dan potongan sudah masuk perhitungan.",
       "Gaji yang sudah final tidak berubah tanpa proses buka koreksi yang diaudit.",
     ],
     pitfalls: [
-      "Jangan lock payroll sebelum approval absensi selesai.",
+      "Jangan kunci gaji sebelum approval absensi selesai.",
       "Jangan approve pembayaran lembur sebelum ada checkout real dari Biofinger/app lapangan.",
       "Jangan bayar lembur terpisah kalau cycle gaji terkait sudah final, terbayar, atau dibatalkan.",
-      "Jangan membayar pulang lewat sebagai lembur jika total jam kerja aktual masih kurang dari kewajiban shift.",
+      "Jangan membayar waktu di luar shift sebagai lembur jika total jam kerja aktual masih kurang dari kewajiban shift.",
       "Jangan memakai basis Full Durasi Kerja untuk Semua Hari karena bisa membuat hari kerja normal terhitung full lembur.",
       "Jangan edit manual nominal tanpa catatan dan jejak audit.",
     ],
@@ -1709,25 +1715,25 @@ const guideArticles: GuideArticle[] = [
     viewId: "cash-advance",
     title: "Kasbon",
     group: "Finance",
-    summary: "Mengelola pinjaman/kasbon karyawan, cicilan, status approval, dan potongan payroll.",
+    summary: "Mengelola pinjaman/kasbon karyawan, cicilan, status approval, dan potongan gaji.",
     icon: WalletCards,
     audience: "Finance, Owner",
-    frequency: "Saat ada pengajuan kasbon atau closing payroll",
+    frequency: "Saat ada pengajuan kasbon atau closing gaji",
     tags: ["kasbon", "potongan", "finance"],
     steps: [
       "Input atau review pengajuan kasbon dari karyawan.",
       "Setujui hanya sesuai kebijakan limit dan kemampuan potong.",
-      "Tentukan cicilan atau skema potongan payroll.",
-      "Cek sisa saldo kasbon sebelum payroll diproses.",
+      "Tentukan cicilan atau skema potongan gaji.",
+      "Cek sisa saldo kasbon sebelum gaji diproses.",
     ],
     checks: [
       "Nominal dan tenor cicilan sudah disetujui.",
-      "Saldo kasbon aktif terbawa ke payroll.",
+      "Saldo kasbon aktif terbawa ke gaji.",
       "Kasbon lunas tidak lagi memotong gaji.",
     ],
     pitfalls: [
       "Jangan approve kasbon tanpa otorisasi finance/owner.",
-      "Pastikan perubahan cicilan tercatat sebelum payroll lock.",
+      "Pastikan perubahan cicilan tercatat sebelum gaji dikunci.",
     ],
     related: ["payroll", "employees", "audit-log"],
   },
@@ -1857,7 +1863,7 @@ const guideArticles: GuideArticle[] = [
     ],
     checks: [
       "Aktivitas kritis punya user pelaku dan waktu yang jelas.",
-      "Approval dan payroll lock bisa ditelusuri.",
+      "Approval dan proses kunci gaji bisa ditelusuri.",
       "Perubahan akses user tercatat.",
     ],
     pitfalls: [
@@ -1954,9 +1960,9 @@ const permissionDefinitions: PermissionDefinition[] = [
   { key: "biofinger.view", label: "Lihat Biofinger", group: "Absensi", description: "Melihat device, user mesin, dan raw event fingerprint." },
   { key: "biofinger.manage", label: "Kelola Biofinger", group: "Absensi", description: "Mapping user Biofinger ke karyawan DMS dan proses import." },
   { key: "overtime.view", label: "Lihat Lembur", group: "Payroll", description: "Melihat kandidat lembur dari check-out melewati jam shift." },
-  { key: "overtime.review", label: "Review Lembur", group: "Payroll", description: "Approve/reject lembur sebelum masuk payroll." },
+  { key: "overtime.review", label: "Review Lembur", group: "Payroll", description: "Approve/reject lembur sebelum masuk hitungan gaji." },
   { key: "payroll.view", label: "Lihat Payroll", group: "Payroll", description: "Melihat cycle 26 hari, draft gaji, bonus, dan potongan." },
-  { key: "payroll.process", label: "Proses Payroll", group: "Payroll", description: "Lock dan proses gaji siap bayar." },
+  { key: "payroll.process", label: "Proses Payroll", group: "Payroll", description: "Kunci dan proses gaji siap bayar." },
   { key: "cash_advance.manage", label: "Kelola Kasbon", group: "Finance", description: "Approve, cicil, dan potong kasbon." },
   { key: "role_permissions.manage", label: "Kelola Role Permission", group: "Sistem", description: "Ubah permission role dan custom access." },
   { key: "audit_logs.view", label: "Lihat Audit Log", group: "Sistem", description: "Melihat riwayat aktivitas dan perubahan sistem." },
@@ -2032,6 +2038,16 @@ const overtimePaymentStatusLabel: Record<OvertimePaymentStatus, string> = {
   unpaid: "Belum dibayar",
   paid: "Terbayar",
   void: "Dibatalkan",
+}
+
+const overtimePaymentPolicyLabel: Record<OvertimePaymentPolicy, string> = {
+  separate: "Bayar Terpisah",
+  salary_cycle: "Ikut Gaji 26 Hari",
+}
+
+const overtimePaymentPolicyDescription: Record<OvertimePaymentPolicy, string> = {
+  separate: "Dibayar mingguan/custom dan tidak menahan proses gaji.",
+  salary_cycle: "Masuk total gaji 26 hari dan ikut proses finalisasi gaji.",
 }
 
 const appScopeLabel: Record<AppScope, string> = {
@@ -2638,7 +2654,7 @@ function validateMasterForm(values: MasterDataFormValues) {
     if (!Number.isFinite(rateAmount) || rateAmount < 0) errors.push("Nominal rate komponen wajib angka 0 atau lebih.")
     if (values.autoDetectOvertime && values.componentType !== "earning") errors.push("Auto lembur wajib memakai jenis Penambah Gaji.")
     if (values.autoDetectOvertime && values.calculationUnit !== "hour") errors.push("Auto lembur wajib memakai unit Per Jam.")
-    if (values.autoDetectOvertime && values.dayType === "weekday" && values.overtimeBasis !== "extra_after_shift") errors.push("Lembur weekday wajib memakai basis Setelah Shift.")
+    if (values.autoDetectOvertime && values.dayType === "weekday" && values.overtimeBasis !== "extra_after_shift") errors.push("Lembur weekday wajib memakai basis Di Luar Shift.")
     if (values.autoDetectOvertime && (values.dayType === "sunday" || values.dayType === "holiday") && values.overtimeBasis !== "full_duration") errors.push("Lembur Minggu/Hari Libur wajib memakai basis Full Durasi Kerja.")
     if (values.autoDetectOvertime && values.dayType === "all" && values.overtimeBasis === "full_duration") errors.push("Basis Full Durasi Kerja tidak boleh dipakai untuk Semua Hari.")
   }
@@ -2825,7 +2841,7 @@ function getPayrollDayTypeLabel(dayType?: string) {
 
 function getOvertimeBasisLabel(basis?: string) {
   if (basis === "full_duration") return "Full durasi kerja"
-  return "Setelah shift"
+  return "Di luar shift"
 }
 
 function getMasterDetail(row: MasterDataRow) {
@@ -3304,7 +3320,7 @@ function PageHeader({
       title={activeItem?.label || "Dashboard"}
       eyebrow="Management App"
       icon={Icon}
-      subtitle={subtitle || "Monitoring karyawan, absensi realtime, face verification, payroll cycle 26 hari kerja, dan kasbon."}
+      subtitle={subtitle || "Monitoring karyawan, absensi realtime, face verification, cycle gaji 26 hari kerja, dan kasbon."}
       meta={meta}
       actions={actions || defaultActions}
     />
@@ -4976,10 +4992,27 @@ function isMissingOvertimePaymentSchema(error: unknown) {
     "overtime_payments",
     "overtime_payment_items",
     "overtime_payment_status",
+    "overtime_payment_policy",
+    "target_payment_policy",
+    "request_overtime",
     "mark_overtime_requests_paid",
     "void_overtime_payment",
+    "set_overtime_payment_policy",
     "schema cache",
     "relation",
+  ]
+
+  return schemaHints.some((hint) => message.includes(hint))
+}
+
+function isMissingOvertimeTimingSchema(error: unknown) {
+  const errorObject = error && typeof error === "object" ? error as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown } : null
+  const message = `${String(errorObject?.code || "")} ${String(errorObject?.message || "")} ${String(errorObject?.details || "")} ${String(errorObject?.hint || "")}`.toLowerCase()
+  const schemaHints = [
+    "actual_check_in_at",
+    "pre_shift_minutes",
+    "post_shift_minutes",
+    "schema cache",
   ]
 
   return schemaHints.some((hint) => message.includes(hint))
@@ -6671,7 +6704,7 @@ function exportPayrollUnifiedPaymentCsv(rows: PayrollUnifiedPaymentRow[]) {
 }
 
 function exportPayrollOvertimeCsv(rows: OvertimeReviewRow[]) {
-  const header = ["No", "Kode", "Nama", "Divisi", "Tanggal", "Jadwal", "Rencana", "Realisasi", "Durasi Dibayar", "Rate", "Total Lembur", "Status Bayar", "Status Approval", "Catatan"]
+  const header = ["No", "Kode", "Nama", "Divisi", "Tanggal", "Jadwal", "Rencana", "Realisasi", "Sebelum Shift", "Setelah Shift", "Durasi Dibayar", "Rate", "Total Lembur", "Status Bayar", "Status Approval", "Catatan"]
   const body = rows.map((row, index) => [
     index + 1,
     row.employeeCode,
@@ -6681,6 +6714,8 @@ function exportPayrollOvertimeCsv(rows: OvertimeReviewRow[]) {
     `${formatShiftClock(row.shiftStartTime)} - ${formatShiftClock(row.shiftEndTime)}`,
     getOvertimePlanRange(row),
     getOvertimeRealizationLabel(row),
+    row.preShiftMinutes,
+    row.postShiftMinutes,
     formatMinutesDuration(row.approvedMinutes || row.overtimeMinutes),
     row.rateAmount,
     row.totalAmount,
@@ -6937,7 +6972,8 @@ async function fetchOvertimePaymentRows() {
 }
 
 const overtimeRequestBaseColumns = "id, employee_id, attendance_log_id, payroll_cycle_id, payroll_component_id, overtime_date, shift_start_time, shift_end_time, actual_check_out_at, overtime_minutes, approved_minutes, rate_amount, total_amount, day_type, overtime_basis, status, request_source, planned_start_at, planned_end_at, planned_minutes, request_reason, requested_at, matched_attendance, notes, created_at"
-const overtimeRequestPaymentColumns = `${overtimeRequestBaseColumns}, overtime_payment_status, overtime_payment_id, overtime_paid_at, overtime_payment_note`
+const overtimeRequestPaymentColumns = `${overtimeRequestBaseColumns}, overtime_payment_status, overtime_payment_policy, overtime_payment_id, overtime_paid_at, overtime_payment_note`
+const overtimeRequestTimingColumns = `${overtimeRequestPaymentColumns}, actual_check_in_at, pre_shift_minutes, post_shift_minutes`
 
 async function fetchOvertimeRequestRows(startDate: string, endDate: string, dateScoped = true) {
   const runQuery = (columns: string) => fetchSupabaseRangeRows<Record<string, unknown>>(() => {
@@ -6955,16 +6991,23 @@ async function fetchOvertimeRequestRows(startDate: string, endDate: string, date
   }, 500, 10000)
 
   try {
-    const rows = await runQuery(overtimeRequestPaymentColumns)
+    const rows = await runQuery(overtimeRequestTimingColumns)
     return { data: rows, error: null }
   } catch (error) {
-    if (!isMissingOvertimePaymentSchema(error)) return { data: [], error }
+    if (!isMissingOvertimeTimingSchema(error) && !isMissingOvertimePaymentSchema(error)) return { data: [], error }
 
     try {
-      const rows = await runQuery(overtimeRequestBaseColumns)
+      const rows = await runQuery(overtimeRequestPaymentColumns)
       return { data: rows, error: null }
-    } catch (legacyError) {
-      return { data: [], error: legacyError }
+    } catch (paymentError) {
+      if (!isMissingOvertimePaymentSchema(paymentError)) return { data: [], error: paymentError }
+
+      try {
+        const rows = await runQuery(overtimeRequestBaseColumns)
+        return { data: rows, error: null }
+      } catch (legacyError) {
+        return { data: [], error: legacyError }
+      }
     }
   }
 }
@@ -7254,6 +7297,12 @@ function compareAttendanceRowsByLatestActivity(a: AttendanceMonitorRow, b: Atten
   return a.employeeCode.localeCompare(b.employeeCode)
 }
 
+function compareAttendanceRowsByCycleProgress(a: AttendanceMonitorRow, b: AttendanceMonitorRow) {
+  const cycleCompare = b.cycleDays - a.cycleDays
+  if (cycleCompare !== 0) return cycleCompare
+  return compareAttendanceRowsByLatestActivity(a, b)
+}
+
 function getAttendanceShiftScheduleLabel(row: AttendanceMonitorRow) {
   if (!row.scheduledStartAt || !row.scheduledEndAt) return "jadwal belum lengkap"
   const crossesDate = row.scheduledStartAt.slice(0, 10) !== row.scheduledEndAt.slice(0, 10)
@@ -7422,6 +7471,10 @@ function mapOvertimePaymentRecord(row: Record<string, unknown>): OvertimePayment
 function mapOvertimePaymentStatus(value: unknown): OvertimePaymentStatus {
   if (value === "paid" || value === "void") return value
   return "unpaid"
+}
+
+function mapOvertimePaymentPolicy(value: unknown): OvertimePaymentPolicy {
+  return value === "salary_cycle" ? "salary_cycle" : "separate"
 }
 
 function getAttendanceMonitorStatus(row?: Record<string, unknown>): AttendanceStatus {
@@ -8058,7 +8111,10 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
       overtimeDate: String(overtime.overtime_date || ""),
       shiftStartTime: String(overtime.shift_start_time || "").slice(0, 5),
       shiftEndTime: String(overtime.shift_end_time || "").slice(0, 5),
+      actualCheckInAt: String(overtime.actual_check_in_at || ""),
       actualCheckOutAt: String(overtime.actual_check_out_at || ""),
+      preShiftMinutes: Number(overtime.pre_shift_minutes || 0),
+      postShiftMinutes: Number(overtime.post_shift_minutes || 0),
       overtimeMinutes: Number(overtime.overtime_minutes || 0),
       approvedMinutes: Number(overtime.approved_minutes || 0),
       rateAmount: Number(overtime.rate_amount || component?.rate_amount || 0),
@@ -8077,6 +8133,7 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
       payrollCycleNumber: Number(payrollCycle?.cycle_number || 0),
       payrollStatus: mapPayrollCycleStatus(payrollCycle?.status),
       overtimePaymentStatus: mapOvertimePaymentStatus(overtime.overtime_payment_status),
+      overtimePaymentPolicy: mapOvertimePaymentPolicy(overtime.overtime_payment_policy),
       overtimePaymentId: String(overtime.overtime_payment_id || ""),
       overtimePaidAt: String(overtime.overtime_paid_at || ""),
       overtimePaymentNote: String(overtime.overtime_payment_note || ""),
@@ -8656,9 +8713,9 @@ async function correctMissingCheckout(employeeId: string, attendanceDate: string
   return data
 }
 
-async function reviewOvertimeRequest(id: string, decision: "approve" | "reject", approvedMinutes: number, notes: string) {
+async function reviewOvertimeRequest(id: string, decision: "approve" | "reject", approvedMinutes: number, paymentPolicy: OvertimePaymentPolicy, notes: string) {
   const { data, error } = await supabase.functions.invoke("overtime-review", {
-    body: { action: decision, payload: { id, approvedMinutes, notes } },
+    body: { action: decision, payload: { id, approvedMinutes, paymentPolicy, notes } },
   })
 
   if (error) {
@@ -8694,8 +8751,22 @@ async function createOvertimeRequest(payload: OvertimeRequestSubmitPayload) {
     target_overtime_date: payload.overtimeDate,
     planned_start_time: payload.plannedStartTime,
     planned_end_time: payload.plannedEndTime,
+    target_payment_policy: payload.paymentPolicy,
     request_reason: payload.reason,
   })
+
+  if (error && payload.paymentPolicy === "separate" && isMissingOvertimePaymentSchema(error)) {
+    const legacyResult = await supabase.rpc("request_overtime", {
+      target_employee_id: payload.employeeId,
+      target_overtime_date: payload.overtimeDate,
+      planned_start_time: payload.plannedStartTime,
+      planned_end_time: payload.plannedEndTime,
+      request_reason: payload.reason,
+    })
+
+    if (legacyResult.error) throw legacyResult.error
+    return legacyResult.data
+  }
 
   if (error) throw error
   return data
@@ -9920,7 +9991,7 @@ function ShiftSchedulesPage({
         icon={RotateCcw}
         eyebrow="Batalkan Jadwal Khusus"
         title={cancelRow ? `Kembalikan ${cancelRow.fullName} ke default shift?` : "Batalkan jadwal khusus?"}
-        description="Jadwal khusus tanggal ini akan dibatalkan, lalu summary absensi dan payroll cycle dihitung ulang memakai default karyawan."
+        description="Jadwal khusus tanggal ini akan dibatalkan, lalu summary absensi dan cycle gaji dihitung ulang memakai default karyawan."
         confirmLabel="Batalkan Jadwal"
         cancelLabel="Tutup"
         loading={saving}
@@ -12635,7 +12706,7 @@ function EmployeeDialog({
         <div className="dialogCompactHeader">
           <div>
             <h2 id="employee-dialog-title">{mode === "edit" ? "Edit Karyawan" : "Tambah Karyawan"}</h2>
-            <p id="employee-dialog-description">Data karyawan ini akan dipakai modul Biofinger, jadwal shift, rekap absensi, dan payroll cycle.</p>
+            <p id="employee-dialog-description">Data karyawan ini akan dipakai modul Biofinger, jadwal shift, absensi lapangan, rekap absensi, dan cycle gaji.</p>
           </div>
           <button className="iconButton dialogClose" type="button" aria-label="Tutup dialog" onClick={onClose}>
             <X size={18} />
@@ -13124,7 +13195,7 @@ function EmployeeDetailDialog({
             <div>
               <span>Karyawan</span>
               <h2 id="employee-detail-title">{row.fullName}</h2>
-              <p>Detail data karyawan yang dipakai modul Biofinger, rekap absensi, jadwal shift, dan payroll.</p>
+              <p>Detail data karyawan yang dipakai modul Biofinger, rekap absensi, jadwal shift, dan gaji.</p>
               {row.deletedAt && <em className="masterDetailArchivedFlag">Diarsipkan {formatUserDateTime(row.deletedAt, "-")}</em>}
             </div>
           </div>
@@ -13138,7 +13209,7 @@ function EmployeeDetailDialog({
             <p>
               <strong>{row.fullName}</strong> adalah karyawan {row.positionName} di divisi {row.divisionName},
               ditempatkan di {row.workLocationName} untuk shift {row.shiftName}. Data ini menjadi acuan Biofinger,
-              rekap absensi, validasi shift, dan perhitungan payroll.
+              absensi lapangan, rekap absensi, radius GPS, face verification, dan perhitungan gaji.
             </p>
           </section>
 
@@ -15872,7 +15943,7 @@ function MasterDataDialog({
                 disabled={!values.autoDetectOvertime}
                 required
               >
-                <option value="extra_after_shift">Setelah Shift</option>
+                <option value="extra_after_shift">Di Luar Shift</option>
                 <option value="full_duration">Full Durasi Kerja</option>
               </SelectFormField>
               <SwitchFormField
@@ -16071,7 +16142,7 @@ function DashboardPage({ activeView }: { activeView: ViewId }) {
     <OperationalPageShell>
       <PageHeader
         activeView={activeView}
-        subtitle="Ringkasan operasional hari ini: absensi, antrian HR, device source, dan payroll cycle."
+        subtitle="Ringkasan operasional hari ini: absensi, antrian HR, device source, dan cycle gaji."
         meta={(
           <InlinePageStats
             items={[
@@ -16643,10 +16714,10 @@ function AttendanceMonitorDetailDialog({
     { label: "Telat / Pulang cepat", value: `${row.lateMinutes ? formatMinutesDuration(row.lateMinutes) : "0m"} / ${row.earlyLeaveMinutes ? formatMinutesDuration(row.earlyLeaveMinutes) : "0m"}` },
     { label: "Sumber check-in", value: row.checkInId ? formatAttendanceSourceMeta(row.checkInSource, row.checkInMedia) : "Belum masuk" },
     { label: "Sumber check-out", value: row.checkOutId ? formatAttendanceSourceMeta(row.checkOutSource, row.checkOutMedia) : "Belum pulang" },
-    { label: "Payroll cycle", value: row.payrollCycleNumber ? `Cycle ${row.payrollCycleNumber} / ${row.cycleDays}/${row.targetDays} hari` : `${row.cycleDays}/${row.targetDays} hari` },
+    { label: "Cycle gaji", value: row.payrollCycleNumber ? `Cycle ${row.payrollCycleNumber} / ${row.cycleDays}/${row.targetDays} hari` : `${row.cycleDays}/${row.targetDays} hari` },
     { label: "Periode", value: formatPayrollPeriod(row) },
     { label: "Tipe gaji", value: `${employeeSalaryTypeLabel[row.salaryType]} / ${row.basePayrollAmount ? formatCurrency(row.basePayrollAmount) : "-"}` },
-    { label: "Total payroll", value: `${row.payrollAmount ? formatCurrency(row.payrollAmount) : "-"} / ${payrollLabel[row.payrollStatus]}` },
+    { label: "Total gaji", value: `${row.payrollAmount ? formatCurrency(row.payrollAmount) : "-"} / ${payrollLabel[row.payrollStatus]}` },
   ]
   const hasAttendance = Boolean(row.checkInId || row.checkOutId)
   const canCorrectCheckout = canCorrectMissingCheckout(row)
@@ -16668,7 +16739,7 @@ function AttendanceMonitorDetailDialog({
             <div>
               <span>Attendance Monitor</span>
               <h2 id="attendance-monitor-detail-title">{row.fullName}</h2>
-              <p>Ringkasan absensi, GPS radius, face verification, dan payroll cycle karyawan.</p>
+              <p>Ringkasan absensi, GPS radius, face verification, dan cycle gaji karyawan.</p>
             </div>
           </div>
           <button className="iconButton dialogClose" type="button" aria-label="Tutup detail" onClick={onClose}>
@@ -16965,7 +17036,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
       showToast({
         tone: "success",
         title: decision === "approve" ? "Absensi disetujui" : "Absensi ditolak",
-        description: `${reviewTarget.fullName} sudah diproses dan payroll cycle diperbarui.`,
+        description: `${reviewTarget.fullName} sudah diproses dan cycle gaji diperbarui.`,
       })
       setReviewTarget(null)
       await refreshData()
@@ -17028,16 +17099,16 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
     }
   }
 
-  const handleOvertimeReviewSubmit = async (decision: "approve" | "reject", approvedMinutes: number, notes: string) => {
+  const handleOvertimeReviewSubmit = async (decision: "approve" | "reject", approvedMinutes: number, paymentPolicy: OvertimePaymentPolicy, notes: string) => {
     if (!overtimeTarget) return
 
     setOvertimeSubmitting(true)
     try {
-      await reviewOvertimeRequest(overtimeTarget.id, decision, approvedMinutes, notes)
+      await reviewOvertimeRequest(overtimeTarget.id, decision, approvedMinutes, paymentPolicy, notes)
       showToast({
         tone: "success",
         title: decision === "approve" ? "Lembur disetujui" : "Lembur ditolak",
-        description: `${overtimeTarget.fullName} • ${formatMinutesDuration(approvedMinutes)} • payroll preview diperbarui.`,
+        description: `${overtimeTarget.fullName} - ${formatMinutesDuration(approvedMinutes)} - ${overtimePaymentPolicyLabel[paymentPolicy]}.`,
       })
       setOvertimeTarget(null)
       await refreshData()
@@ -17137,9 +17208,9 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
       const payrollActionTitle: Record<PayrollProcessAction, string> = {
         lock: "Nominal gaji difinalkan",
         mark_paid: "Pembayaran dicatat",
-        unlock: "Payroll dibuka untuk koreksi",
-        void: "Cycle payroll dibatalkan",
-        restore: "Cycle payroll dipulihkan",
+        unlock: "Gaji dibuka untuk koreksi",
+        void: "Gaji 26 hari dibatalkan",
+        restore: "Gaji 26 hari dipulihkan",
       }
       showToast({
         tone: "success",
@@ -17160,8 +17231,8 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
     } catch (error) {
       showToast({
         tone: "error",
-        title: "Gagal proses payroll",
-        description: getFriendlySupabaseError(error, "Payroll belum bisa diproses."),
+        title: "Gagal proses gaji",
+        description: getFriendlySupabaseError(error, "Gaji belum bisa diproses."),
       })
     } finally {
       setPayrollSubmitting(false)
@@ -17406,8 +17477,8 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
 
     return matchesDate && matchesDivision && matchesSearch && matchesStatus
   })
-  const latestFirstRows = activeView === "attendance-live"
-    ? [...filteredRows].sort(compareAttendanceRowsByLatestActivity)
+  const cycleFirstRows = activeView === "attendance-live"
+    ? [...filteredRows].sort(compareAttendanceRowsByCycleProgress)
     : filteredRows
   const payrollProcessRows = filteredRows.filter(isPayrollEligibleAttendanceRow)
   const filteredReviewRows = data.reviews.filter((row) => {
@@ -17509,12 +17580,26 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
       || (row.overtimeDate >= attendanceDateRange.start && row.overtimeDate <= attendanceDateRange.end)
     const matchesDivision = matchesDivisionFilter(row.divisionName)
     const matchesSearch = normalizedSearch
-      ? [row.employeeCode, row.fullName, row.divisionName, row.componentName, row.status, row.dayType, row.overtimeBasis, row.requestSource, row.requestReason].join(" ").toLowerCase().includes(normalizedSearch)
+      ? [
+        row.employeeCode,
+        row.fullName,
+        row.divisionName,
+        row.componentName,
+        row.status,
+        row.dayType,
+        row.overtimeBasis,
+        row.requestSource,
+        row.requestReason,
+        overtimePaymentPolicyLabel[row.overtimePaymentPolicy],
+        overtimePaymentStatusLabel[row.overtimePaymentStatus],
+      ].join(" ").toLowerCase().includes(normalizedSearch)
       : true
     const matchesStatus = (statusFilter === "all" && row.status !== "rejected")
       || row.status === statusFilter
       || row.dayType === statusFilter
       || row.requestSource === statusFilter
+      || row.overtimePaymentPolicy === statusFilter
+      || row.overtimePaymentStatus === statusFilter
       || (statusFilter === "pending_overtime" && row.status === "pending")
 
     return matchesDate && matchesDivision && matchesSearch && matchesStatus
@@ -17534,6 +17619,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
         row.overtimeBasis,
         row.requestSource,
         row.requestReason,
+        overtimePaymentPolicyLabel[row.overtimePaymentPolicy],
         overtimePaymentStatusLabel[row.overtimePaymentStatus],
       ].join(" ").toLowerCase().includes(normalizedSearch)
       : true
@@ -17541,6 +17627,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
       || row.status === statusFilter
       || row.dayType === statusFilter
       || row.requestSource === statusFilter
+      || row.overtimePaymentPolicy === statusFilter
       || row.overtimePaymentStatus === statusFilter
       || (statusFilter === "overtime_pending" && row.status === "pending")
       || (statusFilter === "overtime_approved" && row.status === "approved")
@@ -17614,6 +17701,8 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
       { value: "paid", label: "Terbayar" },
       { value: "void", label: "Dibatalkan" },
       { value: "overtime_approved", label: "Lembur Disetujui" },
+      { value: "separate", label: "Lembur Terpisah" },
+      { value: "salary_cycle", label: "Lembur Ikut Gaji" },
       { value: "overtime_pending", label: "Lembur Menunggu" },
     ]
     : activeView === "attendance-review"
@@ -17624,6 +17713,8 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
           { value: "draft", label: "Menunggu Checkout" },
           { value: "approved", label: "Approved" },
           { value: "rejected", label: "Rejected" },
+          { value: "separate", label: "Bayar Terpisah" },
+          { value: "salary_cycle", label: "Ikut Gaji 26 Hari" },
           { value: "planned", label: "Request Terencana" },
           { value: "auto", label: "Auto Detect" },
           { value: "sunday", label: "Hari Minggu" },
@@ -17707,12 +17798,12 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
   const pageSubtitle = activeView === "payroll"
     ? "Preview gaji otomatis dari hari kerja valid, lembur disetujui, tipe gaji, dan cycle berjalan."
     : activeView === "attendance-review"
-      ? "Pusat approval absensi bermasalah dan lembur sebelum masuk hitungan payroll cycle."
+      ? "Pusat approval absensi bermasalah dan lembur sebelum masuk hitungan gaji."
     : activeView === "attendance-requests"
       ? "Rekap check-in, check-out, jam kerja, validasi GPS/face, dan status hari kerja per tanggal."
     : activeView === "field-monitoring"
       ? "Monitoring titik lokasi kerja, radius GPS, kesiapan koordinat, dan aktivitas absensi per lokasi."
-      : "Pantau absensi realtime dengan validasi GPS radius, face verification, dan progress payroll cycle."
+      : "Pantau absensi realtime dengan validasi GPS radius, face verification, dan progress cycle gaji."
   const approvalQueueTabs = [
     canReviewAttendance ? { id: "attendance" as const, label: "Absensi Review", icon: ClipboardList, count: filteredReviewRows.length } : null,
     canReviewOvertime ? { id: "overtime" as const, label: "Lembur", icon: BadgeDollarSign, count: filteredOvertimeRows.length } : null,
@@ -17737,10 +17828,10 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
         canManageLeave ? `${approvedLeaveRows.length} izin/cuti disetujui` : null,
       ].filter(Boolean) as string[]
     : [
-      `${latestFirstRows.length} karyawan`,
+      `${cycleFirstRows.length} karyawan`,
       `${gpsReadyLocations.length} lokasi GPS siap`,
       `${faceVerifiedRows.length} face valid`,
-      activeView === "payroll" ? `${readyPayrollRows.length} siap dicek - ${lockedPayrollRows.length} final - ${paidPayrollRows.length} terbayar - ${voidPayrollRows.length} dibatalkan` : `${readyPayrollRows.length} cycle siap`,
+      activeView === "payroll" ? `${readyPayrollRows.length} siap dicek - ${lockedPayrollRows.length} menunggu bayar - ${paidPayrollRows.length} terbayar - ${voidPayrollRows.length} dibatalkan` : `${readyPayrollRows.length} gaji siap`,
     ]
 
   return (
@@ -17868,7 +17959,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
       </OperationalFilterPanel>
 
       {(activeView === "attendance-live" || activeView === "attendance-requests") && (
-        <AttendanceLiveRecap rows={activeView === "attendance-requests" ? filteredRecapRows : latestFirstRows} selectedDate={selectedDate} mode={attendanceDateMode} />
+        <AttendanceLiveRecap rows={activeView === "attendance-requests" ? filteredRecapRows : cycleFirstRows} selectedDate={selectedDate} mode={attendanceDateMode} />
       )}
 
       {activeView === "attendance-review" && (
@@ -17926,7 +18017,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
           onVoidOvertimePayment={setOvertimePaymentVoidTarget}
         />
       ) : (
-        <LiveAttendanceTable rows={latestFirstRows} loading={loading} errorMessage={errorMessage} selectedDate={selectedDate} onResetDay={setResetAttendanceRow} onCorrectCheckIn={setCheckinCorrectionRow} onCorrectCheckout={setCheckoutCorrectionRow} />
+        <LiveAttendanceTable rows={cycleFirstRows} loading={loading} errorMessage={errorMessage} selectedDate={selectedDate} onResetDay={setResetAttendanceRow} onCorrectCheckIn={setCheckinCorrectionRow} onCorrectCheckout={setCheckoutCorrectionRow} />
       )}
 
       <FieldAttendanceDialog
@@ -17986,7 +18077,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
         icon={Trash2}
         eyebrow="Hapus Request"
         title="Hapus request ketidakhadiran?"
-        description="Data request akan dihapus dari antrian dan rekap harian karyawan akan dihitung ulang. Request yang sudah masuk payroll final tetap dikunci oleh database."
+        description="Data request akan dihapus dari antrian dan rekap harian karyawan akan dihitung ulang. Request yang sudah masuk gaji final tetap dikunci oleh database."
         confirmLabel="Hapus Request"
         loading={leaveSubmitting}
         onClose={() => {
@@ -18006,7 +18097,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
         icon={FileCheck2}
         eyebrow="Approval Massal"
         title={`Approve ${bulkReviewRows.length} event review?`}
-        description="Semua event terpilih akan berubah menjadi valid dan payroll cycle karyawan akan dihitung ulang."
+        description="Semua event terpilih akan berubah menjadi valid dan cycle gaji karyawan akan dihitung ulang."
         confirmLabel="Approve Semua"
         loading={reviewSubmitting}
         onClose={() => {
@@ -18343,7 +18434,7 @@ function LiveAttendanceTable({
       <div className="tableHeader">
         <div>
           <h2>Realtime Attendance Feed</h2>
-          <p>Update terbaru tampil paling atas. Klik baris untuk membuka detail tanpa keluar dari tabel.</p>
+          <p>Cycle terbesar tampil paling atas. Jika cycle sama, update terbaru menjadi prioritas berikutnya.</p>
         </div>
       </div>
       <div
@@ -19550,7 +19641,7 @@ function AttendanceReviewDialog({
             <div>
               <span>Issue</span>
               <strong>{row.issueLabel}</strong>
-              <small>{row.workdayCounted ? "Sudah masuk hitungan payroll" : "Belum dihitung payroll"}</small>
+              <small>{row.workdayCounted ? "Sudah masuk hitungan gaji" : "Belum dihitung gaji"}</small>
             </div>
             <div>
               <span>Sumber Event</span>
@@ -19625,38 +19716,38 @@ function PayrollProcessDialog({
 
   const copy: Record<PayrollProcessAction, { eyebrow: string; title: string; description: string; button: string; icon: LucideIcon }> = {
     lock: {
-      eyebrow: "FINALISASI GAJI",
-      title: `Finalkan gaji ${row.fullName}?`,
-      description: "Nominal akan dikunci agar tidak berubah saat data absensi atau lembur direfresh.",
-      button: "Finalkan Nominal",
+      eyebrow: "KUNCI GAJI 26 HARI",
+      title: `Kunci gaji ${row.fullName}?`,
+      description: "Nominal gaji 26 hari dikunci agar tidak berubah saat data absensi direfresh. Lembur terpisah tetap dibayar dari tab Bayar Lembur.",
+      button: "Kunci Gaji",
       icon: Lock,
     },
     mark_paid: {
-      eyebrow: "PEMBAYARAN GAJI",
-      title: `Catat pembayaran ${row.fullName}?`,
-      description: "Setelah disimpan, data masuk Riwayat Bayar dan cycle tidak berubah otomatis.",
-      button: "Simpan Pembayaran",
+      eyebrow: "BAYAR GAJI",
+      title: `Bayar gaji ${row.fullName}?`,
+      description: "Catat pembayaran gaji 26 hari. Transaksi masuk Riwayat Bayar sebagai Gaji 26 Hari.",
+      button: "Simpan Bayar Gaji",
       icon: CreditCard,
     },
     unlock: {
       eyebrow: "BUKA KOREKSI",
-      title: `Buka koreksi payroll ${row.fullName}?`,
-      description: "Cycle kembali ke Siap Dicek supaya nominal bisa dihitung ulang dari data terbaru.",
+      title: `Buka koreksi gaji ${row.fullName}?`,
+      description: "Data kembali ke Siap Dicek supaya nominal gaji bisa dihitung ulang dari data terbaru.",
       button: "Buka Koreksi",
       icon: FileCheck2,
     },
     void: {
-      eyebrow: "BATALKAN CYCLE",
-      title: `Batalkan cycle payroll ${row.fullName}?`,
-      description: "Cycle ditandai Dibatalkan tanpa menghapus data, supaya riwayat audit tetap ada.",
-      button: "Batalkan Cycle",
+      eyebrow: "BATALKAN GAJI",
+      title: `Batalkan gaji 26 hari ${row.fullName}?`,
+      description: "Gaji ditandai Dibatalkan tanpa menghapus data, supaya riwayat audit tetap ada.",
+      button: "Batalkan Gaji",
       icon: Trash2,
     },
     restore: {
-      eyebrow: "PULIHKAN CYCLE",
-      title: `Pulihkan cycle payroll ${row.fullName}?`,
-      description: "Cycle yang dibatalkan dikembalikan ke Berjalan atau Siap Dicek sesuai jumlah hari kerja valid.",
-      button: "Pulihkan Cycle",
+      eyebrow: "PULIHKAN GAJI",
+      title: `Pulihkan gaji 26 hari ${row.fullName}?`,
+      description: "Gaji yang dibatalkan dikembalikan ke Berjalan atau Siap Dicek sesuai jumlah hari kerja valid.",
+      button: "Pulihkan Gaji",
       icon: FileCheck2,
     },
   }
@@ -19736,11 +19827,11 @@ function PayrollProcessDialog({
                 <strong>{formatCurrency(row.basePayrollAmount)}</strong>
               </div>
               <div>
-                <small>Lembur Disetujui</small>
+                <small>Lembur Ikut Gaji</small>
                 <strong>{formatCurrency(row.overtimeAmount)}</strong>
               </div>
               <div className="payrollProcessTotal">
-                <small>Total Gaji</small>
+                <small>Total Gaji 26 Hari</small>
                 <strong>{formatCurrency(row.payrollAmount)}</strong>
               </div>
             </div>
@@ -19781,7 +19872,7 @@ function PayrollProcessDialog({
             <textarea
               value={notes}
               onChange={(event) => setNotes(event.target.value)}
-              placeholder={isPayment ? "Contoh: transfer BCA sudah dicek dan slip disimpan." : "Contoh: angka sudah dicek dengan HR dan lembur sudah disetujui."}
+              placeholder={isPayment ? "Contoh: transfer BCA sudah dicek dan slip disimpan." : "Contoh: gaji pokok dan jumlah hari kerja sudah dicek."}
               disabled={saving}
             />
           </div>
@@ -19905,6 +19996,10 @@ function OvertimePaymentDialog({
                 <small>Rate</small>
                 <strong>{`${formatCurrency(row.rateAmount)}/jam`}</strong>
               </div>
+              <div>
+                <small>Pembayaran</small>
+                <strong>{overtimePaymentPolicyLabel[row.overtimePaymentPolicy]}</strong>
+              </div>
               <div className="payrollProcessTotal">
                 <small>Total Lembur</small>
                 <strong>{formatCurrency(row.totalAmount)}</strong>
@@ -20024,7 +20119,7 @@ function PayrollPreviewTable({
     return buildPayrollPaymentHistoryRows([...ledgerRows, ...fallbackRows])
   }, [paidCycleRows, payments])
   const unifiedPaymentRows = useMemo(() => buildPayrollUnifiedPaymentRows(paymentRows, overtimePayments), [overtimePayments, paymentRows])
-  const overtimePayableRows = useMemo(() => sortPayrollOvertimeRows(overtimeRows.filter((row) => row.status === "approved" && row.overtimePaymentStatus !== "paid" && row.overtimePaymentStatus !== "void" && row.approvedMinutes > 0 && row.totalAmount > 0)), [overtimeRows])
+  const overtimePayableRows = useMemo(() => sortPayrollOvertimeRows(overtimeRows.filter((row) => row.overtimePaymentPolicy === "separate" && row.status === "approved" && row.overtimePaymentStatus !== "paid" && row.overtimePaymentStatus !== "void" && row.approvedMinutes > 0 && row.totalAmount > 0)), [overtimeRows])
   const readyRows = useMemo(() => sortedRows.filter((row) => row.payrollStatus === "ready"), [sortedRows])
   const activeRows = useMemo(() => sortedRows.filter((row) => row.payrollStatus === "active"), [sortedRows])
   const voidRows = useMemo(() => sortedRows.filter((row) => row.payrollStatus === "void"), [sortedRows])
@@ -20082,8 +20177,8 @@ function PayrollPreviewTable({
         <div className="tableHeader">
           <div>
             <h2>Proses Payroll</h2>
-            <p>Gaji 26 hari tetap berjalan. Lembur bisa ikut cycle atau dibayar terpisah mingguan/custom.</p>
-            <InlinePageStats items={[`${formatCurrency(overtimeTotal)} lembur disetujui`, `${formatCurrency(payableAmount)} gaji siap proses`, `${formatCurrency(overtimePayableAmount)} lembur belum dibayar`, `${formatNumber(unifiedPaymentRows.length)} riwayat bayar`]} />
+            <p>Gaji 26 hari tetap berjalan. Lembur bisa ikut gaji atau dibayar terpisah mingguan/custom.</p>
+            <InlinePageStats items={[`${formatCurrency(overtimeTotal)} lembur disetujui total`, `${formatCurrency(payableAmount)} gaji siap/final`, `${formatCurrency(overtimePayableAmount)} lembur terpisah belum dibayar`, `${formatNumber(unifiedPaymentRows.length)} riwayat bayar`]} />
           </div>
           <div className="payrollTableActions">
             <button className="secondaryButton" type="button" onClick={() => exportPayrollCsv(visibleCycleRows)} disabled={loading || workspaceTab !== "cycle" || visibleCycleRows.length === 0}>
@@ -20102,9 +20197,9 @@ function PayrollPreviewTable({
         </div>
 
         <div className="payrollFinanceSummary">
-          <PayrollFinanceMetric icon={WalletCards} label="Gaji perlu diproses" value={formatCurrency(payableAmount)} meta={`${formatNumber(payableRows.length)} cycle siap/final`} tone="info" />
-          <PayrollFinanceMetric icon={BadgeDollarSign} label="Lembur belum dibayar" value={formatCurrency(overtimePayableAmount)} meta={`${formatNumber(overtimePayableRows.length)} request approved`} tone="warning" />
-          <PayrollFinanceMetric icon={FileCheck2} label="Sudah terbayar" value={formatCurrency(paidAmount)} meta={`${formatNumber(unifiedPaymentRows.length)} transaksi riwayat`} tone="success" />
+          <PayrollFinanceMetric icon={WalletCards} label="Gaji perlu diproses" value={formatCurrency(payableAmount)} meta={`${formatNumber(payableRows.length)} gaji siap diproses`} tone="info" />
+          <PayrollFinanceMetric icon={BadgeDollarSign} label="Lembur belum dibayar" value={formatCurrency(overtimePayableAmount)} meta={`${formatNumber(overtimePayableRows.length)} request bayar terpisah`} tone="warning" />
+          <PayrollFinanceMetric icon={FileCheck2} label="Sudah terbayar" value={formatCurrency(paidAmount)} meta={`${formatNumber(unifiedPaymentRows.length)} transaksi gaji/lembur`} tone="success" />
           <PayrollFinanceMetric icon={BadgeDollarSign} label="Masih berjalan" value={formatNumber(activeRows.length)} meta="masih mengikuti absensi" tone="neutral" />
         </div>
 
@@ -20144,7 +20239,7 @@ function PayrollPreviewTable({
                   </tr>
                 </thead>
                 <tbody>
-                  {loading && <tr><td className="tableStateCell" colSpan={9}><TableState title="Memuat payroll" description="Menghitung preview gaji 26 hari." icon={BadgeDollarSign} /></td></tr>}
+                  {loading && <tr><td className="tableStateCell" colSpan={9}><TableState title="Memuat gaji" description="Menghitung preview gaji 26 hari." icon={BadgeDollarSign} /></td></tr>}
                   {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={9}><TableState title="Gagal memuat" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
                   {!loading && !errorMessage && pagedCycleRows.map((row, index) => (
                     <ClickableTableRow key={row.payrollCycleId || row.employeeId} label={`Lihat detail payroll ${row.fullName}`} onOpen={() => setDetailRow(row)}>
@@ -20152,7 +20247,7 @@ function PayrollPreviewTable({
                       <td><EmployeeIdentityCell fullName={row.fullName} code={row.employeeCode} photoUrl={row.employeePhotoUrl} /></td>
                       <td><TableText primary={formatPayrollPeriod(row)} secondary={row.payrollCycleNumber ? `Cycle ${row.payrollCycleNumber} / ${employeeSalaryTypeLabel[row.salaryType]}` : employeeSalaryTypeLabel[row.salaryType]} /></td>
                       <td><TableText primary={row.basePayrollAmount ? formatCurrency(row.basePayrollAmount) : "-"} /></td>
-                      <td><TableText primary={row.overtimeAmount ? formatCurrency(row.overtimeAmount) : "-"} secondary={row.overtimeApprovedMinutes ? `${formatMinutesDuration(row.overtimeApprovedMinutes)} disetujui` : ""} /></td>
+                      <td><TableText primary={row.overtimeAmount ? formatCurrency(row.overtimeAmount) : "-"} secondary={row.overtimeAmount ? "Ikut gaji 26 hari" : row.overtimeApprovedMinutes ? "Lembur terpisah" : ""} /></td>
                       <td><TableText primary={row.payrollAmount ? formatCurrency(row.payrollAmount) : "-"} secondary={row.payrollStatus === "paid" ? "Masuk riwayat bayar" : row.payrollStatus === "locked" ? "Menunggu bayar" : ""} /></td>
                       <td><span className="cycleCell"><ProgressRing value={row.cycleDays} /><span>{row.cycleDays}/{row.targetDays}</span></span></td>
                       <td>
@@ -20170,11 +20265,11 @@ function PayrollPreviewTable({
                         <RowActionMenu label={`Aksi payroll ${row.fullName}`}>
                           <RowActionMenuItem disabled={!row.payrollCycleId || row.payrollStatus !== "ready"} onClick={() => onProcess(row, "lock")}>
                             <Lock size={15} />
-                            Finalkan Gaji
+                            Kunci Gaji
                           </RowActionMenuItem>
                           <RowActionMenuItem disabled={!row.payrollCycleId || row.payrollStatus !== "locked"} onClick={() => onProcess(row, "mark_paid")}>
                             <CreditCard size={15} />
-                            Tandai Terbayar
+                            Bayar Gaji
                           </RowActionMenuItem>
                           <RowActionMenuItem disabled={!row.payrollCycleId || row.payrollStatus !== "locked"} onClick={() => onProcess(row, "unlock")}>
                             <FileCheck2 size={15} />
@@ -20182,7 +20277,7 @@ function PayrollPreviewTable({
                           </RowActionMenuItem>
                           <RowActionMenuItem danger disabled={!row.payrollCycleId || row.payrollStatus === "paid" || row.payrollStatus === "void"} onClick={() => onProcess(row, "void")}>
                             <Trash2 size={15} />
-                            Batalkan Cycle
+                            Batalkan Gaji
                           </RowActionMenuItem>
                           <RowActionMenuItem disabled={!row.payrollCycleId || row.payrollStatus !== "void"} onClick={() => onProcess(row, "restore")}>
                             <FileCheck2 size={15} />
@@ -20372,11 +20467,10 @@ function sortPayrollOvertimeRows(rows: OvertimeReviewRow[]) {
 }
 
 function getOvertimePaymentBlockReason(row: OvertimeReviewRow) {
+  if (row.overtimePaymentPolicy === "salary_cycle") return "Lembur ini ikut gaji 26 hari."
   if (row.status !== "approved") return "Lembur belum disetujui."
   if (row.overtimePaymentStatus === "paid") return "Lembur sudah dibayar."
   if (row.overtimePaymentStatus === "void") return "Pembayaran lembur pernah dibatalkan."
-  if (isOvertimePayrollFinal(row)) return getOvertimePayrollFinalLabel(row)
-  if (row.payrollStatus === "void") return "Cycle payroll dibatalkan."
   if ((row.approvedMinutes || row.overtimeMinutes) <= 0) return "Durasi lembur belum valid."
   if (row.totalAmount <= 0) return "Nominal lembur belum valid."
   return ""
@@ -20588,7 +20682,7 @@ function PayrollOvertimePaymentTable({
                   <td><TableText primary={formatMinutesDuration(row.approvedMinutes || row.overtimeMinutes)} secondary={getOvertimeRealizationLabel(row)} /></td>
                   <td><TableText primary={`${formatCurrency(row.rateAmount)}/jam`} secondary={row.componentName || (row.dayType === "sunday" ? "Lembur Minggu" : "Lembur Weekday")} /></td>
                   <td><TableText primary={formatCurrency(row.totalAmount)} secondary={row.payrollCycleNumber ? `Cycle ${row.payrollCycleNumber}` : "Belum masuk cycle"} /></td>
-                  <td><TableText primary={blockReason || "Siap dibayar"} secondary={row.notes || row.requestReason || ""} /></td>
+                  <td><TableText primary={overtimePaymentPolicyLabel[row.overtimePaymentPolicy]} secondary={blockReason || row.notes || row.requestReason || "Siap dibayar terpisah"} /></td>
                   <td><OvertimePaymentStatusBadge status={row.overtimePaymentStatus} /></td>
                   <td className="tableActionCell">
                     <RowActionMenu label={`Aksi lembur ${row.fullName}`}>
@@ -20601,7 +20695,7 @@ function PayrollOvertimePaymentTable({
                 </tr>
               )
             })}
-            {!loading && !errorMessage && totalRows === 0 && <tr><td className="tableStateCell" colSpan={10}><TableState title="Tidak ada lembur belum dibayar" description="Lembur approved akan muncul di sini kalau belum dibayar terpisah dan belum masuk payroll final." icon={BadgeDollarSign} /></td></tr>}
+            {!loading && !errorMessage && totalRows === 0 && <tr><td className="tableStateCell" colSpan={10}><TableState title="Tidak ada lembur belum dibayar" description="Lembur approved dengan jadwal Bayar Terpisah akan muncul di sini sampai dibayar." icon={BadgeDollarSign} /></td></tr>}
           </tbody>
         </table>
       </div>
@@ -20694,7 +20788,7 @@ function PayrollUnifiedPaymentHistoryTable({
                 <td>
                   <TableText
                     primary={row.source === "salary" ? `Gaji ${formatCurrency(row.grossAmount)}` : `${formatMinutesDuration(row.overtimeMinutes)} lembur`}
-                    secondary={row.source === "salary" ? `Lembur ikut cycle ${formatCurrency(row.overtimeAmount)}` : `Nominal lembur ${formatCurrency(row.overtimeAmount)}`}
+                    secondary={row.source === "salary" ? `Lembur ikut gaji ${formatCurrency(row.overtimeAmount)}` : `Nominal lembur ${formatCurrency(row.overtimeAmount)}`}
                   />
                 </td>
                 <td><TableText primary={formatCurrency(row.paidAmount)} secondary={row.paidByName || "Finance"} /></td>
@@ -20767,12 +20861,23 @@ function getOvertimeDayTypeFromDate(dateKey?: string): "weekday" | "sunday" {
 }
 
 function getOvertimeRequestBasisPreview(dateKey?: string) {
-  return getOvertimeDayTypeFromDate(dateKey) === "sunday" ? "Full durasi kerja" : "Setelah shift"
+  return getOvertimeDayTypeFromDate(dateKey) === "sunday" ? "Full durasi kerja" : "Di luar shift"
+}
+
+function getOvertimeOutsideShiftLabel(row: Pick<OvertimeReviewRow, "preShiftMinutes" | "postShiftMinutes" | "overtimeMinutes">) {
+  const parts = [
+    row.preShiftMinutes > 0 ? `Sebelum shift ${formatMinutesDuration(row.preShiftMinutes)}` : "",
+    row.postShiftMinutes > 0 ? `Setelah shift ${formatMinutesDuration(row.postShiftMinutes)}` : "",
+  ].filter(Boolean)
+
+  if (parts.length > 0) return parts.join(" + ")
+  if (row.overtimeMinutes > 0) return "Di luar shift"
+  return "Belum ada realisasi"
 }
 
 function getOvertimeRealizationLabel(row: OvertimeReviewRow) {
   if (!row.actualCheckOutAt) return "Menunggu checkout"
-  if (row.requestSource !== "planned") return "Tanpa request"
+  if (row.requestSource !== "planned") return getOvertimeOutsideShiftLabel(row)
   if (row.plannedMinutes <= 0) return "Request tanpa durasi"
 
   const diffMinutes = row.overtimeMinutes - row.plannedMinutes
@@ -20808,8 +20913,8 @@ function isOvertimePayrollFinal(row: Pick<OvertimeReviewRow, "payrollStatus">) {
 }
 
 function getOvertimePayrollFinalLabel(row: Pick<OvertimeReviewRow, "payrollStatus">) {
-  if (row.payrollStatus === "paid") return "Payroll sudah terbayar"
-  if (row.payrollStatus === "locked") return "Payroll sudah locked"
+  if (row.payrollStatus === "paid") return "Gaji sudah terbayar"
+  if (row.payrollStatus === "locked") return "Gaji sedang menunggu bayar"
   return ""
 }
 
@@ -20868,6 +20973,7 @@ function OvertimeRequestDialog({
   const [overtimeDate, setOvertimeDate] = useState(selectedDate || getLocalDateKey())
   const [plannedStartTime, setPlannedStartTime] = useState("16:00")
   const [plannedEndTime, setPlannedEndTime] = useState("18:00")
+  const [paymentPolicy, setPaymentPolicy] = useState<OvertimePaymentPolicy>("separate")
   const [reason, setReason] = useState("")
   const [error, setError] = useState("")
 
@@ -20880,6 +20986,7 @@ function OvertimeRequestDialog({
     setOvertimeDate(selectedDate || getLocalDateKey())
     setPlannedStartTime(fallbackStart)
     setPlannedEndTime(addMinutesToClockTime(fallbackStart, 120, "18:00"))
+    setPaymentPolicy("separate")
     setReason("")
     setError("")
   }, [firstEmployee, open, selectedDate])
@@ -20889,7 +20996,7 @@ function OvertimeRequestDialog({
   const requestDayType = getOvertimeDayTypeFromDate(overtimeDate)
   const requestBasisPreview = getOvertimeRequestBasisPreview(overtimeDate)
   const existingRequest = existingRequests.find((request) => request.employeeId === employeeId && request.overtimeDate === overtimeDate)
-  const existingRequestFinal = existingRequest?.status === "approved" || (existingRequest ? isOvertimePayrollFinal(existingRequest) : false)
+  const existingRequestFinal = existingRequest?.status === "approved" || (existingRequest?.overtimePaymentPolicy === "salary_cycle" && isOvertimePayrollFinal(existingRequest))
   const employeeSelectOptions = employees.map((employee) => ({
     value: employee.employeeId,
     label: employee.fullName,
@@ -20909,6 +21016,7 @@ function OvertimeRequestDialog({
 
     setPlannedStartTime(existingStart)
     setPlannedEndTime(existingEnd)
+    setPaymentPolicy(existingRequest.overtimePaymentPolicy)
     setReason(existingRequest.requestReason || "")
     setError("")
   }, [existingRequest, open, selectedEmployee?.shiftEndTime])
@@ -20937,8 +21045,8 @@ function OvertimeRequestDialog({
       setError("Request lembur tanggal ini sudah approved dan tidak bisa diganti dari form request.")
       return
     }
-    if (existingRequest && isOvertimePayrollFinal(existingRequest)) {
-      setError(`${getOvertimePayrollFinalLabel(existingRequest)}. Request lembur tidak bisa diubah dari form ini.`)
+    if (existingRequest?.overtimePaymentPolicy === "salary_cycle" && isOvertimePayrollFinal(existingRequest)) {
+      setError(`${getOvertimePayrollFinalLabel(existingRequest)}. Request lembur ikut gaji dan tidak bisa diubah dari form ini.`)
       return
     }
 
@@ -20947,6 +21055,7 @@ function OvertimeRequestDialog({
       overtimeDate,
       plannedStartTime,
       plannedEndTime,
+      paymentPolicy,
       reason: trimmedReason,
     })
   }
@@ -20964,7 +21073,7 @@ function OvertimeRequestDialog({
           <div>
             <span><ClipboardList size={14} /> Request Lembur</span>
             <h2 id="overtime-request-title">Rencana Lembur</h2>
-            <p id="overtime-request-description">Ajukan rencana lembur sebelum realisasi. Payroll tetap menunggu checkout dan approval final.</p>
+            <p id="overtime-request-description">Ajukan rencana lembur sebelum realisasi, lalu pilih jadwal bayarnya.</p>
           </div>
           <FoundationDialogCloseButton onClose={onClose} disabled={saving} />
         </header>
@@ -20986,6 +21095,22 @@ function OvertimeRequestDialog({
               <DateFormField label="Tanggal Lembur" value={overtimeDate} onChange={setOvertimeDate} required />
               <TextFormField label="Mulai Lembur" type="time" value={plannedStartTime} onChange={(event) => setPlannedStartTime(event.target.value)} required />
               <TextFormField label="Selesai Rencana" type="time" value={plannedEndTime} onChange={(event) => setPlannedEndTime(event.target.value)} required />
+            </div>
+            <div className="overtimePaymentPolicyPicker" role="radiogroup" aria-label="Jadwal pembayaran lembur">
+              {(Object.keys(overtimePaymentPolicyLabel) as OvertimePaymentPolicy[]).map((policy) => (
+                <button
+                  key={policy}
+                  type="button"
+                  role="radio"
+                  aria-checked={paymentPolicy === policy}
+                  className={clsx("overtimePaymentPolicyOption", paymentPolicy === policy && "active")}
+                  onClick={() => setPaymentPolicy(policy)}
+                  disabled={saving || (existingRequest?.status === "approved")}
+                >
+                  <strong>{overtimePaymentPolicyLabel[policy]}</strong>
+                  <small>{overtimePaymentPolicyDescription[policy]}</small>
+                </button>
+              ))}
             </div>
             <TextFormField label="Alasan Lembur" value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Contoh: closing order produksi / stock opname gudang" required />
             {existingRequest && (
@@ -21027,13 +21152,17 @@ function OvertimeRequestDialog({
                 <dd>Terencana, belum payable</dd>
               </div>
               <div>
-                <dt>Policy</dt>
+                <dt>Pembayaran</dt>
+                <dd>{overtimePaymentPolicyLabel[paymentPolicy]}</dd>
+              </div>
+              <div>
+                <dt>Perhitungan</dt>
                 <dd>{requestDayType === "sunday" ? "Minggu" : "Weekday"} / {requestBasisPreview}</dd>
               </div>
             </dl>
             <div className="overtimeRequestNotice">
               <AlertCircle size={17} />
-              <span>Request ini menandai rencana lembur. Weekday dihitung setelah kewajiban shift, sedangkan Minggu dihitung dari full durasi kerja aktual.</span>
+              <span>Bayar Terpisah cocok untuk lembur mingguan/custom. Ikut Gaji dipakai kalau lembur mau digabung ke finalisasi 26 hari.</span>
             </div>
           </aside>
         </div>
@@ -21120,7 +21249,7 @@ function LeaveRequestDialog({
     { value: "off", label: "Libur", description: "Hari libur/off, tidak dihitung." },
   ] as Array<{ value: LeaveRequestType; label: string; description: string }>
   const payPolicyOptions = [
-    { value: "paid", label: "Dibayar", description: "Tetap dihitung sebagai hari kerja payroll." },
+    { value: "paid", label: "Dibayar", description: "Tetap dihitung sebagai hari kerja gaji." },
     { value: "unpaid", label: "Tidak dibayar", description: "Tercatat di rekap, tidak menambah hari kerja." },
     { value: "not_counted", label: "Tidak dihitung", description: "Libur/off, tidak dianggap hari kerja." },
   ] as Array<{ value: LeavePayPolicy; label: string; description: string }>
@@ -21174,7 +21303,7 @@ function LeaveRequestDialog({
           <div>
             <span><CalendarCheck2 size={14} /> Ketidakhadiran</span>
             <h2 id="leave-request-title">Input Izin/Cuti</h2>
-            <p id="leave-request-description">Catat izin, sakit, cuti, tugas luar, alpha, atau libur agar monitoring dan payroll tidak menebak dari absen kosong.</p>
+            <p id="leave-request-description">Catat izin, sakit, cuti, tugas luar, alpha, atau libur agar monitoring dan gaji tidak menebak dari absen kosong.</p>
           </div>
           <FoundationDialogCloseButton onClose={onClose} disabled={saving} />
         </header>
@@ -21212,7 +21341,7 @@ function LeaveRequestDialog({
               </FormField>
               <FormField label="Payroll" required>
                 <FoundationSelect
-                  label="Policy payroll"
+                  label="Aturan gaji"
                   value={payPolicy}
                   options={payPolicyOptions}
                   searchable={false}
@@ -21255,7 +21384,7 @@ function LeaveRequestDialog({
             </dl>
             <div className="overtimeRequestNotice">
               <AlertCircle size={17} />
-              <span>Setelah disetujui, rekap harian berubah dari belum masuk menjadi {selectedTypeOption?.label || "izin"} dan payroll mengikuti policy yang dipilih.</span>
+              <span>Setelah disetujui, rekap harian berubah dari belum masuk menjadi {selectedTypeOption?.label || "izin"} dan hitungan gaji mengikuti aturan yang dipilih.</span>
             </div>
           </aside>
         </div>
@@ -21310,7 +21439,7 @@ function LeaveReviewTable({
       <div className="tableHeader">
         <div>
           <h2>Approval Izin/Cuti</h2>
-          <p>Request ketidakhadiran yang mengubah status rekap harian dan sumber payroll. Klik baris untuk detail.</p>
+          <p>Request ketidakhadiran yang mengubah status rekap harian dan sumber hitungan gaji. Klik baris untuk detail.</p>
         </div>
         <InlinePageStats items={[`${pendingRows.length} pending`, `${approvedRows.length} disetujui`, `${paidRows.length} dibayar`]} />
       </div>
@@ -21366,7 +21495,7 @@ function LeaveReviewTable({
                     <td><EmployeeIdentityCell fullName={row.fullName} code={row.employeeCode} photoUrl={row.employeePhotoUrl} secondary={`${row.employeeCode || "-"} / ${row.divisionName}`} /></td>
                     <td><TableText primary={getLeaveRequestDateLabel(row)} secondary={row.startDate === row.endDate ? "1 hari" : "Multi hari"} /></td>
                     <td><LeaveRequestTypeBadge type={row.requestType} /></td>
-                    <td><TableText primary={getLeavePayPolicyLabel(row.payPolicy)} secondary={row.payPolicy === "paid" ? "Masuk payroll" : row.payPolicy === "not_counted" ? "Tidak masuk cycle" : "Tidak dibayar"} /></td>
+                    <td><TableText primary={getLeavePayPolicyLabel(row.payPolicy)} secondary={row.payPolicy === "paid" ? "Masuk hitungan gaji" : row.payPolicy === "not_counted" ? "Tidak masuk cycle" : "Tidak dibayar"} /></td>
                     <td><TableText primary={row.reason || "Tanpa catatan"} secondary={row.attachmentUrl ? "Ada lampiran" : ""} /></td>
                     <td><LeaveRequestStatusBadge status={row.status} /></td>
                     <td className="tableActionCell">
@@ -21421,10 +21550,10 @@ function LeaveReviewTable({
 
 function LeaveReviewExpandPanel({ row, onReview }: { row: LeaveRequestRow; onReview: (row: LeaveRequestRow) => void }) {
   const payrollText = row.payPolicy === "paid"
-    ? "Dihitung sebagai hari kerja payroll setelah approved."
+    ? "Dihitung sebagai hari kerja gaji setelah disetujui."
     : row.payPolicy === "not_counted"
       ? "Tidak dihitung sebagai hari kerja."
-      : "Tercatat di monitoring, tidak menambah hari kerja payroll."
+      : "Tercatat di monitoring, tidak menambah hari kerja gaji."
 
   return (
     <div className="leaveReviewExpandPanel">
@@ -21532,10 +21661,10 @@ function LeaveReviewDialog({
               <CalendarCheck2 size={18} />
             </span>
             <div className="attendanceReviewStoryCopy">
-              <p>{row.fullName} mengajukan {getLeaveRequestTypeLabel(row.requestType).toLowerCase()} untuk {getLeaveRequestDateLabel(row)}. Policy payroll: {getLeavePayPolicyLabel(row.payPolicy).toLowerCase()}.</p>
+              <p>{row.fullName} mengajukan {getLeaveRequestTypeLabel(row.requestType).toLowerCase()} untuk {getLeaveRequestDateLabel(row)}. Aturan gaji: {getLeavePayPolicyLabel(row.payPolicy).toLowerCase()}.</p>
               <div className="attendanceReviewSourceRow">
                 <LeaveRequestTypeBadge type={row.requestType} />
-                <small>{row.status === "approved" ? "Sudah mengubah rekap harian." : row.status === "pending" ? "Menunggu keputusan HR." : "Tidak aktif di rekap payroll."}</small>
+                <small>{row.status === "approved" ? "Sudah mengubah rekap harian." : row.status === "pending" ? "Menunggu keputusan HR." : "Tidak aktif di rekap gaji."}</small>
               </div>
             </div>
           </div>
@@ -21676,7 +21805,7 @@ function OvertimeReviewTable({
               const hasRealization = Boolean(row.actualCheckOutAt)
               const displayMinutes = row.overtimeMinutes || row.plannedMinutes
               const previewAmount = row.status === "approved" ? row.totalAmount : row.overtimeMinutes > 0 ? Math.round((row.overtimeMinutes / 60) * row.rateAmount) : 0
-              const payrollFinal = isOvertimePayrollFinal(row)
+              const payrollFinal = row.overtimePaymentPolicy === "salary_cycle" && isOvertimePayrollFinal(row)
               const canApproveOvertime = row.status === "pending" && hasRealization && row.overtimeMinutes > 0 && !payrollFinal
               const isFinal = row.status === "approved" || row.status === "rejected"
               const isOpen = openOvertimeId === row.id
@@ -21705,7 +21834,7 @@ function OvertimeReviewTable({
                     </td>
                     <td><TableText primary={formatWorkDate(row.overtimeDate)} secondary={`${getPayrollDayTypeLabel(row.dayType)} / ${getOvertimeSourceLabel(row.requestSource)}`} /></td>
                     <td><TableText primary={`${row.shiftStartTime || "--:--"} - ${row.shiftEndTime || "--:--"}`} secondary="Shift kerja" /></td>
-                    <td><TableText primary={displayMinutes ? formatMinutesDuration(displayMinutes) : "-"} secondary={hasRealization ? "Realisasi terbaca" : "Menunggu checkout"} /></td>
+                    <td><TableText primary={displayMinutes ? formatMinutesDuration(displayMinutes) : "-"} secondary={hasRealization ? getOvertimeOutsideShiftLabel(row) : "Menunggu checkout"} /></td>
                     <td><TableText primary={`${formatCurrency(row.rateAmount)}/jam`} secondary={row.componentName} /></td>
                     <td><TableText primary={previewAmount > 0 ? formatCurrency(previewAmount) : "-"} secondary={getOvertimeBasisLabel(row.overtimeBasis)} /></td>
                     <td><OvertimeStatusBadge status={row.status} source={row.requestSource} /></td>
@@ -21764,7 +21893,8 @@ function OvertimeReviewTable({
 function OvertimeReviewExpandPanel({ row, onReview }: { row: OvertimeReviewRow; onReview: (row: OvertimeReviewRow) => void }) {
   const hasRealization = Boolean(row.actualCheckOutAt)
   const isFinal = row.status === "approved" || row.status === "rejected"
-  const payrollFinal = isOvertimePayrollFinal(row)
+  const payrollFinal = row.overtimePaymentPolicy === "salary_cycle" && isOvertimePayrollFinal(row)
+  const paymentPolicyLabel = overtimePaymentPolicyLabel[row.overtimePaymentPolicy]
   const canApproveOvertime = row.status === "pending" && hasRealization && row.overtimeMinutes > 0 && !payrollFinal
   const plannedRange = getOvertimePlanRange(row)
   const displayMinutes = row.overtimeMinutes || row.plannedMinutes
@@ -21781,14 +21911,14 @@ function OvertimeReviewExpandPanel({ row, onReview }: { row: OvertimeReviewRow; 
         ? "Lihat Request"
         : "Review Lembur"
   const statusNote = payrollFinal
-    ? `${getOvertimePayrollFinalLabel(row)}. Lembur tidak bisa diubah dari approval agar payroll tetap bersih.`
+    ? `${getOvertimePayrollFinalLabel(row)}. Lembur tidak bisa diubah dari approval agar data gaji final tetap bersih.`
     : row.status === "approved"
-    ? `${formatMinutesDuration(row.approvedMinutes)} approved dan masuk preview payroll.`
+      ? `${formatMinutesDuration(row.approvedMinutes)} approved. Pembayaran: ${paymentPolicyLabel}.`
     : row.status === "rejected"
-      ? "Ditolak HR, tidak masuk payroll."
+      ? "Ditolak HR, tidak masuk pembayaran."
       : canApproveOvertime
         ? "Sudah ada checkout dan menit payable, siap direview HR."
-        : "Menunggu checkout/settlement sebelum bisa masuk payroll."
+        : "Menunggu checkout/settlement sebelum bisa masuk pembayaran."
   const notes = row.notes || row.requestReason || "Belum ada catatan."
 
   return (
@@ -21833,24 +21963,29 @@ function OvertimeReviewExpandPanel({ row, onReview }: { row: OvertimeReviewRow; 
           <h3>Realisasi</h3>
           <div className="overtimeReviewFactGrid">
             <div>
+              <span>Check-in</span>
+              <strong>{row.actualCheckInAt ? formatAttendanceTime(row.actualCheckInAt) : "Belum check-in"}</strong>
+              <small>{row.preShiftMinutes > 0 ? `Sebelum shift ${formatMinutesDuration(row.preShiftMinutes)}` : "Tidak ada lembur awal"}</small>
+            </div>
+            <div>
               <span>Checkout</span>
               <strong>{row.actualCheckOutAt ? formatAttendanceTime(row.actualCheckOutAt) : "Belum checkout"}</strong>
-              <small>{row.matchedAttendance ? "Tersambung absensi" : "Belum match absensi"}</small>
+              <small>{row.postShiftMinutes > 0 ? `Setelah shift ${formatMinutesDuration(row.postShiftMinutes)}` : row.matchedAttendance ? "Tersambung absensi" : "Belum match absensi"}</small>
             </div>
             <div>
               <span>Payable</span>
               <strong>{row.overtimeMinutes ? formatMinutesDuration(row.overtimeMinutes) : "-"}</strong>
-              <small>{getOvertimeRealizationLabel(row)}</small>
+              <small>{getOvertimeOutsideShiftLabel(row)}</small>
             </div>
             <div>
               <span>Basis</span>
               <strong>{getOvertimeBasisLabel(row.overtimeBasis)}</strong>
-              <small>{row.overtimeBasis === "full_duration" ? "Full durasi kerja" : "Setelah kewajiban shift"}</small>
+              <small>{row.overtimeBasis === "full_duration" ? "Full durasi kerja" : "Sebelum/sesudah shift"}</small>
             </div>
             <div>
               <span>Status</span>
               <strong>{statusNote}</strong>
-              <small>{row.payrollCycleNumber ? `Cycle ${row.payrollCycleNumber} / ${payrollLabel[row.payrollStatus]}` : "Cycle payroll belum tersambung"}</small>
+              <small>{row.payrollCycleNumber ? `Cycle gaji ${row.payrollCycleNumber} / ${payrollLabel[row.payrollStatus]}` : "Gaji belum tersambung cycle"}</small>
             </div>
           </div>
         </section>
@@ -21871,10 +22006,15 @@ function OvertimeReviewExpandPanel({ row, onReview }: { row: OvertimeReviewRow; 
             <div>
               <span>Dibayar</span>
               <strong>{row.approvedMinutes ? formatMinutesDuration(row.approvedMinutes) : "Belum approved"}</strong>
-              <small>{row.totalAmount ? formatCurrency(row.totalAmount) : "Belum masuk payroll"}</small>
+              <small>{row.totalAmount ? formatCurrency(row.totalAmount) : "Belum masuk pembayaran"}</small>
             </div>
             <div>
-              <span>Payroll</span>
+              <span>Pembayaran</span>
+              <strong>{paymentPolicyLabel}</strong>
+              <small>{overtimePaymentPolicyDescription[row.overtimePaymentPolicy]}</small>
+            </div>
+            <div>
+              <span>Gaji</span>
               <strong>{row.payrollCycleNumber ? `Cycle ${row.payrollCycleNumber}` : "Cycle aktif"}</strong>
               <small>{payrollLabel[row.payrollStatus]}</small>
             </div>
@@ -21907,14 +22047,16 @@ function OvertimeReviewDialog({
   row: OvertimeReviewRow | null
   saving: boolean
   onClose: () => void
-  onSubmit: (decision: "approve" | "reject", approvedMinutes: number, notes: string) => void
+  onSubmit: (decision: "approve" | "reject", approvedMinutes: number, paymentPolicy: OvertimePaymentPolicy, notes: string) => void
 }) {
   const [approvedMinutes, setApprovedMinutes] = useState("0")
+  const [paymentPolicy, setPaymentPolicy] = useState<OvertimePaymentPolicy>("separate")
   const [notes, setNotes] = useState("")
   const [noteError, setNoteError] = useState("")
 
   useEffect(() => {
     setApprovedMinutes(String(row?.approvedMinutes || row?.overtimeMinutes || 0))
+    setPaymentPolicy(row?.overtimePaymentPolicy || "separate")
     setNotes("")
     setNoteError("")
   }, [row])
@@ -21923,10 +22065,13 @@ function OvertimeReviewDialog({
 
   const isFinal = row.status === "approved" || row.status === "rejected"
   const isPlannedDraft = row.status === "draft" && row.requestSource === "planned"
-  const payrollFinal = isOvertimePayrollFinal(row)
+  const payrollFinal = row.overtimePaymentPolicy === "salary_cycle" && isOvertimePayrollFinal(row)
+  const paymentPolicyLabel = overtimePaymentPolicyLabel[paymentPolicy]
+  const salaryCycleIsFinal = paymentPolicy === "salary_cycle" && isOvertimePayrollFinal(row)
+  const approvalDestination = paymentPolicy === "separate" ? "masuk tab Bayar Lembur" : "ikut Gaji 26 Hari"
   const minutes = Math.max(0, Math.min(row.overtimeMinutes, Number(approvedMinutes || 0)))
   const previewAmount = Math.round((minutes / 60) * row.rateAmount)
-  const canApprovePayroll = !isFinal && !payrollFinal && row.overtimeMinutes > 0 && Boolean(row.actualCheckOutAt) && row.status !== "draft"
+  const canApprovePayroll = !isFinal && !payrollFinal && !salaryCycleIsFinal && row.overtimeMinutes > 0 && Boolean(row.actualCheckOutAt) && row.status !== "draft"
   const canRejectOvertime = !isFinal && !payrollFinal
   const plannedLabel = getOvertimePlanRange(row)
   const sourceLabel = getOvertimeSourceLabel(row.requestSource)
@@ -21937,7 +22082,11 @@ function OvertimeReviewDialog({
     const trimmedNotes = notes.trim()
     if (isFinal) return
     if (payrollFinal) {
-      setNoteError(`${getOvertimePayrollFinalLabel(row)}. Perubahan lembur harus lewat koreksi payroll terpisah.`)
+      setNoteError(`${getOvertimePayrollFinalLabel(row)}. Perubahan lembur harus lewat koreksi pembayaran terpisah.`)
+      return
+    }
+    if (decision === "approve" && salaryCycleIsFinal) {
+      setNoteError("Gaji 26 hari sudah final. Pilih Bayar Terpisah kalau lembur ini tetap perlu dibayar.")
       return
     }
     if (decision === "reject" && trimmedNotes.length < 5) {
@@ -21951,7 +22100,7 @@ function OvertimeReviewDialog({
     }
 
     setNoteError("")
-    onSubmit(decision, decision === "approve" ? minutes : 0, trimmedNotes)
+    onSubmit(decision, decision === "approve" ? minutes : 0, paymentPolicy, trimmedNotes)
   }
 
   return (
@@ -21969,7 +22118,7 @@ function OvertimeReviewDialog({
           <div>
             <span>Overtime Review</span>
             <h2 id="overtime-review-title">{row.requestSource === "planned" && row.status === "draft" ? "Request lembur" : "Review lembur"} {row.fullName}</h2>
-            <p>{payrollFinal ? `${getOvertimePayrollFinalLabel(row)}. Data lembur tidak bisa diubah dari approval.` : isFinal ? "Status lembur sudah final. Gunakan koreksi payroll terpisah jika perlu perubahan." : canApprovePayroll ? "Approve menit yang dibayar. Lembur approved akan masuk preview payroll." : "Request sudah tercatat, tetapi payroll menunggu realisasi checkout dan kalkulasi payable."}</p>
+            <p>{payrollFinal ? `${getOvertimePayrollFinalLabel(row)}. Data lembur tidak bisa diubah dari approval.` : isFinal ? "Status lembur sudah final. Gunakan koreksi pembayaran terpisah jika perlu perubahan." : canApprovePayroll ? `Approve menit yang dibayar. Lembur approved akan ${approvalDestination}.` : "Request sudah tercatat, tetapi pembayaran menunggu realisasi checkout dan kalkulasi payable."}</p>
           </div>
           <FoundationDialogCloseButton label="Tutup review lembur" onClose={onClose} disabled={saving} />
         </div>
@@ -21998,7 +22147,7 @@ function OvertimeReviewDialog({
             <div>
               <span>Jam Shift</span>
               <strong>{row.shiftStartTime || "--:--"} - {row.shiftEndTime || "--:--"}</strong>
-              <small>{row.actualCheckOutAt ? `Checkout ${formatAttendanceTime(row.actualCheckOutAt)}` : `Rencana ${plannedLabel}`}</small>
+              <small>{row.actualCheckOutAt ? `In ${row.actualCheckInAt ? formatAttendanceTime(row.actualCheckInAt) : "--:--"} / Out ${formatAttendanceTime(row.actualCheckOutAt)}` : `Rencana ${plannedLabel}`}</small>
             </div>
             <div>
               <span>Rencana</span>
@@ -22008,24 +22157,50 @@ function OvertimeReviewDialog({
             <div>
               <span>Realisasi</span>
               <strong>{realizationLabel}</strong>
-              <small>{getOvertimeBasisLabel(row.overtimeBasis)}</small>
+              <small>{getOvertimeOutsideShiftLabel(row)}</small>
             </div>
             <div>
               <span>Dibayar</span>
               <strong>{canApprovePayroll ? formatMinutesDuration(minutes) : "Menunggu"}</strong>
-              <small>{canApprovePayroll ? formatCurrency(previewAmount) : "Belum masuk payroll"}</small>
+              <small>{canApprovePayroll ? `${paymentPolicyLabel} / ${formatCurrency(previewAmount)}` : "Belum masuk pembayaran"}</small>
+            </div>
+            <div>
+              <span>Pembayaran</span>
+              <strong>{paymentPolicyLabel}</strong>
+              <small>{overtimePaymentPolicyDescription[paymentPolicy]}</small>
             </div>
           </div>
+
+          {!isFinal && !payrollFinal && (
+            <div className="overtimePaymentPolicyPicker overtimeReviewPolicyPicker" role="radiogroup" aria-label="Jadwal pembayaran lembur">
+              {(Object.keys(overtimePaymentPolicyLabel) as OvertimePaymentPolicy[]).map((policy) => {
+                const disabled = policy === "salary_cycle" && isOvertimePayrollFinal(row)
+                return (
+                  <button
+                    key={policy}
+                    type="button"
+                    className={clsx("overtimePaymentPolicyOption", paymentPolicy === policy && "active")}
+                    aria-pressed={paymentPolicy === policy}
+                    disabled={saving || disabled}
+                    onClick={() => setPaymentPolicy(policy)}
+                  >
+                    <strong>{overtimePaymentPolicyLabel[policy]}</strong>
+                    <small>{disabled ? "Gaji 26 hari sudah final. Pakai Bayar Terpisah." : overtimePaymentPolicyDescription[policy]}</small>
+                  </button>
+                )
+              })}
+            </div>
+          )}
 
           {payrollFinal ? (
             <div className="overtimeRequestNotice">
               <Lock size={17} />
-              <span>{getOvertimePayrollFinalLabel(row)}. Approval lembur dikunci agar payroll final tidak berubah tanpa proses koreksi terpisah.</span>
+              <span>{getOvertimePayrollFinalLabel(row)}. Approval lembur dikunci agar gaji final tidak berubah tanpa proses koreksi terpisah.</span>
             </div>
           ) : isFinal ? (
             <div className="overtimeRequestNotice">
               <ShieldCheck size={17} />
-              <span>Approval lembur sudah final dengan status {getOvertimeStatusLabel(row.status)}. Aksi approve/reject dinonaktifkan agar audit payroll tetap bersih.</span>
+              <span>Approval lembur sudah final dengan status {getOvertimeStatusLabel(row.status)}. Aksi approve/reject dinonaktifkan agar audit pembayaran tetap bersih.</span>
             </div>
           ) : canApprovePayroll ? (
             <TextFormField
@@ -22063,7 +22238,7 @@ function OvertimeReviewDialog({
           {payrollFinal ? (
             <button className="primaryButton" type="button" onClick={onClose} disabled={saving}>
               <Lock size={16} />
-              Payroll Final
+              Gaji Final
             </button>
           ) : isFinal ? (
             <button className="primaryButton" type="button" onClick={onClose} disabled={saving}>
@@ -22980,7 +23155,7 @@ function FieldAttendanceDialog({
           <div>
             <span className="dialogEyebrow">App Lapangan</span>
             <h2 id="field-attendance-title">Tes Absensi GPS + Face</h2>
-            <p>Validasi user terkait karyawan, radius lokasi kerja, face score, dan payroll cycle.</p>
+            <p>Validasi user terkait karyawan, radius lokasi kerja, face score, dan cycle gaji.</p>
           </div>
           <button className="iconButton dialogClose" type="button" aria-label="Tutup dialog absensi" onClick={onClose}>
             <X size={20} />
@@ -23328,7 +23503,7 @@ function EmployeePwaApp({ profile, onLogout }: { profile: AppAccessProfile; onLo
         <section className="employeeAppLoading">
           <span className="authTopProgress" />
           <strong>Memuat data karyawan...</strong>
-          <small>Sinkronisasi user, karyawan, lokasi, dan payroll cycle.</small>
+          <small>Sinkronisasi user, karyawan, lokasi, dan cycle gaji.</small>
         </section>
       ) : errorMessage ? (
         <section className="employeeAppError">

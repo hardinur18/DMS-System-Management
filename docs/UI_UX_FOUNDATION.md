@@ -298,8 +298,10 @@ Live Absensi dan Rekap Absensi tidak boleh hanya membaca durasi mentah dari `att
 Lembur payroll tidak boleh sekadar membaca `pulang lewat jam shift`.
 
 - Live Absensi boleh menampilkan `pulang lewat` sebagai indikator operasional.
-- Kandidat lembur yang masuk payroll memakai menit payable: `min(pulang lewat shift, jam aktual - kewajiban shift)`.
-- Jika karyawan masuk telat dan pulang lewat tetapi total jam aktual masih kurang dari kewajiban shift, lembur payable adalah 0.
+- Kandidat lembur hari kerja biasa memakai menit payable dari waktu `di luar shift`: sebelum jam masuk shift + setelah jam pulang shift.
+- Rumus aman: `min(menit di luar shift, jam aktual - kewajiban shift)`.
+- Jika karyawan masuk lebih awal atau pulang lewat tetapi total jam aktual masih kurang dari kewajiban shift, lembur payable adalah 0.
+- Contoh shift 08.00-16.00: check-in 06.00 dan check-out 16.00 berarti kandidat lembur sebelum shift 2 jam.
 - Komponen lembur wajib punya `overtime_basis`: `extra_after_shift` untuk hari kerja biasa, `full_duration` untuk Minggu/hari libur.
 - Untuk Minggu/hari libur, payable lembur adalah full durasi kerja aktual dari check-in sampai check-out.
 - `full_duration` tidak boleh dipakai untuk `Semua Hari` karena bisa membuat hari kerja normal terhitung full lembur.

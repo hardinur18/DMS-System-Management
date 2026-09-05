@@ -8682,6 +8682,64 @@ button {
   gap: 12px;
 }
 
+.overtimePaymentPolicyPicker {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.overtimePaymentPolicyOption {
+  display: grid;
+  min-height: 72px;
+  gap: 5px;
+  align-content: center;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 16px;
+  padding: 13px 15px;
+  color: var(--ops-ink);
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 14px 34px -34px rgba(7, 24, 74, 0.58);
+  text-align: left;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.overtimePaymentPolicyOption:hover:not(:disabled) {
+  border-color: rgba(34, 174, 202, 0.38);
+  background: rgba(246, 253, 255, 0.96);
+  transform: translateY(-1px);
+}
+
+.overtimePaymentPolicyOption.active {
+  border-color: rgba(34, 174, 202, 0.52);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(34, 174, 202, 0.14), transparent 38%),
+    rgba(240, 253, 255, 0.92);
+  box-shadow: 0 0 0 3px rgba(34, 174, 202, 0.1);
+}
+
+.overtimePaymentPolicyOption:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.overtimeReviewPolicyPicker {
+  margin-top: 14px;
+}
+
+.overtimePaymentPolicyOption strong {
+  color: var(--ops-ink);
+  font-size: 0.86rem;
+  font-weight: 780;
+  line-height: 1.18;
+}
+
+.overtimePaymentPolicyOption small {
+  color: var(--ops-muted);
+  font-size: 0.73rem;
+  font-weight: 520;
+  line-height: 1.32;
+}
+
 .overtimeRequestPreview {
   padding: 18px;
   border: 1px solid rgba(34, 174, 202, 0.17);
@@ -15886,6 +15944,7 @@ button {
   }
 
   .overtimeRequestGrid,
+  .overtimePaymentPolicyPicker,
   .overtimeRequestPreview dl {
     grid-template-columns: 1fr;
   }

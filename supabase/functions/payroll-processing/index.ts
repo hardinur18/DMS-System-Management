@@ -61,7 +61,7 @@ function normalizePaidAmount(value: unknown, fallback: number) {
 
 function isMissingLedgerError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error || "")
-  return /payroll_payments|payroll_cycle_items|overtime_payments|overtime_payment_items|overtime_payment_status|mark_payroll_cycle_paid|mark_overtime_requests_paid|void_overtime_payment|rebuild_payroll_cycle_items|schema cache|PGRST202/i.test(message)
+  return /payroll_payments|payroll_cycle_items|overtime_payments|overtime_payment_items|overtime_payment_status|overtime_payment_policy|target_payment_policy|set_overtime_payment_policy|mark_payroll_cycle_paid|mark_overtime_requests_paid|void_overtime_payment|rebuild_payroll_cycle_items|schema cache|PGRST202/i.test(message)
 }
 
 function ledgerMigrationMessage() {
@@ -84,20 +84,24 @@ async function assertNoOpenPayrollDependencies(adminClient: any, cycle: Record<s
 
   const { count: reviewCount, error: reviewError } = await attendanceQuery
   if (reviewError) throw reviewError
-  assertPayload(!reviewCount, "Masih ada absensi review di periode payroll ini.")
+  assertPayload(!reviewCount, "Masih ada absensi review di periode gaji ini.")
 
   let overtimeQuery = adminClient
     .from("overtime_requests")
     .select("id", { count: "exact", head: true })
     .eq("employee_id", employeeId)
     .in("status", ["draft", "pending"])
+    .eq("overtime_payment_policy", "salary_cycle")
 
   if (periodStartedAt) overtimeQuery = overtimeQuery.gte("overtime_date", periodStartedAt)
   if (periodClosedAt) overtimeQuery = overtimeQuery.lte("overtime_date", periodClosedAt)
 
   const { count: overtimeCount, error: overtimeError } = await overtimeQuery
-  if (overtimeError) throw overtimeError
-  assertPayload(!overtimeCount, "Masih ada lembur draft/pending di periode payroll ini.")
+  if (overtimeError) {
+    if (isMissingLedgerError(overtimeError)) throw new Error(ledgerMigrationMessage())
+    throw overtimeError
+  }
+  assertPayload(!overtimeCount, "Masih ada lembur ikut gaji 26 hari yang belum selesai review di periode gaji ini.")
 }
 
 async function rebuildPayrollCycleItems(adminClient: any, cycleId: string) {
@@ -144,7 +148,7 @@ Deno.serve(async (request) => {
       || action === "restore"
       || action === "mark_overtime_paid"
       || action === "void_overtime_payment",
-      "Action payroll tidak valid.",
+      "Aksi gaji tidak valid.",
     )
 
     const token = authorization.replace(/^Bearer\s+/i, "")
@@ -220,7 +224,7 @@ Deno.serve(async (request) => {
       return jsonResponse({ ok: true, ...paymentResult })
     }
 
-    assertPayload(payload.cycleId, "ID payroll cycle wajib ada.")
+    assertPayload(payload.cycleId, "ID gaji wajib ada.")
 
     const { data: cycle, error: cycleError } = await adminClient
       .from("payroll_cycles")
@@ -229,7 +233,7 @@ Deno.serve(async (request) => {
       .maybeSingle()
 
     if (cycleError) throw cycleError
-    if (!cycle) return jsonResponse({ error: "Payroll cycle tidak ditemukan." }, 404)
+    if (!cycle) return jsonResponse({ error: "Data gaji tidak ditemukan." }, 404)
 
     const { data: employee, error: employeeError } = await adminClient
       .from("employees")
@@ -249,7 +253,7 @@ Deno.serve(async (request) => {
     const employeeCode = String(employee?.employee_code || "")
 
     if (action === "mark_paid") {
-      assertPayload(currentStatus === "locked", "Payroll wajib dikunci sebelum ditandai terbayar.")
+      assertPayload(currentStatus === "locked", "Gaji wajib dikunci dulu sebelum dicatat terbayar.")
 
       const paidAt = normalizePaidAt(payload.paidAt)
       const paidAmount = normalizePaidAmount(payload.paidAmount, netAmount)
@@ -277,13 +281,13 @@ Deno.serve(async (request) => {
     let nextStatus: string
 
     if (action === "lock") {
-      assertPayload(currentStatus === "ready", "Payroll hanya bisa dikunci saat status Siap Gajian.")
+      assertPayload(currentStatus === "ready", "Gaji hanya bisa dikunci saat status Siap Dicek.")
       assertPayload(Number(cycle.work_days_count || 0) >= Number(cycle.target_work_days || 26), "Cycle belum mencapai target hari kerja.")
       await assertNoOpenPayrollDependencies(adminClient, cycle)
       await rebuildPayrollCycleItems(adminClient, String(cycle.id))
 
       nextStatus = "locked"
-      auditAction = "Lock payroll cycle"
+      auditAction = "Kunci gaji 26 hari"
       updatePayload = {
         status: nextStatus,
         locked_at: now,
@@ -291,39 +295,39 @@ Deno.serve(async (request) => {
         gross_amount: grossAmount,
         overtime_amount: overtimeAmount,
         net_amount: netAmount,
-        notes: appendPayrollNote(cycle.notes, notes ? `Finance lock payroll: ${notes}` : "Finance lock payroll."),
+        notes: appendPayrollNote(cycle.notes, notes ? `Finance kunci gaji: ${notes}` : "Finance kunci gaji."),
         updated_at: now,
       }
     } else if (action === "unlock") {
-      assertPayload(currentStatus === "locked", "Hanya payroll locked yang bisa dibuka ulang.")
+      assertPayload(currentStatus === "locked", "Hanya gaji berstatus Menunggu Bayar yang bisa dibuka ulang.")
 
       nextStatus = "ready"
-      auditAction = "Unlock payroll cycle"
+      auditAction = "Buka koreksi gaji 26 hari"
       updatePayload = {
         status: nextStatus,
         locked_at: null,
         processed_by: null,
-        notes: appendPayrollNote(cycle.notes, notes ? `Finance unlock payroll: ${notes}` : "Finance unlock payroll."),
+        notes: appendPayrollNote(cycle.notes, notes ? `Finance buka koreksi gaji: ${notes}` : "Finance buka koreksi gaji."),
         updated_at: now,
       }
     } else if (action === "void") {
-      assertPayload(currentStatus !== "paid", "Payroll yang sudah terbayar tidak bisa dibatalkan.")
-      assertPayload(currentStatus !== "void", "Payroll cycle sudah dalam status Void.")
+      assertPayload(currentStatus !== "paid", "Gaji yang sudah terbayar tidak bisa dibatalkan.")
+      assertPayload(currentStatus !== "void", "Gaji 26 hari ini sudah dibatalkan.")
 
       nextStatus = "void"
-      auditAction = "Void payroll cycle"
+      auditAction = "Batalkan gaji 26 hari"
       updatePayload = {
         status: nextStatus,
         processed_at: now,
         processed_by: actor.id,
-        notes: appendPayrollNote(cycle.notes, notes ? `Finance void payroll: ${notes}` : "Finance void payroll."),
+        notes: appendPayrollNote(cycle.notes, notes ? `Finance batalkan gaji: ${notes}` : "Finance batalkan gaji."),
         updated_at: now,
       }
     } else {
-      assertPayload(currentStatus === "void", "Hanya payroll Void yang bisa direstore.")
+      assertPayload(currentStatus === "void", "Hanya gaji yang dibatalkan yang bisa dipulihkan.")
 
       nextStatus = Number(cycle.work_days_count || 0) >= Number(cycle.target_work_days || 26) ? "ready" : "active"
-      auditAction = "Restore payroll cycle"
+      auditAction = "Pulihkan gaji 26 hari"
       updatePayload = {
         status: nextStatus,
         locked_at: null,
@@ -331,7 +335,7 @@ Deno.serve(async (request) => {
         processed_by: null,
         paid_at: null,
         net_amount: netAmount,
-        notes: appendPayrollNote(cycle.notes, notes ? `Finance restore payroll: ${notes}` : "Finance restore payroll."),
+        notes: appendPayrollNote(cycle.notes, notes ? `Finance pulihkan gaji: ${notes}` : "Finance pulihkan gaji."),
         updated_at: now,
       }
     }
@@ -344,6 +348,10 @@ Deno.serve(async (request) => {
       .single()
 
     if (updateError) throw updateError
+
+    const auditGrossAmount = Number(updatedCycle.gross_amount ?? grossAmount)
+    const auditOvertimeAmount = Number(updatedCycle.overtime_amount ?? overtimeAmount)
+    const auditNetAmount = Number(updatedCycle.net_amount ?? netAmount)
 
     await adminClient.from("audit_logs").insert({
       actor_user_id: actor.id,
@@ -359,9 +367,9 @@ Deno.serve(async (request) => {
         cycle_number: cycle.cycle_number,
         previous_status: currentStatus,
         next_status: nextStatus,
-        gross_amount: grossAmount,
-        overtime_amount: overtimeAmount,
-        net_amount: nextStatus === "locked" ? netAmount : Number(cycle.net_amount || netAmount),
+        gross_amount: auditGrossAmount,
+        overtime_amount: auditOvertimeAmount,
+        net_amount: auditNetAmount,
         source: "edge-function",
       },
     })

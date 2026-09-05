@@ -5,6 +5,7 @@ type OvertimeReviewAction = "approve" | "reject"
 interface OvertimeReviewPayload {
   id?: string
   approvedMinutes?: number
+  paymentPolicy?: string
   notes?: string
 }
 
@@ -82,19 +83,19 @@ Deno.serve(async (request) => {
 
     const { data: overtime, error: overtimeError } = await adminClient
       .from("overtime_requests")
-      .select("id, employee_id, payroll_cycle_id, overtime_date, overtime_minutes, approved_minutes, rate_amount, total_amount, status, request_source, overtime_basis, actual_check_out_at, notes")
+      .select("id, employee_id, payroll_cycle_id, overtime_date, overtime_minutes, approved_minutes, rate_amount, total_amount, status, request_source, overtime_basis, overtime_payment_policy, actual_check_out_at, notes")
       .eq("id", payload.id)
       .maybeSingle()
 
     if (overtimeError) throw overtimeError
     if (!overtime) return jsonResponse({ error: "Data lembur tidak ditemukan." }, 404)
 
-    let payrollCycle: { status?: string; cycle_number?: number } | null = null
+    let payrollCycle: { id?: string; status?: string; cycle_number?: number } | null = null
 
     if (overtime.payroll_cycle_id) {
       const { data: cycle, error: cycleError } = await adminClient
         .from("payroll_cycles")
-        .select("status, cycle_number")
+        .select("id, status, cycle_number")
         .eq("id", overtime.payroll_cycle_id)
         .maybeSingle()
 
@@ -106,16 +107,40 @@ Deno.serve(async (request) => {
     const requestedMinutes = Number(overtime.overtime_minutes || 0)
     const reviewNote = payload.notes?.trim()
     const isPlannedDraft = overtime.status === "draft" && overtime.request_source === "planned"
+    const paymentPolicy = payload.paymentPolicy === "salary_cycle"
+      ? "salary_cycle"
+      : overtime.overtime_payment_policy === "salary_cycle"
+        ? "salary_cycle"
+        : "separate"
+
+    if (paymentPolicy === "salary_cycle" && !payrollCycle) {
+      const { data: cycleByDate, error: cycleByDateError } = await adminClient
+        .from("payroll_cycles")
+        .select("id, status, cycle_number")
+        .eq("employee_id", overtime.employee_id)
+        .lte("period_started_at", overtime.overtime_date)
+        .or(`period_closed_at.is.null,period_closed_at.gte.${overtime.overtime_date}`)
+        .order("cycle_number", { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (cycleByDateError) throw cycleByDateError
+      payrollCycle = cycleByDate
+    }
 
     if (overtime.status === "approved" || overtime.status === "rejected") {
       return jsonResponse({ error: "Approval lembur sudah final dan tidak bisa diproses ulang." }, 409)
     }
 
-    if (payrollCycle?.status === "locked" || payrollCycle?.status === "paid") {
+    if (paymentPolicy === "salary_cycle" && (payrollCycle?.status === "locked" || payrollCycle?.status === "paid" || payrollCycle?.status === "void")) {
+      const finalMessage = payrollCycle.status === "paid"
+        ? "Gaji 26 hari sudah terbayar. Lembur ikut gaji tidak bisa diubah dari approval."
+        : payrollCycle.status === "void"
+          ? "Gaji 26 hari dibatalkan. Lembur ikut gaji tidak bisa diubah dari approval."
+          : "Gaji 26 hari sedang menunggu bayar. Lembur ikut gaji tidak bisa diubah dari approval."
+
       return jsonResponse({
-        error: payrollCycle.status === "paid"
-          ? "Payroll cycle sudah terbayar. Lembur tidak bisa diubah dari approval."
-          : "Payroll cycle sudah locked. Lembur tidak bisa diubah dari approval.",
+        error: finalMessage,
       }, 409)
     }
 
@@ -148,6 +173,7 @@ Deno.serve(async (request) => {
       .update({
         status: approved ? "approved" : "rejected",
         approved_minutes: approvedMinutes,
+        overtime_payment_policy: paymentPolicy,
         total_amount: totalAmount,
         reviewed_by: actor.id,
         reviewed_at: new Date().toISOString(),
@@ -179,6 +205,7 @@ Deno.serve(async (request) => {
         total_amount: totalAmount,
         request_source: overtime.request_source,
         overtime_basis: overtime.overtime_basis,
+        overtime_payment_policy: paymentPolicy,
         payroll_cycle_number: payrollCycle?.cycle_number || null,
         payroll_status: payrollCycle?.status || null,
         source: "edge-function",

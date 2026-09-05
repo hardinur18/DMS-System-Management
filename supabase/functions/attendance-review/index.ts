@@ -78,8 +78,8 @@ async function getFinalPayrollCycleBlock(
 
   return jsonResponse({
     error: payrollCycle.status === "paid"
-      ? "Payroll cycle sudah terbayar. Absensi tidak bisa diubah dari Approval."
-      : "Payroll cycle sudah locked. Absensi tidak bisa diubah dari Approval.",
+      ? "Gaji 26 hari sudah terbayar. Absensi tidak bisa diubah dari Approval."
+      : "Gaji 26 hari sedang menunggu bayar. Absensi tidak bisa diubah dari Approval.",
     payroll_cycle_id: payrollCycle.id,
     payroll_cycle_number: payrollCycle.cycle_number,
     payroll_status: payrollCycle.status,
