@@ -109,10 +109,12 @@ type PayrollPaymentMethod = "cash" | "bank_transfer" | "ewallet" | "other"
 type PayrollPaymentStatus = "paid" | "void" | "reversed"
 type PayrollLedgerTab = "active" | "ready" | "locked" | "paid" | "void" | "all"
 type PayrollCycleTab = "active" | "ready" | "locked" | "void" | "all"
-type PayrollWorkspaceTab = "cycle" | "overtime" | "history"
-type PayrollPaymentSource = "salary" | "overtime"
+type PayrollWorkspaceTab = "cycle" | "overtime" | "bonus" | "history"
+type PayrollPaymentSource = "salary" | "overtime" | "bonus"
 type OvertimePaymentStatus = "unpaid" | "paid" | "void"
 type OvertimePaymentPolicy = "separate" | "salary_cycle"
+type WeeklyBonusPolicyStatus = "active" | "inactive"
+type WeeklyShiftBonusStatus = "draft" | "ready" | "paid" | "void"
 type AttendanceLogStatus = "valid" | "review" | "rejected"
 type AttendanceGpsStatus = "valid" | "out_of_radius" | "missing"
 type AttendanceFaceStatus = "verified" | "review" | "failed" | "not_required"
@@ -455,12 +457,73 @@ interface OvertimePaymentRow {
   notes: string
 }
 
+interface WeeklyShiftBonusRow {
+  id: string
+  policyId: string
+  policyCode: string
+  policyName: string
+  employeeId: string
+  employeeCode: string
+  employeeName: string
+  divisionName: string
+  periodStartedAt: string
+  periodClosedAt: string
+  paymentDueDate: string
+  eligibleDays: number
+  targetDays: number
+  fullAmount: number
+  bonusAmount: number
+  status: WeeklyShiftBonusStatus
+  paymentId: string
+  paidAt: string
+  paidByName: string
+  paymentNote: string
+  calculatedAt: string
+}
+
+interface WeeklyBonusPaymentRow {
+  id: string
+  paymentNo: string
+  employeeId: string
+  employeeCode: string
+  employeeName: string
+  periodStartedAt: string
+  periodClosedAt: string
+  cycleCount: number
+  eligibleDays: number
+  targetDays: number
+  bonusAmount: number
+  paidAmount: number
+  paymentMethod: PayrollPaymentMethod
+  paymentReference: string
+  paidAt: string
+  paidByName: string
+  status: PayrollPaymentStatus
+  notes: string
+}
+
+interface WeeklyBonusPolicyRow {
+  id: string
+  code: string
+  name: string
+  description: string
+  targetDays: number
+  fullAmount: number
+  weekStartDow: number
+  paymentDayDow: number
+  status: WeeklyBonusPolicyStatus
+  isActive: boolean
+  shiftIds: string[]
+  updatedAt: string
+}
+
 interface PayrollUnifiedPaymentRow {
   id: string
   source: PayrollPaymentSource
   paymentNo: string
   payrollCycleId: string
   overtimePaymentId: string
+  weeklyBonusPaymentId: string
   employeeId: string
   employeeCode: string
   employeeName: string
@@ -479,7 +542,11 @@ interface PayrollUnifiedPaymentRow {
   notes: string
   requestCount: number
   overtimeMinutes: number
+  bonusAmount: number
+  eligibleDays: number
+  targetDays: number
   overtimePayment?: OvertimePaymentRow
+  weeklyBonusPayment?: WeeklyBonusPaymentRow
 }
 
 interface PayrollProcessSubmitPayload {
@@ -495,6 +562,25 @@ interface OvertimePaymentSubmitPayload extends PayrollProcessSubmitPayload {
   overtimePaymentId?: string
 }
 
+interface WeeklyBonusPaymentSubmitPayload extends PayrollProcessSubmitPayload {
+  weeklyBonusCycleIds?: string[]
+  weeklyBonusPaymentId?: string
+}
+
+interface WeeklyBonusPolicySubmitPayload {
+  policyId?: string
+  code: string
+  name: string
+  description: string
+  targetDays: number
+  fullAmount: number
+  weekStartDow: number
+  paymentDayDow: number
+  isActive: boolean
+  shiftIds: string[]
+  notes?: string
+}
+
 interface OperationsFoundationData {
   rows: AttendanceMonitorRow[]
   allRows: AttendanceMonitorRow[]
@@ -505,10 +591,14 @@ interface OperationsFoundationData {
   leaveRequests: LeaveRequestRow[]
   payrollPayments: PayrollPaymentRow[]
   overtimePayments: OvertimePaymentRow[]
+  weeklyBonuses: WeeklyShiftBonusRow[]
+  weeklyBonusPayments: WeeklyBonusPaymentRow[]
+  weeklyBonusPolicies: WeeklyBonusPolicyRow[]
+  shifts: ShiftScheduleShiftOption[]
 }
 
 function createEmptyOperationsFoundationData(): OperationsFoundationData {
-  return { rows: [], allRows: [], locations: [], fieldReadiness: [], reviews: [], overtime: [], leaveRequests: [], payrollPayments: [], overtimePayments: [] }
+  return { rows: [], allRows: [], locations: [], fieldReadiness: [], reviews: [], overtime: [], leaveRequests: [], payrollPayments: [], overtimePayments: [], weeklyBonuses: [], weeklyBonusPayments: [], weeklyBonusPolicies: [], shifts: [] }
 }
 
 type AttendanceDateMode = DateModePickerMode
@@ -526,6 +616,9 @@ interface AttendanceLoadOptions {
   overtimeDateScoped?: boolean
   includePayrollPayments?: boolean
   includeOvertimePayments?: boolean
+  includeWeeklyBonuses?: boolean
+  includeWeeklyBonusPayments?: boolean
+  includeWeeklyBonusPolicies?: boolean
 }
 
 function getOperationsFoundationCacheKey(
@@ -2048,6 +2141,13 @@ const overtimePaymentPolicyLabel: Record<OvertimePaymentPolicy, string> = {
 const overtimePaymentPolicyDescription: Record<OvertimePaymentPolicy, string> = {
   separate: "Dibayar mingguan/custom dan tidak menahan proses gaji.",
   salary_cycle: "Masuk total gaji 26 hari dan ikut proses finalisasi gaji.",
+}
+
+const weeklyShiftBonusStatusLabel: Record<WeeklyShiftBonusStatus, string> = {
+  draft: "Draft",
+  ready: "Siap Dibayar",
+  paid: "Terbayar",
+  void: "Dibatalkan",
 }
 
 const appScopeLabel: Record<AppScope, string> = {
@@ -5005,6 +5105,25 @@ function isMissingOvertimePaymentSchema(error: unknown) {
   return schemaHints.some((hint) => message.includes(hint))
 }
 
+function isMissingWeeklyBonusSchema(error: unknown) {
+  const errorObject = error && typeof error === "object" ? error as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown } : null
+  const message = `${String(errorObject?.code || "")} ${String(errorObject?.message || "")} ${String(errorObject?.details || "")} ${String(errorObject?.hint || "")}`.toLowerCase()
+  const schemaHints = [
+    "weekly_bonus_policies",
+    "weekly_bonus_policy_shifts",
+    "weekly_shift_bonus_cycles",
+    "weekly_shift_bonus_payments",
+    "weekly_shift_bonus_payment_items",
+    "refresh_weekly_shift_bonus_cycles",
+    "mark_weekly_shift_bonus_paid",
+    "void_weekly_bonus_payment",
+    "schema cache",
+    "relation",
+  ]
+
+  return schemaHints.some((hint) => message.includes(hint))
+}
+
 function isMissingOvertimeTimingSchema(error: unknown) {
   const errorObject = error && typeof error === "object" ? error as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown } : null
   const message = `${String(errorObject?.code || "")} ${String(errorObject?.message || "")} ${String(errorObject?.details || "")} ${String(errorObject?.hint || "")}`.toLowerCase()
@@ -6671,26 +6790,36 @@ function exportPayrollPaymentCsv(rows: PayrollPaymentRow[]) {
 }
 
 function exportPayrollUnifiedPaymentCsv(rows: PayrollUnifiedPaymentRow[]) {
-  const header = ["No", "Jenis", "No Bayar", "Kode", "Nama", "Periode", "Cycle", "Gaji Pokok", "Lembur", "Total", "Nominal Bayar", "Metode", "Referensi", "Tanggal Bayar", "Dibayar Oleh", "Status", "Catatan"]
-  const body = rows.map((row, index) => [
-    index + 1,
-    row.source === "overtime" ? "Lembur terpisah" : "Gaji cycle",
-    row.paymentNo,
-    row.employeeCode,
-    row.employeeName,
-    formatPayrollPaymentPeriod(row),
-    row.source === "overtime" ? `${row.requestCount} request` : row.cycleNumber,
-    row.grossAmount,
-    row.overtimeAmount,
-    row.netAmount,
-    row.paidAmount,
-    payrollPaymentMethodLabel[row.paymentMethod],
-    row.paymentReference,
-    formatUserDateTime(row.paidAt, "-"),
-    row.paidByName,
-    payrollPaymentStatusLabel[row.status],
-    row.notes,
-  ])
+  const header = ["No", "Jenis", "No Bayar", "Kode", "Nama", "Periode", "Cycle", "Gaji Pokok", "Lembur", "Bonus", "Total", "Nominal Bayar", "Metode", "Referensi", "Tanggal Bayar", "Dibayar Oleh", "Status", "Catatan"]
+  const body = rows.map((row, index) => {
+    const typeLabel = row.source === "bonus" ? "Bonus shift" : row.source === "overtime" ? "Lembur terpisah" : "Gaji cycle"
+    const cycleLabel = row.source === "bonus"
+      ? `${row.eligibleDays}/${row.targetDays} hari`
+      : row.source === "overtime"
+        ? `${row.requestCount} request`
+        : row.cycleNumber
+
+    return [
+      index + 1,
+      typeLabel,
+      row.paymentNo,
+      row.employeeCode,
+      row.employeeName,
+      formatPayrollPaymentPeriod(row),
+      cycleLabel,
+      row.grossAmount,
+      row.overtimeAmount,
+      row.bonusAmount,
+      row.netAmount,
+      row.paidAmount,
+      payrollPaymentMethodLabel[row.paymentMethod],
+      row.paymentReference,
+      formatUserDateTime(row.paidAt, "-"),
+      row.paidByName,
+      payrollPaymentStatusLabel[row.status],
+      row.notes,
+    ]
+  })
   const csv = [header, ...body]
     .map((columns) => columns.map((column) => `"${String(column).replace(/"/g, '""')}"`).join(","))
     .join("\n")
@@ -6699,6 +6828,35 @@ function exportPayrollUnifiedPaymentCsv(rows: PayrollUnifiedPaymentRow[]) {
   const link = document.createElement("a")
   link.href = url
   link.download = `dms-riwayat-pembayaran-${new Date().toISOString().slice(0, 10)}.csv`
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
+function exportPayrollWeeklyBonusCsv(rows: WeeklyShiftBonusRow[]) {
+  const header = ["No", "Kode", "Nama", "Divisi", "Periode", "Jatuh Tempo", "Policy", "Hari Bonus", "Target Hari", "Nominal Full", "Nominal Bonus", "Status", "Catatan"]
+  const body = rows.map((row, index) => [
+    index + 1,
+    row.employeeCode,
+    row.employeeName,
+    row.divisionName,
+    formatPayrollPaymentPeriod(row),
+    formatEmployeeDate(row.paymentDueDate),
+    row.policyName || row.policyCode,
+    row.eligibleDays,
+    row.targetDays,
+    row.fullAmount,
+    row.bonusAmount,
+    weeklyShiftBonusStatusLabel[row.status],
+    row.paymentNote,
+  ])
+  const csv = [header, ...body]
+    .map((columns) => columns.map((column) => `"${String(column).replace(/"/g, '""')}"`).join(","))
+    .join("\n")
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement("a")
+  link.href = url
+  link.download = `dms-bonus-shift-belum-dibayar-${new Date().toISOString().slice(0, 10)}.csv`
   link.click()
   URL.revokeObjectURL(url)
 }
@@ -6966,6 +7124,70 @@ async function fetchOvertimePaymentRows() {
       .order("payment_no", { ascending: false }), 500, 20000)
 
     return { data: rows, error: null }
+  } catch (error) {
+    return { data: [], error }
+  }
+}
+
+async function fetchWeeklyShiftBonusRows() {
+  try {
+    const rows = await fetchSupabaseRangeRows<Record<string, unknown>>(() => supabase
+      .from("weekly_shift_bonus_cycles")
+      .select("id, policy_id, policy_code, policy_name, employee_id, employee_code, employee_name, division_name, period_started_at, period_closed_at, payment_due_date, eligible_days, target_days, full_amount, bonus_amount, status, payment_id, paid_at, paid_by_name, payment_note, calculated_at")
+      .order("payment_due_date", { ascending: false })
+      .order("employee_name", { ascending: true }), 500, 20000)
+
+    return { data: rows, error: null }
+  } catch (error) {
+    return { data: [], error }
+  }
+}
+
+async function fetchWeeklyBonusPaymentRows() {
+  try {
+    const rows = await fetchSupabaseRangeRows<Record<string, unknown>>(() => supabase
+      .from("weekly_shift_bonus_payments")
+      .select("id, payment_no, employee_id, employee_code, employee_name, period_started_at, period_closed_at, cycle_count, eligible_days, target_days, bonus_amount, paid_amount, payment_method, payment_reference, paid_at, paid_by_name, status, notes")
+      .order("paid_at", { ascending: false })
+      .order("payment_no", { ascending: false }), 500, 20000)
+
+    return { data: rows, error: null }
+  } catch (error) {
+    return { data: [], error }
+  }
+}
+
+async function fetchWeeklyBonusPolicyRows() {
+  try {
+    const [policyResult, shiftResult] = await Promise.all([
+      supabase
+        .from("weekly_bonus_policies")
+        .select("id, code, name, description, target_days, full_amount, week_start_dow, payment_day_dow, status, is_active, updated_at, created_at")
+        .order("created_at", { ascending: true }),
+      supabase
+        .from("weekly_bonus_policy_shifts")
+        .select("policy_id, shift_id, is_active"),
+    ])
+
+    if (policyResult.error) throw policyResult.error
+    if (shiftResult.error) throw shiftResult.error
+
+    const shiftIdsByPolicy = new Map<string, string[]>()
+    ;((shiftResult.data || []) as Array<Record<string, unknown>>).forEach((row) => {
+      if (row.is_active === false) return
+      const policyId = String(row.policy_id || "")
+      const shiftId = String(row.shift_id || "")
+      if (!policyId || !shiftId) return
+      shiftIdsByPolicy.set(policyId, [...(shiftIdsByPolicy.get(policyId) || []), shiftId])
+    })
+
+    return {
+      data: ((policyResult.data || []) as Array<Record<string, unknown>>).map((row) => ({
+        ...row,
+        shift_ids: shiftIdsByPolicy.get(String(row.id || "")) || [],
+      })),
+      error: null,
+    }
   } catch (error) {
     return { data: [], error }
   }
@@ -7468,6 +7690,81 @@ function mapOvertimePaymentRecord(row: Record<string, unknown>): OvertimePayment
   }
 }
 
+function mapWeeklyShiftBonusStatus(value: unknown): WeeklyShiftBonusStatus {
+  if (value === "ready" || value === "paid" || value === "void") return value
+  return "draft"
+}
+
+function mapWeeklyShiftBonusRecord(row: Record<string, unknown>): WeeklyShiftBonusRow {
+  return {
+    id: String(row.id || ""),
+    policyId: String(row.policy_id || ""),
+    policyCode: String(row.policy_code || ""),
+    policyName: String(row.policy_name || ""),
+    employeeId: String(row.employee_id || ""),
+    employeeCode: String(row.employee_code || ""),
+    employeeName: String(row.employee_name || "Karyawan"),
+    divisionName: String(row.division_name || "Belum pilih divisi"),
+    periodStartedAt: String(row.period_started_at || ""),
+    periodClosedAt: String(row.period_closed_at || ""),
+    paymentDueDate: String(row.payment_due_date || ""),
+    eligibleDays: Number(row.eligible_days || 0),
+    targetDays: Number(row.target_days || 0),
+    fullAmount: Number(row.full_amount || 0),
+    bonusAmount: Number(row.bonus_amount || 0),
+    status: mapWeeklyShiftBonusStatus(row.status),
+    paymentId: String(row.payment_id || ""),
+    paidAt: String(row.paid_at || ""),
+    paidByName: String(row.paid_by_name || ""),
+    paymentNote: String(row.payment_note || ""),
+    calculatedAt: String(row.calculated_at || ""),
+  }
+}
+
+function mapWeeklyBonusPaymentRecord(row: Record<string, unknown>): WeeklyBonusPaymentRow {
+  return {
+    id: String(row.id || ""),
+    paymentNo: String(row.payment_no || ""),
+    employeeId: String(row.employee_id || ""),
+    employeeCode: String(row.employee_code || ""),
+    employeeName: String(row.employee_name || "Karyawan"),
+    periodStartedAt: String(row.period_started_at || ""),
+    periodClosedAt: String(row.period_closed_at || ""),
+    cycleCount: Number(row.cycle_count || 0),
+    eligibleDays: Number(row.eligible_days || 0),
+    targetDays: Number(row.target_days || 0),
+    bonusAmount: Number(row.bonus_amount || 0),
+    paidAmount: Number(row.paid_amount || 0),
+    paymentMethod: mapPayrollPaymentMethod(row.payment_method),
+    paymentReference: String(row.payment_reference || ""),
+    paidAt: String(row.paid_at || ""),
+    paidByName: String(row.paid_by_name || ""),
+    status: mapPayrollPaymentStatus(row.status),
+    notes: String(row.notes || ""),
+  }
+}
+
+function mapWeeklyBonusPolicyStatus(value: unknown): WeeklyBonusPolicyStatus {
+  return value === "inactive" ? "inactive" : "active"
+}
+
+function mapWeeklyBonusPolicyRecord(row: Record<string, unknown>): WeeklyBonusPolicyRow {
+  return {
+    id: String(row.id || ""),
+    code: String(row.code || ""),
+    name: String(row.name || "Bonus Shift Mingguan"),
+    description: String(row.description || ""),
+    targetDays: Number(row.target_days || 0),
+    fullAmount: Number(row.full_amount || 0),
+    weekStartDow: Number(row.week_start_dow ?? 1),
+    paymentDayDow: Number(row.payment_day_dow ?? 6),
+    status: mapWeeklyBonusPolicyStatus(row.status),
+    isActive: row.is_active !== false,
+    shiftIds: Array.isArray(row.shift_ids) ? row.shift_ids.map((id) => String(id || "")).filter(Boolean) : [],
+    updatedAt: String(row.updated_at || ""),
+  }
+}
+
 function mapOvertimePaymentStatus(value: unknown): OvertimePaymentStatus {
   if (value === "paid" || value === "void") return value
   return "unpaid"
@@ -7614,8 +7911,13 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
     if (payrollRefresh.error) throw payrollRefresh.error
   }
 
+  if (options.refreshPayroll) {
+    const weeklyBonusRefresh = await supabase.rpc("refresh_weekly_shift_bonus_cycles")
+    if (weeklyBonusRefresh.error && !isMissingWeeklyBonusSchema(weeklyBonusRefresh.error)) throw weeklyBonusRefresh.error
+  }
+
   const attendanceLogColumns = "id, employee_id, work_location_id, attendance_date, event_type, event_at, latitude, longitude, distance_m, radius_m, gps_status, face_status, face_score, face_snapshot_path, status, workday_counted, source, attendance_media, attendance_device_id, biofinger_event_id, notes"
-  const [employeeResult, divisionResult, locationResult, shiftResult, attendanceRows, dailySummaryRows, reviewAttendanceResult, payrollRows, overtimeResult, payrollComponentResult, appUserResult, faceProfileResult, leaveResult, payrollPaymentResult, overtimePaymentResult] = await Promise.all([
+  const [employeeResult, divisionResult, locationResult, shiftResult, attendanceRows, dailySummaryRows, reviewAttendanceResult, payrollRows, overtimeResult, payrollComponentResult, appUserResult, faceProfileResult, leaveResult, payrollPaymentResult, overtimePaymentResult, weeklyBonusResult, weeklyBonusPaymentResult, weeklyBonusPolicyResult] = await Promise.all([
     supabase
       .from("employees")
       .select("id, employee_code, full_name, photo_path, division_id, work_location_id, shift_id, salary_type, daily_salary, monthly_salary, payroll_cycle_days, payroll_eligible, employee_pay_policy, allowance_amount, employment_type_id, status, deleted_at")
@@ -7672,17 +7974,25 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
       .order("created_at", { ascending: false }), 500, 10000).then((data) => ({ data, error: null })),
     options.includePayrollPayments ? fetchPayrollPaymentRows() : emptyResult,
     options.includeOvertimePayments ? fetchOvertimePaymentRows() : emptyResult,
+    options.includeWeeklyBonuses ? fetchWeeklyShiftBonusRows() : emptyResult,
+    options.includeWeeklyBonusPayments ? fetchWeeklyBonusPaymentRows() : emptyResult,
+    options.includeWeeklyBonusPolicies ? fetchWeeklyBonusPolicyRows() : emptyResult,
   ])
   const payrollPaymentError = payrollPaymentResult.error && !isMissingPayrollLedgerSchema(payrollPaymentResult.error) ? payrollPaymentResult.error : null
   const overtimePaymentError = overtimePaymentResult.error && !isMissingOvertimePaymentSchema(overtimePaymentResult.error) ? overtimePaymentResult.error : null
-  const error = employeeResult.error || divisionResult.error || locationResult.error || shiftResult.error || reviewAttendanceResult.error || overtimeResult.error || payrollComponentResult.error || appUserResult.error || faceProfileResult.error || leaveResult.error || payrollPaymentError || overtimePaymentError
+  const weeklyBonusError = weeklyBonusResult.error && !isMissingWeeklyBonusSchema(weeklyBonusResult.error) ? weeklyBonusResult.error : null
+  const weeklyBonusPaymentError = weeklyBonusPaymentResult.error && !isMissingWeeklyBonusSchema(weeklyBonusPaymentResult.error) ? weeklyBonusPaymentResult.error : null
+  const weeklyBonusPolicyError = weeklyBonusPolicyResult.error && !isMissingWeeklyBonusSchema(weeklyBonusPolicyResult.error) ? weeklyBonusPolicyResult.error : null
+  const error = employeeResult.error || divisionResult.error || locationResult.error || shiftResult.error || reviewAttendanceResult.error || overtimeResult.error || payrollComponentResult.error || appUserResult.error || faceProfileResult.error || leaveResult.error || payrollPaymentError || overtimePaymentError || weeklyBonusError || weeklyBonusPaymentError || weeklyBonusPolicyError
 
   if (error) throw error
 
   const divisionMap = new Map((divisionResult.data || []).map((row) => [String(row.id), String(row.name || "")]))
   const locationRows = (locationResult.data || []) as Array<Record<string, unknown>>
   const locationMap = new Map(locationRows.map((row) => [String(row.id), row]))
-  const shiftMap = new Map(((shiftResult.data || []) as Array<Record<string, unknown>>).map((row) => [String(row.id), row]))
+  const shiftRows = (shiftResult.data || []) as Array<Record<string, unknown>>
+  const shiftMap = new Map(shiftRows.map((row) => [String(row.id), row]))
+  const shiftOptions = shiftRows.map(createShiftScheduleOption)
   const appUserRows = (appUserResult.data || []) as Array<Record<string, unknown>>
   const appUserByEmployee = new Map<string, Record<string, unknown>>()
   appUserRows.forEach((row) => {
@@ -7716,6 +8026,15 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
   const overtimePayments = (overtimePaymentResult.error && isMissingOvertimePaymentSchema(overtimePaymentResult.error))
     ? []
     : ((overtimePaymentResult.data || []) as Array<Record<string, unknown>>).map(mapOvertimePaymentRecord)
+  const weeklyBonuses = (weeklyBonusResult.error && isMissingWeeklyBonusSchema(weeklyBonusResult.error))
+    ? []
+    : ((weeklyBonusResult.data || []) as Array<Record<string, unknown>>).map(mapWeeklyShiftBonusRecord)
+  const weeklyBonusPayments = (weeklyBonusPaymentResult.error && isMissingWeeklyBonusSchema(weeklyBonusPaymentResult.error))
+    ? []
+    : ((weeklyBonusPaymentResult.data || []) as Array<Record<string, unknown>>).map(mapWeeklyBonusPaymentRecord)
+  const weeklyBonusPolicies = (weeklyBonusPolicyResult.error && isMissingWeeklyBonusSchema(weeklyBonusPolicyResult.error))
+    ? []
+    : ((weeklyBonusPolicyResult.data || []) as Array<Record<string, unknown>>).map(mapWeeklyBonusPolicyRecord)
   const payrollComponentMap = new Map(((payrollComponentResult.data || []) as Array<Record<string, unknown>>).map((row) => [String(row.id), row]))
   const overtimeByEmployeeDate = new Map<string, Record<string, unknown>>()
   overtimeRows.forEach((row) => {
@@ -8162,7 +8481,7 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
     }
   })
 
-  return { rows, allRows, locations, fieldReadiness, reviews: reviewRows, overtime: overtimeReviewRows, leaveRequests, payrollPayments, overtimePayments }
+  return { rows, allRows, locations, fieldReadiness, reviews: reviewRows, overtime: overtimeReviewRows, leaveRequests, payrollPayments, overtimePayments, weeklyBonuses, weeklyBonusPayments, weeklyBonusPolicies, shifts: shiftOptions }
 }
 
 function getBrowserPosition(): Promise<GeolocationPosition> {
@@ -8842,6 +9161,85 @@ async function processPayrollCycle(cycleId: string, action: PayrollProcessAction
 async function processOvertimePayment(action: "mark_overtime_paid" | "void_overtime_payment", payload: OvertimePaymentSubmitPayload) {
   const { data, error } = await supabase.functions.invoke("payroll-processing", {
     body: { action, payload },
+  })
+
+  if (error) {
+    const context = "context" in error ? (error as { context?: unknown }).context : null
+
+    if (context instanceof Response) {
+      const text = await context.clone().text()
+
+      if (text) {
+        let parsedMessage = ""
+
+        try {
+          const parsed = JSON.parse(text) as { error?: unknown; message?: unknown }
+          parsedMessage = String(parsed.error || parsed.message || "")
+        } catch {
+          parsedMessage = ""
+        }
+
+        throw new Error(parsedMessage || text)
+      }
+    }
+
+    throw error
+  }
+  if (data?.error) throw new Error(String(data.error))
+
+  return data
+}
+
+async function processWeeklyBonusPayment(action: "mark_weekly_bonus_paid" | "void_weekly_bonus_payment", payload: WeeklyBonusPaymentSubmitPayload) {
+  const { data, error } = await supabase.functions.invoke("payroll-processing", {
+    body: { action, payload },
+  })
+
+  if (error) {
+    const context = "context" in error ? (error as { context?: unknown }).context : null
+
+    if (context instanceof Response) {
+      const text = await context.clone().text()
+
+      if (text) {
+        let parsedMessage = ""
+
+        try {
+          const parsed = JSON.parse(text) as { error?: unknown; message?: unknown }
+          parsedMessage = String(parsed.error || parsed.message || "")
+        } catch {
+          parsedMessage = ""
+        }
+
+        throw new Error(parsedMessage || text)
+      }
+    }
+
+    throw error
+  }
+  if (data?.error) throw new Error(String(data.error))
+
+  return data
+}
+
+async function saveWeeklyBonusPolicy(payload: WeeklyBonusPolicySubmitPayload) {
+  const { data, error } = await supabase.functions.invoke("payroll-processing", {
+    body: {
+      action: "save_weekly_bonus_policy",
+      payload: {
+        weeklyBonusPolicyId: payload.policyId,
+        weeklyBonusPolicyCode: payload.code,
+        weeklyBonusPolicyName: payload.name,
+        weeklyBonusPolicyDescription: payload.description,
+        weeklyBonusTargetDays: payload.targetDays,
+        weeklyBonusFullAmount: payload.fullAmount,
+        weeklyBonusWeekStartDow: payload.weekStartDow,
+        weeklyBonusPaymentDayDow: payload.paymentDayDow,
+        weeklyBonusIsActive: payload.isActive,
+        weeklyBonusShiftIds: payload.shiftIds,
+        notes: payload.notes || "",
+      },
+    },
   })
 
   if (error) {
@@ -16852,6 +17250,9 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
       overtimeDateScoped: activeView !== "payroll",
       includePayrollPayments: activeView === "payroll",
       includeOvertimePayments: activeView === "payroll",
+      includeWeeklyBonuses: activeView === "payroll",
+      includeWeeklyBonusPayments: activeView === "payroll",
+      includeWeeklyBonusPolicies: activeView === "payroll",
     }),
     [activeView, dataLoadRange, loadScope, selectedDate],
   )
@@ -16878,6 +17279,8 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
   const [overtimeRequestOpen, setOvertimeRequestOpen] = useState(false)
   const [overtimeRequestSubmitting, setOvertimeRequestSubmitting] = useState(false)
   const [overtimeTarget, setOvertimeTarget] = useState<OvertimeReviewRow | null>(null)
+  const [bulkOvertimeRows, setBulkOvertimeRows] = useState<OvertimeReviewRow[]>([])
+  const [bulkOvertimeDecision, setBulkOvertimeDecision] = useState<"approve" | "reject">("reject")
   const [overtimeSubmitting, setOvertimeSubmitting] = useState(false)
   const [leaveRequestOpen, setLeaveRequestOpen] = useState(false)
   const [leaveRequestSubmitting, setLeaveRequestSubmitting] = useState(false)
@@ -16891,6 +17294,11 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
   const [overtimePaymentTarget, setOvertimePaymentTarget] = useState<OvertimeReviewRow | null>(null)
   const [overtimePaymentVoidTarget, setOvertimePaymentVoidTarget] = useState<OvertimePaymentRow | null>(null)
   const [overtimePaymentSubmitting, setOvertimePaymentSubmitting] = useState(false)
+  const [weeklyBonusPaymentTarget, setWeeklyBonusPaymentTarget] = useState<WeeklyShiftBonusRow | null>(null)
+  const [weeklyBonusPaymentVoidTarget, setWeeklyBonusPaymentVoidTarget] = useState<WeeklyBonusPaymentRow | null>(null)
+  const [weeklyBonusPaymentSubmitting, setWeeklyBonusPaymentSubmitting] = useState(false)
+  const [weeklyBonusPolicyOpen, setWeeklyBonusPolicyOpen] = useState(false)
+  const [weeklyBonusPolicySubmitting, setWeeklyBonusPolicySubmitting] = useState(false)
   const [resetAttendanceRow, setResetAttendanceRow] = useState<AttendanceMonitorRow | null>(null)
   const [resetAttendanceSubmitting, setResetAttendanceSubmitting] = useState(false)
   const [checkinCorrectionRow, setCheckinCorrectionRow] = useState<AttendanceMonitorRow | null>(null)
@@ -16934,6 +17342,9 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
           overtimeDateScoped: activeView !== "payroll",
           includePayrollPayments: activeView === "payroll",
           includeOvertimePayments: activeView === "payroll",
+          includeWeeklyBonuses: activeView === "payroll",
+          includeWeeklyBonusPayments: activeView === "payroll",
+          includeWeeklyBonusPolicies: activeView === "payroll",
         }),
       })
 
@@ -17123,6 +17534,58 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
     }
   }
 
+  const handleBulkOvertimeReviewSubmit = async () => {
+    const decision = bulkOvertimeDecision
+    const targetRows = bulkOvertimeRows.filter((row) => decision === "approve" ? canBulkApproveOvertimeRow(row) : canBulkRejectOvertimeRow(row))
+
+    if (!targetRows.length) {
+      showToast({
+        tone: "error",
+        title: "Tidak ada lembur valid",
+        description: "Pilihan sudah final/terkunci atau belum memenuhi syarat untuk diproses massal.",
+      })
+      setBulkOvertimeRows([])
+      return
+    }
+
+    setOvertimeSubmitting(true)
+    let successCount = 0
+    let failedCount = 0
+
+    try {
+      for (const batch of chunkBatch(targetRows, 8)) {
+        const results = await Promise.allSettled(batch.map((row) => reviewOvertimeRequest(
+          row.id,
+          decision,
+          decision === "approve" ? row.overtimeMinutes : 0,
+          row.overtimePaymentPolicy || "separate",
+          decision === "approve"
+            ? "Disetujui massal dari Approval Lembur."
+            : "Ditolak massal dari Approval Lembur karena bukan lembur.",
+        )))
+
+        successCount += results.filter((result) => result.status === "fulfilled").length
+        failedCount += results.filter((result) => result.status === "rejected").length
+      }
+
+      setBulkOvertimeRows([])
+      showToast({
+        tone: failedCount > 0 ? "warning" : "success",
+        title: decision === "approve" ? "Lembur massal disetujui" : "Lembur massal ditolak",
+        description: `${successCount} request berhasil diproses${failedCount > 0 ? `, ${failedCount} gagal` : ""}.`,
+      })
+      await refreshData()
+    } catch (error) {
+      showToast({
+        tone: "error",
+        title: "Gagal proses lembur massal",
+        description: getFriendlySupabaseError(error, "Bulk review lembur belum bisa diproses."),
+      })
+    } finally {
+      setOvertimeSubmitting(false)
+    }
+  }
+
   const handleLeaveRequestSubmit = async (payload: LeaveRequestSubmitPayload) => {
     setLeaveRequestSubmitting(true)
     try {
@@ -17295,6 +17758,84 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
     }
   }
 
+  const handleWeeklyBonusPaymentSubmit = async (payload: WeeklyBonusPaymentSubmitPayload) => {
+    if (!weeklyBonusPaymentTarget) return
+
+    setWeeklyBonusPaymentSubmitting(true)
+    try {
+      await processWeeklyBonusPayment("mark_weekly_bonus_paid", {
+        ...payload,
+        weeklyBonusCycleIds: [weeklyBonusPaymentTarget.id],
+      })
+      showToast({
+        tone: "success",
+        title: "Pembayaran bonus dicatat",
+        description: `${weeklyBonusPaymentTarget.employeeName} - ${formatCurrency(payload.paidAmount || weeklyBonusPaymentTarget.bonusAmount)} masuk Riwayat Bayar.`,
+      })
+      setWeeklyBonusPaymentTarget(null)
+      setStatusFilter("all")
+      await refreshData()
+    } catch (error) {
+      showToast({
+        tone: "error",
+        title: "Gagal bayar bonus",
+        description: getFriendlySupabaseError(error, "Bonus shift belum bisa dibayar."),
+      })
+    } finally {
+      setWeeklyBonusPaymentSubmitting(false)
+    }
+  }
+
+  const handleWeeklyBonusPaymentVoidSubmit = async () => {
+    if (!weeklyBonusPaymentVoidTarget) return
+
+    setWeeklyBonusPaymentSubmitting(true)
+    try {
+      await processWeeklyBonusPayment("void_weekly_bonus_payment", {
+        weeklyBonusPaymentId: weeklyBonusPaymentVoidTarget.id,
+        notes: "Pembayaran bonus shift dibatalkan dari halaman Payroll.",
+      })
+      showToast({
+        tone: "success",
+        title: "Pembayaran bonus dibatalkan",
+        description: `${weeklyBonusPaymentVoidTarget.employeeName} - ${formatCurrency(weeklyBonusPaymentVoidTarget.paidAmount)} kembali ke bonus belum dibayar.`,
+      })
+      setWeeklyBonusPaymentVoidTarget(null)
+      setStatusFilter("all")
+      await refreshData()
+    } catch (error) {
+      showToast({
+        tone: "error",
+        title: "Gagal membatalkan bonus",
+        description: getFriendlySupabaseError(error, "Pembayaran bonus belum bisa dibatalkan."),
+      })
+    } finally {
+      setWeeklyBonusPaymentSubmitting(false)
+    }
+  }
+
+  const handleWeeklyBonusPolicySubmit = async (payload: WeeklyBonusPolicySubmitPayload) => {
+    setWeeklyBonusPolicySubmitting(true)
+    try {
+      await saveWeeklyBonusPolicy(payload)
+      showToast({
+        tone: "success",
+        title: "Pengaturan bonus disimpan",
+        description: `${payload.name} - ${payload.shiftIds.length} shift aktif, ${formatCurrency(payload.fullAmount)} per ${payload.targetDays} hari.`,
+      })
+      setWeeklyBonusPolicyOpen(false)
+      await refreshData()
+    } catch (error) {
+      showToast({
+        tone: "error",
+        title: "Gagal simpan bonus",
+        description: getFriendlySupabaseError(error, "Pengaturan bonus shift belum bisa disimpan."),
+      })
+    } finally {
+      setWeeklyBonusPolicySubmitting(false)
+    }
+  }
+
   const handleResetAttendanceSubmit = async () => {
     if (!resetAttendanceRow) return
 
@@ -17403,9 +17944,10 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
     data.reviews.forEach((row) => addEmployeeDivision(row.employeeId, row.divisionName))
     data.overtime.forEach((row) => addEmployeeDivision(row.employeeId, row.divisionName))
     data.leaveRequests.forEach((row) => addEmployeeDivision(row.employeeId, row.divisionName))
+    data.weeklyBonuses.forEach((row) => addEmployeeDivision(row.employeeId, row.divisionName))
 
     return divisions
-  }, [data.allRows, data.leaveRequests, data.overtime, data.reviews, data.rows])
+  }, [data.allRows, data.leaveRequests, data.overtime, data.reviews, data.rows, data.weeklyBonuses])
   const divisionFilterOptions = useMemo(() => {
     const divisionNames = new Set<string>()
     const addDivision = (divisionName: string) => {
@@ -17418,6 +17960,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
     data.reviews.forEach((row) => addDivision(row.divisionName))
     data.overtime.forEach((row) => addDivision(row.divisionName))
     data.leaveRequests.forEach((row) => addDivision(row.divisionName))
+    data.weeklyBonuses.forEach((row) => addDivision(row.divisionName))
     employeeDivisionById.forEach(addDivision)
 
     return [
@@ -17426,7 +17969,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
         .sort((a, b) => a.localeCompare(b, "id-ID"))
         .map((divisionName) => ({ value: divisionName, label: divisionName })),
     ]
-  }, [data.allRows, data.leaveRequests, data.overtime, data.reviews, data.rows, employeeDivisionById])
+  }, [data.allRows, data.leaveRequests, data.overtime, data.reviews, data.rows, data.weeklyBonuses, employeeDivisionById])
   const matchesDivisionFilter = (divisionName: string) => {
     return divisionFilter === "all" || divisionName.trim() === divisionFilter
   }
@@ -17540,6 +18083,47 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
     return matchesDivision && matchesSearch && matchesStatus
   })
   const filteredOvertimePayments = data.overtimePayments.filter((row) => {
+    const matchesDivision = matchesDivisionFilter(employeeDivisionById.get(row.employeeId) || "")
+    const matchesSearch = normalizedSearch
+      ? [
+        row.paymentNo,
+        row.employeeCode,
+        row.employeeName,
+        row.paymentMethod,
+        payrollPaymentMethodLabel[row.paymentMethod],
+        row.paymentReference,
+        row.paidByName,
+        row.notes,
+      ].join(" ").toLowerCase().includes(normalizedSearch)
+      : true
+    const matchesStatus = statusFilter === "all"
+      || row.status === statusFilter
+      || row.paymentMethod === statusFilter
+      || (statusFilter === "paid" && row.status === "paid")
+
+    return matchesDivision && matchesSearch && matchesStatus
+  })
+  const filteredWeeklyBonuses = data.weeklyBonuses.filter((row) => {
+    const matchesDivision = matchesDivisionFilter(row.divisionName || employeeDivisionById.get(row.employeeId) || "")
+    const matchesSearch = normalizedSearch
+      ? [
+        row.policyCode,
+        row.policyName,
+        row.employeeCode,
+        row.employeeName,
+        row.divisionName,
+        weeklyShiftBonusStatusLabel[row.status],
+        row.paymentNote,
+        row.paidByName,
+      ].join(" ").toLowerCase().includes(normalizedSearch)
+      : true
+    const matchesStatus = statusFilter === "all"
+      || row.status === statusFilter
+      || (statusFilter === "paid" && row.status === "paid")
+
+    return matchesDivision && matchesSearch && matchesStatus
+  })
+  const filteredWeeklyBonusPayments = data.weeklyBonusPayments.filter((row) => {
     const matchesDivision = matchesDivisionFilter(employeeDivisionById.get(row.employeeId) || "")
     const matchesSearch = normalizedSearch
       ? [
@@ -17978,7 +18562,16 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
         </>
       ) : activeView === "attendance-review" ? (
         activeApprovalTab === "overtime" ? (
-          <OvertimeReviewTable rows={filteredOvertimeRows} loading={loading || overtimeSubmitting} errorMessage={errorMessage} onReview={setOvertimeTarget} />
+          <OvertimeReviewTable
+            rows={filteredOvertimeRows}
+            loading={loading || overtimeSubmitting}
+            errorMessage={errorMessage}
+            onReview={setOvertimeTarget}
+            onBulkReview={(rows, decision) => {
+              setBulkOvertimeDecision(decision)
+              setBulkOvertimeRows(rows)
+            }}
+          />
         ) : activeApprovalTab === "leave" ? (
           <LeaveReviewTable rows={filteredLeaveRows} loading={loading || leaveSubmitting} errorMessage={errorMessage} onReview={setLeaveTarget} onDelete={setLeaveDeleteTarget} />
         ) : (
@@ -18007,6 +18600,10 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
           payments={filteredPayrollPayments}
           overtimeRows={payrollOvertimeRows}
           overtimePayments={filteredOvertimePayments}
+          weeklyBonuses={filteredWeeklyBonuses}
+          weeklyBonusPayments={filteredWeeklyBonusPayments}
+          weeklyBonusPolicies={data.weeklyBonusPolicies}
+          shifts={data.shifts}
           loading={loading}
           errorMessage={errorMessage}
           overtimeTotal={approvedOvertimeTotal}
@@ -18015,6 +18612,9 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
           onProcess={openPayrollProcessDialog}
           onPayOvertime={setOvertimePaymentTarget}
           onVoidOvertimePayment={setOvertimePaymentVoidTarget}
+          onPayWeeklyBonus={setWeeklyBonusPaymentTarget}
+          onVoidWeeklyBonusPayment={setWeeklyBonusPaymentVoidTarget}
+          onOpenWeeklyBonusSettings={() => setWeeklyBonusPolicyOpen(true)}
         />
       ) : (
         <LiveAttendanceTable rows={cycleFirstRows} loading={loading} errorMessage={errorMessage} selectedDate={selectedDate} onResetDay={setResetAttendanceRow} onCorrectCheckIn={setCheckinCorrectionRow} onCorrectCheckout={setCheckoutCorrectionRow} />
@@ -18065,6 +18665,28 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
         onClose={() => setOvertimeTarget(null)}
         onSubmit={handleOvertimeReviewSubmit}
       />
+      <ConfirmDialog
+        open={bulkOvertimeRows.length > 0}
+        tone={bulkOvertimeDecision === "reject" ? "danger" : "warning"}
+        icon={bulkOvertimeDecision === "reject" ? X : FileCheck2}
+        eyebrow="Review Lembur Massal"
+        title={bulkOvertimeDecision === "reject" ? `Tolak ${bulkOvertimeRows.length} lembur terpilih?` : `Setujui ${bulkOvertimeRows.length} lembur terpilih?`}
+        description={bulkOvertimeDecision === "reject"
+          ? "Semua request terpilih akan ditandai ditolak dan tidak masuk pembayaran lembur."
+          : "Semua request terpilih yang sudah punya checkout dan durasi payable akan disetujui memakai durasi real serta jadwal bayar masing-masing."}
+        confirmLabel={bulkOvertimeDecision === "reject" ? "Tolak Pilihan" : "Setujui Pilihan"}
+        loading={overtimeSubmitting}
+        onClose={() => {
+          if (!overtimeSubmitting) setBulkOvertimeRows([])
+        }}
+        onConfirm={() => void handleBulkOvertimeReviewSubmit()}
+      >
+        <div className="confirmDialogPreview">
+          <span>Total pilihan</span>
+          <strong>{bulkOvertimeRows.length} request lembur</strong>
+          <small>{bulkOvertimeDecision === "reject" ? "Cocok untuk kandidat lembur yang sebenarnya bukan lembur." : "Durasi approved mengikuti durasi real dari settlement absensi."}</small>
+        </div>
+      </ConfirmDialog>
       <LeaveReviewDialog
         row={leaveTarget}
         saving={leaveSubmitting}
@@ -18126,6 +18748,24 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
         }}
         onSubmit={handleOvertimePaymentSubmit}
       />
+      <WeeklyBonusPaymentDialog
+        row={weeklyBonusPaymentTarget}
+        saving={weeklyBonusPaymentSubmitting}
+        onClose={() => {
+          if (!weeklyBonusPaymentSubmitting) setWeeklyBonusPaymentTarget(null)
+        }}
+        onSubmit={handleWeeklyBonusPaymentSubmit}
+      />
+      <WeeklyBonusPolicyDialog
+        open={weeklyBonusPolicyOpen}
+        policies={data.weeklyBonusPolicies}
+        shifts={data.shifts}
+        saving={weeklyBonusPolicySubmitting}
+        onClose={() => {
+          if (!weeklyBonusPolicySubmitting) setWeeklyBonusPolicyOpen(false)
+        }}
+        onSubmit={handleWeeklyBonusPolicySubmit}
+      />
       <ConfirmDialog
         open={Boolean(overtimePaymentVoidTarget)}
         tone="danger"
@@ -18145,6 +18785,27 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
           <span>{overtimePaymentVoidTarget?.paymentNo || "Pembayaran lembur"}</span>
           <strong>{overtimePaymentVoidTarget?.employeeName || "-"}</strong>
           <small>{overtimePaymentVoidTarget ? `${formatCurrency(overtimePaymentVoidTarget.paidAmount)} / ${formatPayrollPaymentPeriod(overtimePaymentVoidTarget)}` : "Belum ada transaksi"}</small>
+        </div>
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={Boolean(weeklyBonusPaymentVoidTarget)}
+        tone="danger"
+        icon={RotateCcw}
+        eyebrow="Batalkan Bayar Bonus"
+        title="Batalkan pembayaran bonus shift?"
+        description="Transaksi bonus ditandai batal dan bonus mingguan kembali menjadi belum dibayar. Data riwayat tetap tersimpan untuk audit."
+        confirmLabel="Batalkan Pembayaran"
+        cancelLabel="Batal"
+        loading={weeklyBonusPaymentSubmitting}
+        onClose={() => {
+          if (!weeklyBonusPaymentSubmitting) setWeeklyBonusPaymentVoidTarget(null)
+        }}
+        onConfirm={() => void handleWeeklyBonusPaymentVoidSubmit()}
+      >
+        <div className="confirmDialogPreview">
+          <span>{weeklyBonusPaymentVoidTarget?.paymentNo || "Pembayaran bonus"}</span>
+          <strong>{weeklyBonusPaymentVoidTarget?.employeeName || "-"}</strong>
+          <small>{weeklyBonusPaymentVoidTarget ? `${formatCurrency(weeklyBonusPaymentVoidTarget.paidAmount)} / ${formatPayrollPaymentPeriod(weeklyBonusPaymentVoidTarget)}` : "Belum ada transaksi"}</small>
         </div>
       </ConfirmDialog>
       <ConfirmDialog
@@ -20068,11 +20729,507 @@ function OvertimePaymentDialog({
   )
 }
 
+function WeeklyBonusPaymentDialog({
+  row,
+  saving,
+  onClose,
+  onSubmit,
+}: {
+  row: WeeklyShiftBonusRow | null
+  saving: boolean
+  onClose: () => void
+  onSubmit: (payload: WeeklyBonusPaymentSubmitPayload) => Promise<void> | void
+}) {
+  const [notes, setNotes] = useState("")
+  const [paymentMethod, setPaymentMethod] = useState<PayrollPaymentMethod>("bank_transfer")
+  const [paymentReference, setPaymentReference] = useState("")
+  const [paidAt, setPaidAt] = useState(getLocalDateKey())
+  const [paidAmount, setPaidAmount] = useState("")
+  const [submitError, setSubmitError] = useState("")
+
+  useEffect(() => {
+    if (!row) return
+    setNotes("")
+    setPaymentMethod("bank_transfer")
+    setPaymentReference("")
+    setPaidAt(row.paymentDueDate || getLocalDateKey())
+    setPaidAmount(String(Math.max(0, Math.round(row.bonusAmount || 0))))
+    setSubmitError("")
+  }, [row])
+
+  if (!row) return null
+
+  const paymentMethodOptions = (Object.keys(payrollPaymentMethodLabel) as PayrollPaymentMethod[]).map((method) => ({
+    value: method,
+    label: payrollPaymentMethodLabel[method],
+  }))
+  const blockReason = getWeeklyBonusPaymentBlockReason(row)
+  const numericPaidAmount = Number(paidAmount)
+  const paymentDelta = Number.isFinite(numericPaidAmount) ? numericPaidAmount - row.bonusAmount : 0
+
+  const submitPayment = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (saving) return
+    if (blockReason) {
+      setSubmitError(blockReason)
+      return
+    }
+    if (!paidAt) {
+      setSubmitError("Tanggal bayar wajib diisi.")
+      return
+    }
+    if (!Number.isFinite(numericPaidAmount) || numericPaidAmount <= 0) {
+      setSubmitError("Nominal bayar harus lebih dari 0.")
+      return
+    }
+    setSubmitError("")
+    void onSubmit({
+      notes: notes.trim(),
+      paymentMethod,
+      paymentReference: paymentReference.trim(),
+      paidAt,
+      paidAmount: numericPaidAmount,
+    })
+  }
+
+  return (
+    <FoundationDialog className="payrollProcessDialog weeklyBonusPaymentDialog" open onClose={onClose}>
+      <form className="payrollProcessShell" onSubmit={submitPayment}>
+        <div className="payrollProcessHeader">
+          <span className="payrollProcessIcon success">
+            <BadgeDollarSign size={22} />
+          </span>
+          <div>
+            <span>Bayar Bonus Shift</span>
+            <h2>{`Bayar bonus ${row.employeeName}`}</h2>
+            <p>Bonus shift dibayar terpisah dari gaji 26 hari dan lembur. Cocok untuk pembayaran Sabtu atau jadwal custom.</p>
+          </div>
+          <button className="foundationDialogClose" type="button" aria-label="Tutup dialog" onClick={onClose} disabled={saving}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="payrollProcessBody">
+          <section className="payrollProcessSummary">
+            <div className="payrollProcessEmployee">
+              <EmployeeIdentityCell fullName={row.employeeName} code={`${row.employeeCode} / ${row.divisionName}`} />
+              <WeeklyShiftBonusStatusBadge status={row.status} />
+            </div>
+            <div className="payrollProcessGrid">
+              <div>
+                <small>Periode</small>
+                <strong>{formatPayrollPaymentPeriod(row)}</strong>
+              </div>
+              <div>
+                <small>Jadwal Bayar</small>
+                <strong>{formatEmployeeDate(row.paymentDueDate)}</strong>
+              </div>
+              <div>
+                <small>Policy</small>
+                <strong>{row.policyName || row.policyCode || "Bonus shift"}</strong>
+              </div>
+              <div>
+                <small>Hari Bonus</small>
+                <strong>{`${row.eligibleDays}/${row.targetDays} hari`}</strong>
+              </div>
+              <div>
+                <small>Nominal Full</small>
+                <strong>{formatCurrency(row.fullAmount)}</strong>
+              </div>
+              <div className="payrollProcessTotal">
+                <small>Total Bonus</small>
+                <strong>{formatCurrency(row.bonusAmount)}</strong>
+              </div>
+            </div>
+          </section>
+
+          {blockReason && (
+            <div className="payrollPaymentDelta hasDelta">
+              <span>Belum bisa dibayar</span>
+              <strong>{blockReason}</strong>
+            </div>
+          )}
+
+          <section className="payrollPaymentForm">
+            <div className="payrollPaymentFormHeader">
+              <CreditCard size={18} />
+              <div>
+                <strong>Detail Pembayaran</strong>
+                <small>Nominal ini masuk ke Riwayat Bayar sebagai transaksi bonus shift.</small>
+              </div>
+            </div>
+            <div className="payrollPaymentFields">
+              <DateFormField label="Tanggal Bayar" value={paidAt} onChange={setPaidAt} required />
+              <TextFormField label="Nominal Dibayar" type="number" min={1} value={paidAmount} onChange={(event) => setPaidAmount(event.target.value)} required />
+              <FormField label="Metode Bayar" required>
+                <FoundationSelect
+                  label="Metode Bayar"
+                  value={paymentMethod}
+                  options={paymentMethodOptions}
+                  searchable={false}
+                  onChange={(value) => setPaymentMethod(mapPayrollPaymentMethod(value))}
+                />
+              </FormField>
+              <TextFormField label="Referensi" value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} placeholder="Nomor transfer, kas, atau bukti pembayaran" />
+            </div>
+            <div className={clsx("payrollPaymentDelta", paymentDelta !== 0 && "hasDelta")}>
+              <span>Selisih bayar</span>
+              <strong>{paymentDelta === 0 ? "Sesuai total bonus" : formatCurrency(paymentDelta)}</strong>
+            </div>
+          </section>
+
+          <div className="payrollProcessNotes">
+            <span>Catatan Finance</span>
+            <textarea
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              placeholder="Contoh: bonus shift dibayar Sabtu via transfer."
+              disabled={saving}
+            />
+          </div>
+          {submitError && <p className="formErrorMessage">{submitError}</p>}
+        </div>
+
+        <div className="attendanceReviewActions">
+          <button className="secondaryButton" type="button" onClick={onClose} disabled={saving}>
+            Batal
+          </button>
+          <button className="primaryButton" type="submit" disabled={saving || Boolean(blockReason)}>
+            <CreditCard size={16} />
+            {saving ? "Menyimpan..." : "Simpan Bayar Bonus"}
+          </button>
+        </div>
+      </form>
+    </FoundationDialog>
+  )
+}
+
+const WEEKLY_BONUS_WEEKDAY_OPTIONS = [
+  { value: "0", label: "Minggu" },
+  { value: "1", label: "Senin" },
+  { value: "2", label: "Selasa" },
+  { value: "3", label: "Rabu" },
+  { value: "4", label: "Kamis" },
+  { value: "5", label: "Jumat" },
+  { value: "6", label: "Sabtu" },
+]
+
+function getWeeklyBonusWeekdayLabel(value: number) {
+  return WEEKLY_BONUS_WEEKDAY_OPTIONS.find((option) => option.value === String(value))?.label || "Sabtu"
+}
+
+function getDefaultWeeklyBonusShiftIds(shifts: ShiftScheduleShiftOption[]) {
+  return shifts
+    .filter((shift) => {
+      const searchText = `${shift.name} ${shift.code}`.toLowerCase()
+      return shift.isActive && searchText.includes("mesin") && (searchText.includes("siang") || searchText.includes("malam"))
+    })
+    .map((shift) => shift.id)
+}
+
+function WeeklyBonusPolicyDialog({
+  open,
+  policies,
+  shifts,
+  saving,
+  onClose,
+  onSubmit,
+}: {
+  open: boolean
+  policies: WeeklyBonusPolicyRow[]
+  shifts: ShiftScheduleShiftOption[]
+  saving: boolean
+  onClose: () => void
+  onSubmit: (payload: WeeklyBonusPolicySubmitPayload) => Promise<void> | void
+}) {
+  const defaultPolicy = useMemo<WeeklyBonusPolicyRow>(() => ({
+    id: "",
+    code: "SHIFT-MESIN-WEEKLY",
+    name: "Bonus Shift Mesin Mingguan",
+    description: "Bonus untuk shift tertentu dan dibayarkan terpisah dari gaji.",
+    targetDays: 6,
+    fullAmount: 50000,
+    weekStartDow: 1,
+    paymentDayDow: 6,
+    status: "active",
+    isActive: true,
+    shiftIds: getDefaultWeeklyBonusShiftIds(shifts),
+    updatedAt: "",
+  }), [shifts])
+  const defaultPolicyId = useMemo(
+    () => policies.find((policy) => policy.isActive && policy.status === "active")?.id || policies[0]?.id || "",
+    [policies],
+  )
+  const [policyId, setPolicyId] = useState("")
+  const [code, setCode] = useState(defaultPolicy.code)
+  const [name, setName] = useState(defaultPolicy.name)
+  const [description, setDescription] = useState(defaultPolicy.description)
+  const [targetDays, setTargetDays] = useState(String(defaultPolicy.targetDays))
+  const [fullAmount, setFullAmount] = useState(String(defaultPolicy.fullAmount))
+  const [weekStartDow, setWeekStartDow] = useState(String(defaultPolicy.weekStartDow))
+  const [paymentDayDow, setPaymentDayDow] = useState(String(defaultPolicy.paymentDayDow))
+  const [isActive, setIsActive] = useState(defaultPolicy.isActive)
+  const [selectedShiftIds, setSelectedShiftIds] = useState<string[]>(defaultPolicy.shiftIds)
+  const [submitError, setSubmitError] = useState("")
+
+  useEffect(() => {
+    if (!open) return
+    setPolicyId(defaultPolicyId)
+  }, [defaultPolicyId, open])
+
+  useEffect(() => {
+    if (!open) return
+    const policy = policies.find((item) => item.id === policyId) || defaultPolicy
+    setCode(policy.code || defaultPolicy.code)
+    setName(policy.name || defaultPolicy.name)
+    setDescription(policy.description || "")
+    setTargetDays(String(policy.targetDays || defaultPolicy.targetDays))
+    setFullAmount(String(Math.round(policy.fullAmount || defaultPolicy.fullAmount)))
+    setWeekStartDow(String(policy.weekStartDow ?? defaultPolicy.weekStartDow))
+    setPaymentDayDow(String(policy.paymentDayDow ?? defaultPolicy.paymentDayDow))
+    setIsActive(policy.isActive)
+    setSelectedShiftIds(policy.shiftIds.length ? policy.shiftIds : defaultPolicy.shiftIds)
+    setSubmitError("")
+  }, [defaultPolicy, open, policies, policyId])
+
+  if (!open) return null
+
+  const activeShiftOptions = shifts.filter((shift) => shift.isActive)
+  const amount = Number(fullAmount)
+  const days = Number(targetDays)
+  const dailyAmount = Number.isFinite(amount) && Number.isFinite(days) && days > 0 ? Math.round(amount / days) : 0
+  const policyOptions = policies.map((policy) => ({
+    value: policy.id,
+    label: policy.name || policy.code,
+    searchLabel: `${policy.name} ${policy.code}`,
+  }))
+
+  const toggleShift = (shiftId: string) => {
+    setSelectedShiftIds((current) => current.includes(shiftId)
+      ? current.filter((id) => id !== shiftId)
+      : [...current, shiftId])
+  }
+
+  const submitPolicy = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (saving) return
+
+    const parsedTargetDays = Number(targetDays)
+    const parsedFullAmount = Number(fullAmount)
+    const cleanCode = code.trim().toUpperCase()
+    const cleanName = name.trim()
+
+    if (!cleanName) {
+      setSubmitError("Nama pengaturan bonus wajib diisi.")
+      return
+    }
+    if (!cleanCode) {
+      setSubmitError("Kode pengaturan bonus wajib diisi.")
+      return
+    }
+    if (!Number.isInteger(parsedTargetDays) || parsedTargetDays < 1 || parsedTargetDays > 31) {
+      setSubmitError("Target hari wajib 1 sampai 31.")
+      return
+    }
+    if (!Number.isFinite(parsedFullAmount) || parsedFullAmount < 0) {
+      setSubmitError("Nominal bonus wajib angka dan minimal 0.")
+      return
+    }
+    if (selectedShiftIds.length === 0) {
+      setSubmitError("Pilih minimal satu shift yang berhak bonus.")
+      return
+    }
+
+    setSubmitError("")
+    void onSubmit({
+      policyId: policyId || undefined,
+      code: cleanCode,
+      name: cleanName,
+      description: description.trim(),
+      targetDays: parsedTargetDays,
+      fullAmount: parsedFullAmount,
+      weekStartDow: Number(weekStartDow),
+      paymentDayDow: Number(paymentDayDow),
+      isActive,
+      shiftIds: selectedShiftIds,
+    })
+  }
+
+  return (
+    <FoundationDialog className="payrollProcessDialog weeklyBonusPolicyDialog" open={open} onClose={onClose}>
+      <form className="payrollProcessShell" onSubmit={submitPolicy}>
+        <div className="payrollProcessHeader">
+          <span className="payrollProcessIcon success">
+            <Settings size={22} />
+          </span>
+          <div>
+            <span>Pengaturan Bonus</span>
+            <h2>Bonus shift mingguan</h2>
+            <p>Atur shift yang mendapat bonus, target hari, nominal full, dan hari pembayaran. Perubahan langsung menghitung ulang bonus dari absensi final.</p>
+          </div>
+          <button className="foundationDialogClose" type="button" aria-label="Tutup dialog" onClick={onClose} disabled={saving}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="payrollProcessBody weeklyBonusPolicyBody">
+          <section className="weeklyBonusPolicySummary">
+            <div>
+              <small>Policy aktif</small>
+              <strong>{name || "Bonus Shift Mingguan"}</strong>
+              <span>{isActive ? "Aktif dipakai payroll" : "Nonaktif sementara"}</span>
+            </div>
+            <div>
+              <small>Nominal</small>
+              <strong>{formatCurrency(Number.isFinite(amount) ? amount : 0)}</strong>
+              <span>{`${formatCurrency(dailyAmount)} per hari bonus`}</span>
+            </div>
+            <div>
+              <small>Target</small>
+              <strong>{`${Number.isFinite(days) ? days : 0} hari`}</strong>
+              <span>{`Dibayar tiap ${getWeeklyBonusWeekdayLabel(Number(paymentDayDow))}`}</span>
+            </div>
+            <div>
+              <small>Shift terpilih</small>
+              <strong>{selectedShiftIds.length}</strong>
+              <span>{`Periode mulai ${getWeeklyBonusWeekdayLabel(Number(weekStartDow))}`}</span>
+            </div>
+          </section>
+
+          <div className="weeklyBonusPolicyLayout">
+            <section className="weeklyBonusPolicyForm">
+              {policyOptions.length > 1 && (
+                <FormField label="Policy">
+                  <FoundationSelect
+                    label="Policy"
+                    value={policyId}
+                    options={policyOptions}
+                    searchable={policyOptions.length > 8}
+                    onChange={setPolicyId}
+                  />
+                </FormField>
+              )}
+              <TextFormField label="Nama Bonus" value={name} onChange={(event) => setName(event.target.value)} placeholder="Contoh: Bonus Shift Mesin Mingguan" required disabled={saving} />
+              <TextFormField label="Kode Bonus" value={code} onChange={(event) => setCode(event.target.value.toUpperCase())} placeholder="SHIFT-MESIN-WEEKLY" required disabled={saving || Boolean(policyId)} />
+              <div className="weeklyBonusPolicyTwoColumns">
+                <TextFormField label="Nominal Full" type="number" min={0} value={fullAmount} onChange={(event) => setFullAmount(event.target.value)} required disabled={saving} />
+                <TextFormField label="Target Hari" type="number" min={1} max={31} value={targetDays} onChange={(event) => setTargetDays(event.target.value)} required disabled={saving} />
+              </div>
+              <div className="weeklyBonusPolicyTwoColumns">
+                <FormField label="Mulai Periode" required>
+                  <FoundationSelect
+                    label="Mulai Periode"
+                    value={weekStartDow}
+                    options={WEEKLY_BONUS_WEEKDAY_OPTIONS}
+                    searchable={false}
+                    disabled={saving}
+                    onChange={setWeekStartDow}
+                  />
+                </FormField>
+                <FormField label="Hari Bayar" required>
+                  <FoundationSelect
+                    label="Hari Bayar"
+                    value={paymentDayDow}
+                    options={WEEKLY_BONUS_WEEKDAY_OPTIONS}
+                    searchable={false}
+                    disabled={saving}
+                    onChange={setPaymentDayDow}
+                  />
+                </FormField>
+              </div>
+              <SwitchFormField
+                label="Status"
+                checked={isActive}
+                onChange={setIsActive}
+                onLabel="Aktif"
+                offLabel="Nonaktif"
+                onDescription="Bonus otomatis dihitung untuk shift terpilih."
+                offDescription="Policy tersimpan, tapi tidak dipakai payroll."
+                disabled={saving}
+              />
+              <div className="payrollProcessNotes weeklyBonusPolicyNotes">
+                <span>Deskripsi</span>
+                <textarea
+                  value={description}
+                  onChange={(event) => setDescription(event.target.value)}
+                  placeholder="Contoh: bonus khusus shift siang mesin dan malam mesin, dibayar Sabtu."
+                  disabled={saving}
+                />
+              </div>
+            </section>
+
+            <section className="weeklyBonusShiftPanel">
+              <div className="weeklyBonusShiftHeader">
+                <div>
+                  <span>Shift Penerima Bonus</span>
+                  <strong>Pilih shift yang masuk hitungan</strong>
+                  <small>Hari kerja di shift ini akan dihitung menjadi bonus mingguan.</small>
+                </div>
+                <button className="secondaryButton compactButton" type="button" disabled={saving || activeShiftOptions.length === 0} onClick={() => setSelectedShiftIds(activeShiftOptions.map((shift) => shift.id))}>
+                  Pilih Semua
+                </button>
+              </div>
+
+              <div className="weeklyBonusShiftGrid">
+                {activeShiftOptions.length === 0 ? (
+                  <div className="weeklyBonusShiftEmpty">
+                    <span>Shift belum tersedia</span>
+                    <small>Tambahkan shift aktif di Master Data sebelum mengatur bonus.</small>
+                  </div>
+                ) : activeShiftOptions.map((shift) => {
+                  const selected = selectedShiftIds.includes(shift.id)
+                  return (
+                    <button
+                      className={clsx("weeklyBonusShiftOption", selected && "selected")}
+                      type="button"
+                      key={shift.id}
+                      disabled={saving}
+                      onClick={() => toggleShift(shift.id)}
+                    >
+                      <span aria-hidden="true" />
+                      <strong>{getShiftScheduleDisplayShiftName(shift.name)}</strong>
+                      <small>{`${shift.code || "SHIFT"} - ${getShiftScheduleTimeLabel(shift)}`}</small>
+                    </button>
+                  )
+                })}
+              </div>
+
+              <div className="weeklyBonusPolicyHint">
+                <BadgeDollarSign size={18} />
+                <div>
+                  <strong>{`${formatCurrency(Number.isFinite(amount) ? amount : 0)} jika mencapai ${Number.isFinite(days) ? days : 0} hari`}</strong>
+                  <small>{`Jika tidak penuh, nominal proporsional: ${formatCurrency(dailyAmount)} x hari masuk di shift terpilih.`}</small>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          {submitError && <p className="formErrorMessage">{submitError}</p>}
+        </div>
+
+        <div className="attendanceReviewActions">
+          <button className="secondaryButton" type="button" onClick={onClose} disabled={saving}>
+            Batal
+          </button>
+          <button className="primaryButton" type="submit" disabled={saving}>
+            <Settings size={16} />
+            {saving ? "Menyimpan..." : "Simpan Pengaturan"}
+          </button>
+        </div>
+      </form>
+    </FoundationDialog>
+  )
+}
+
 function PayrollPreviewTable({
   rows,
   payments,
   overtimeRows,
   overtimePayments,
+  weeklyBonuses,
+  weeklyBonusPayments,
+  weeklyBonusPolicies,
+  shifts,
   loading,
   errorMessage,
   overtimeTotal,
@@ -20081,11 +21238,18 @@ function PayrollPreviewTable({
   onProcess,
   onPayOvertime,
   onVoidOvertimePayment,
+  onPayWeeklyBonus,
+  onVoidWeeklyBonusPayment,
+  onOpenWeeklyBonusSettings,
 }: {
   rows: AttendanceMonitorRow[]
   payments: PayrollPaymentRow[]
   overtimeRows: OvertimeReviewRow[]
   overtimePayments: OvertimePaymentRow[]
+  weeklyBonuses: WeeklyShiftBonusRow[]
+  weeklyBonusPayments: WeeklyBonusPaymentRow[]
+  weeklyBonusPolicies: WeeklyBonusPolicyRow[]
+  shifts: ShiftScheduleShiftOption[]
   loading: boolean
   errorMessage: string
   overtimeTotal: number
@@ -20094,6 +21258,9 @@ function PayrollPreviewTable({
   onProcess: (row: AttendanceMonitorRow, action: PayrollProcessAction) => void
   onPayOvertime: (row: OvertimeReviewRow) => void
   onVoidOvertimePayment: (row: OvertimePaymentRow) => void
+  onPayWeeklyBonus: (row: WeeklyShiftBonusRow) => void
+  onVoidWeeklyBonusPayment: (row: WeeklyBonusPaymentRow) => void
+  onOpenWeeklyBonusSettings: () => void
 }) {
   const [workspaceTab, setWorkspaceTab] = useState<PayrollWorkspaceTab>("cycle")
   const [cycleTab, setCycleTab] = useState<PayrollCycleTab>("ready")
@@ -20102,10 +21269,13 @@ function PayrollPreviewTable({
   const [cyclePageSize, setCyclePageSize] = useState(25)
   const [overtimePage, setOvertimePage] = useState(1)
   const [overtimePageSize, setOvertimePageSize] = useState(25)
+  const [bonusPage, setBonusPage] = useState(1)
+  const [bonusPageSize, setBonusPageSize] = useState(25)
   const [historyPage, setHistoryPage] = useState(1)
   const [historyPageSize, setHistoryPageSize] = useState(25)
   const cycleScrollProps = useHorizontalDragScroll<HTMLDivElement>()
   const overtimeScrollProps = useHorizontalDragScroll<HTMLDivElement>()
+  const bonusScrollProps = useHorizontalDragScroll<HTMLDivElement>()
   const historyScrollProps = useHorizontalDragScroll<HTMLDivElement>()
   const sortedRows = useMemo(() => sortPayrollRows(rows), [rows])
   const paidCycleRows = useMemo(() => sortedRows.filter((row) => row.payrollStatus === "paid"), [sortedRows])
@@ -20118,8 +21288,9 @@ function PayrollPreviewTable({
 
     return buildPayrollPaymentHistoryRows([...ledgerRows, ...fallbackRows])
   }, [paidCycleRows, payments])
-  const unifiedPaymentRows = useMemo(() => buildPayrollUnifiedPaymentRows(paymentRows, overtimePayments), [overtimePayments, paymentRows])
+  const unifiedPaymentRows = useMemo(() => buildPayrollUnifiedPaymentRows(paymentRows, overtimePayments, weeklyBonusPayments), [overtimePayments, paymentRows, weeklyBonusPayments])
   const overtimePayableRows = useMemo(() => sortPayrollOvertimeRows(overtimeRows.filter((row) => row.overtimePaymentPolicy === "separate" && row.status === "approved" && row.overtimePaymentStatus !== "paid" && row.overtimePaymentStatus !== "void" && row.approvedMinutes > 0 && row.totalAmount > 0)), [overtimeRows])
+  const weeklyBonusPayableRows = useMemo(() => sortWeeklyShiftBonusRows(weeklyBonuses.filter((row) => row.status === "ready" && !row.paymentId && row.eligibleDays > 0 && row.bonusAmount > 0)), [weeklyBonuses])
   const readyRows = useMemo(() => sortedRows.filter((row) => row.payrollStatus === "ready"), [sortedRows])
   const activeRows = useMemo(() => sortedRows.filter((row) => row.payrollStatus === "active"), [sortedRows])
   const voidRows = useMemo(() => sortedRows.filter((row) => row.payrollStatus === "void"), [sortedRows])
@@ -20136,16 +21307,26 @@ function PayrollPreviewTable({
         : sortedRows
   const pagedCycleRows = visibleCycleRows.slice((cyclePage - 1) * cyclePageSize, cyclePage * cyclePageSize)
   const pagedOvertimeRows = overtimePayableRows.slice((overtimePage - 1) * overtimePageSize, overtimePage * overtimePageSize)
+  const pagedBonusRows = weeklyBonusPayableRows.slice((bonusPage - 1) * bonusPageSize, bonusPage * bonusPageSize)
   const pagedPaymentRows = unifiedPaymentRows.slice((historyPage - 1) * historyPageSize, historyPage * historyPageSize)
   const payableAmount = payableRows.reduce((total, row) => total + row.payrollAmount, 0)
   const lockedAmount = lockedRows.reduce((total, row) => total + row.payrollAmount, 0)
   const overtimePayableAmount = overtimePayableRows.reduce((total, row) => total + row.totalAmount, 0)
+  const weeklyBonusPayableAmount = weeklyBonusPayableRows.reduce((total, row) => total + row.bonusAmount, 0)
   const paidAmount = unifiedPaymentRows.filter((row) => row.status === "paid").reduce((total, row) => total + row.paidAmount, 0)
+  const activeWeeklyBonusPolicy = useMemo(
+    () => weeklyBonusPolicies.find((policy) => policy.isActive && policy.status === "active") || weeklyBonusPolicies[0] || null,
+    [weeklyBonusPolicies],
+  )
+  const weeklyBonusPolicyMeta = activeWeeklyBonusPolicy
+    ? `${formatCurrency(activeWeeklyBonusPolicy.fullAmount)} / ${activeWeeklyBonusPolicy.targetDays || 0} hari`
+    : "Belum ada policy bonus"
   const workspaceTabs = useMemo(() => ([
     { id: "cycle" as const, label: "Gaji 26 Hari", icon: WalletCards, count: payableRows.length },
     { id: "overtime" as const, label: "Bayar Lembur", icon: BadgeDollarSign, count: overtimePayableRows.length },
+    { id: "bonus" as const, label: "Bayar Bonus", icon: BadgeDollarSign, count: weeklyBonusPayableRows.length },
     { id: "history" as const, label: "Riwayat Bayar", icon: FileCheck2, count: unifiedPaymentRows.length },
-  ]), [overtimePayableRows.length, payableRows.length, unifiedPaymentRows.length])
+  ]), [overtimePayableRows.length, payableRows.length, unifiedPaymentRows.length, weeklyBonusPayableRows.length])
   const payrollCycleTabs = useMemo(() => ([
     { id: "ready" as const, label: "Siap Dicek", icon: WalletCards, count: readyRows.length },
     { id: "locked" as const, label: "Menunggu Bayar", icon: Lock, count: lockedRows.length },
@@ -20168,8 +21349,9 @@ function PayrollPreviewTable({
   useEffect(() => {
     setCyclePage(1)
     setOvertimePage(1)
+    setBonusPage(1)
     setHistoryPage(1)
-  }, [cycleTab, overtimePayableRows.length, rows.length, unifiedPaymentRows.length, workspaceTab])
+  }, [cycleTab, overtimePayableRows.length, rows.length, unifiedPaymentRows.length, weeklyBonusPayableRows.length, workspaceTab])
 
   return (
     <>
@@ -20178,28 +21360,40 @@ function PayrollPreviewTable({
           <div>
             <h2>Proses Payroll</h2>
             <p>Gaji 26 hari tetap berjalan. Lembur bisa ikut gaji atau dibayar terpisah mingguan/custom.</p>
-            <InlinePageStats items={[`${formatCurrency(overtimeTotal)} lembur disetujui total`, `${formatCurrency(payableAmount)} gaji siap/final`, `${formatCurrency(overtimePayableAmount)} lembur terpisah belum dibayar`, `${formatNumber(unifiedPaymentRows.length)} riwayat bayar`]} />
+            <InlinePageStats items={[`${formatCurrency(overtimeTotal)} lembur disetujui total`, `${formatCurrency(payableAmount)} gaji siap/final`, `${formatCurrency(overtimePayableAmount)} lembur terpisah belum dibayar`, `${formatCurrency(weeklyBonusPayableAmount)} bonus belum dibayar`, weeklyBonusPolicyMeta, `${formatNumber(unifiedPaymentRows.length)} riwayat bayar`]} />
           </div>
           <div className="payrollTableActions">
-            <button className="secondaryButton" type="button" onClick={() => exportPayrollCsv(visibleCycleRows)} disabled={loading || workspaceTab !== "cycle" || visibleCycleRows.length === 0}>
-              <FileBarChart size={17} />
-              Export Gaji
+            <button className="payrollIconButton" type="button" onClick={onOpenWeeklyBonusSettings} disabled={loading} aria-label="Pengaturan bonus" title="Pengaturan bonus">
+              <Settings size={18} />
             </button>
-            <button className="secondaryButton" type="button" onClick={() => exportPayrollOvertimeCsv(overtimePayableRows)} disabled={loading || workspaceTab !== "overtime" || overtimePayableRows.length === 0}>
-              <Download size={17} />
-              Export Lembur
-            </button>
-            <button className="secondaryButton" type="button" onClick={() => exportPayrollUnifiedPaymentCsv(unifiedPaymentRows)} disabled={loading || unifiedPaymentRows.length === 0}>
-              <Download size={17} />
-              Export Riwayat
-            </button>
+            <span className="payrollExportMenu">
+              <RowActionMenu label="Export payroll">
+                <RowActionMenuItem disabled={loading || workspaceTab !== "cycle" || visibleCycleRows.length === 0} onClick={() => exportPayrollCsv(visibleCycleRows)}>
+                  <FileBarChart size={15} />
+                  Export Gaji
+                </RowActionMenuItem>
+                <RowActionMenuItem disabled={loading || workspaceTab !== "overtime" || overtimePayableRows.length === 0} onClick={() => exportPayrollOvertimeCsv(overtimePayableRows)}>
+                  <Download size={15} />
+                  Export Lembur
+                </RowActionMenuItem>
+                <RowActionMenuItem disabled={loading || workspaceTab !== "bonus" || weeklyBonusPayableRows.length === 0} onClick={() => exportPayrollWeeklyBonusCsv(weeklyBonusPayableRows)}>
+                  <Download size={15} />
+                  Export Bonus
+                </RowActionMenuItem>
+                <RowActionMenuItem disabled={loading || unifiedPaymentRows.length === 0} onClick={() => exportPayrollUnifiedPaymentCsv(unifiedPaymentRows)}>
+                  <Download size={15} />
+                  Export Riwayat
+                </RowActionMenuItem>
+              </RowActionMenu>
+            </span>
           </div>
         </div>
 
         <div className="payrollFinanceSummary">
           <PayrollFinanceMetric icon={WalletCards} label="Gaji perlu diproses" value={formatCurrency(payableAmount)} meta={`${formatNumber(payableRows.length)} gaji siap diproses`} tone="info" />
           <PayrollFinanceMetric icon={BadgeDollarSign} label="Lembur belum dibayar" value={formatCurrency(overtimePayableAmount)} meta={`${formatNumber(overtimePayableRows.length)} request bayar terpisah`} tone="warning" />
-          <PayrollFinanceMetric icon={FileCheck2} label="Sudah terbayar" value={formatCurrency(paidAmount)} meta={`${formatNumber(unifiedPaymentRows.length)} transaksi gaji/lembur`} tone="success" />
+          <PayrollFinanceMetric icon={BadgeDollarSign} label="Bonus belum dibayar" value={formatCurrency(weeklyBonusPayableAmount)} meta={`${formatNumber(weeklyBonusPayableRows.length)} bonus shift mingguan`} tone="success" />
+          <PayrollFinanceMetric icon={FileCheck2} label="Sudah terbayar" value={formatCurrency(paidAmount)} meta={`${formatNumber(unifiedPaymentRows.length)} transaksi gaji/lembur/bonus`} tone="success" />
           <PayrollFinanceMetric icon={BadgeDollarSign} label="Masih berjalan" value={formatNumber(activeRows.length)} meta="masih mengikuti absensi" tone="neutral" />
         </div>
 
@@ -20323,6 +21517,24 @@ function PayrollPreviewTable({
           />
         )}
 
+        {workspaceTab === "bonus" && (
+          <PayrollWeeklyBonusTable
+            rows={pagedBonusRows}
+            loading={loading}
+            errorMessage={errorMessage}
+            page={bonusPage}
+            pageSize={bonusPageSize}
+            totalRows={weeklyBonusPayableRows.length}
+            scrollProps={bonusScrollProps}
+            onPayWeeklyBonus={onPayWeeklyBonus}
+            onPageChange={setBonusPage}
+            onPageSizeChange={(nextSize) => {
+              setBonusPageSize(nextSize)
+              setBonusPage(1)
+            }}
+          />
+        )}
+
         {workspaceTab === "history" && (
           <PayrollUnifiedPaymentHistoryTable
             rows={pagedPaymentRows}
@@ -20333,6 +21545,7 @@ function PayrollPreviewTable({
             totalRows={unifiedPaymentRows.length}
             scrollProps={historyScrollProps}
             onVoidOvertimePayment={onVoidOvertimePayment}
+            onVoidWeeklyBonusPayment={onVoidWeeklyBonusPayment}
             onPageChange={setHistoryPage}
             onPageSizeChange={(nextSize) => {
               setHistoryPageSize(nextSize)
@@ -20398,7 +21611,7 @@ function sortPayrollRows(rows: AttendanceMonitorRow[]) {
   })
 }
 
-function formatPayrollPaymentPeriod(row: Pick<PayrollPaymentRow, "periodStartedAt" | "periodClosedAt">) {
+function formatPayrollPaymentPeriod(row: { periodStartedAt: string; periodClosedAt: string }) {
   if (!row.periodStartedAt && !row.periodClosedAt) return "-"
   return `${formatPayrollDate(row.periodStartedAt)} - ${row.periodClosedAt ? formatPayrollDate(row.periodClosedAt) : "berjalan"}`
 }
@@ -20411,14 +21624,18 @@ function buildPayrollPaymentHistoryRows(rows: PayrollPaymentRow[]) {
   })
 }
 
-function buildPayrollUnifiedPaymentRows(payments: PayrollPaymentRow[], overtimePayments: OvertimePaymentRow[]): PayrollUnifiedPaymentRow[] {
+function buildPayrollUnifiedPaymentRows(payments: PayrollPaymentRow[], overtimePayments: OvertimePaymentRow[], weeklyBonusPayments: WeeklyBonusPaymentRow[]): PayrollUnifiedPaymentRow[] {
   const salaryRows = payments.map((row) => ({
     ...row,
     id: `salary-${row.id}`,
     source: "salary" as const,
     overtimePaymentId: "",
+    weeklyBonusPaymentId: "",
     requestCount: 0,
     overtimeMinutes: 0,
+    bonusAmount: 0,
+    eligibleDays: 0,
+    targetDays: 0,
   }))
   const overtimeRows = overtimePayments.map((row) => ({
     id: `overtime-${row.id}`,
@@ -20426,6 +21643,7 @@ function buildPayrollUnifiedPaymentRows(payments: PayrollPaymentRow[], overtimeP
     paymentNo: row.paymentNo,
     payrollCycleId: "",
     overtimePaymentId: row.id,
+    weeklyBonusPaymentId: "",
     employeeId: row.employeeId,
     employeeCode: row.employeeCode,
     employeeName: row.employeeName,
@@ -20444,10 +21662,43 @@ function buildPayrollUnifiedPaymentRows(payments: PayrollPaymentRow[], overtimeP
     notes: row.notes,
     requestCount: row.requestCount,
     overtimeMinutes: row.overtimeMinutes,
+    bonusAmount: 0,
+    eligibleDays: 0,
+    targetDays: 0,
     overtimePayment: row,
   }))
+  const weeklyBonusRows = weeklyBonusPayments.map((row) => ({
+    id: `bonus-${row.id}`,
+    source: "bonus" as const,
+    paymentNo: row.paymentNo,
+    payrollCycleId: "",
+    overtimePaymentId: "",
+    weeklyBonusPaymentId: row.id,
+    employeeId: row.employeeId,
+    employeeCode: row.employeeCode,
+    employeeName: row.employeeName,
+    cycleNumber: 0,
+    periodStartedAt: row.periodStartedAt,
+    periodClosedAt: row.periodClosedAt,
+    grossAmount: 0,
+    overtimeAmount: 0,
+    netAmount: row.bonusAmount,
+    paidAmount: row.paidAmount,
+    paymentMethod: row.paymentMethod,
+    paymentReference: row.paymentReference,
+    paidAt: row.paidAt,
+    paidByName: row.paidByName,
+    status: row.status,
+    notes: row.notes,
+    requestCount: 0,
+    overtimeMinutes: 0,
+    bonusAmount: row.bonusAmount,
+    eligibleDays: row.eligibleDays,
+    targetDays: row.targetDays,
+    weeklyBonusPayment: row,
+  }))
 
-  return [...salaryRows, ...overtimeRows].sort((a, b) => {
+  return [...salaryRows, ...overtimeRows, ...weeklyBonusRows].sort((a, b) => {
     const first = new Date(a.paidAt || a.periodClosedAt || "").getTime()
     const second = new Date(b.paidAt || b.periodClosedAt || "").getTime()
     return (Number.isFinite(second) ? second : 0) - (Number.isFinite(first) ? first : 0)
@@ -20476,8 +21727,38 @@ function getOvertimePaymentBlockReason(row: OvertimeReviewRow) {
   return ""
 }
 
+function sortWeeklyShiftBonusRows(rows: WeeklyShiftBonusRow[]) {
+  const statusWeight: Record<WeeklyShiftBonusStatus, number> = {
+    ready: 4,
+    draft: 3,
+    paid: 2,
+    void: 1,
+  }
+
+  return [...rows].sort((a, b) => {
+    const statusDiff = statusWeight[b.status] - statusWeight[a.status]
+    if (statusDiff !== 0) return statusDiff
+    const dueDiff = new Date(`${b.paymentDueDate || b.periodClosedAt}T00:00:00+07:00`).getTime() - new Date(`${a.paymentDueDate || a.periodClosedAt}T00:00:00+07:00`).getTime()
+    if (Number.isFinite(dueDiff) && dueDiff !== 0) return dueDiff
+    const eligibleDiff = b.eligibleDays - a.eligibleDays
+    if (eligibleDiff !== 0) return eligibleDiff
+    return a.employeeName.localeCompare(b.employeeName, "id-ID")
+  })
+}
+
+function getWeeklyBonusPaymentBlockReason(row: WeeklyShiftBonusRow) {
+  if (row.status === "paid") return "Bonus shift sudah dibayar."
+  if (row.status === "void") return "Bonus shift pernah dibatalkan."
+  if (row.status !== "ready") return "Bonus shift belum siap dibayar."
+  if (row.eligibleDays <= 0) return "Belum ada hari masuk di shift bonus."
+  if (row.bonusAmount <= 0) return "Nominal bonus belum valid."
+  return ""
+}
+
 function getPayrollPaymentSourceLabel(source: PayrollPaymentSource) {
-  return source === "overtime" ? "Lembur terpisah" : "Gaji 26 hari"
+  if (source === "bonus") return "Bonus shift"
+  if (source === "overtime") return "Lembur terpisah"
+  return "Gaji 26 hari"
 }
 
 function PayrollPaymentStatusBadge({ status }: { status: PayrollPaymentStatus }) {
@@ -20490,6 +21771,13 @@ function OvertimePaymentStatusBadge({ status }: { status: OvertimePaymentStatus 
   if (status === "paid") return <UiStatusBadge tone="valid">{overtimePaymentStatusLabel.paid}</UiStatusBadge>
   if (status === "void") return <UiStatusBadge tone="failed">{overtimePaymentStatusLabel.void}</UiStatusBadge>
   return <UiStatusBadge tone="pending">{overtimePaymentStatusLabel.unpaid}</UiStatusBadge>
+}
+
+function WeeklyShiftBonusStatusBadge({ status }: { status: WeeklyShiftBonusStatus }) {
+  if (status === "ready") return <UiStatusBadge tone="pending">Siap Bayar</UiStatusBadge>
+  if (status === "paid") return <UiStatusBadge tone="valid">Terbayar</UiStatusBadge>
+  if (status === "void") return <UiStatusBadge tone="failed">Dibatalkan</UiStatusBadge>
+  return <UiStatusBadge tone="missing">Draft</UiStatusBadge>
 }
 
 function mapPaidCycleToPaymentHistory(row: AttendanceMonitorRow): PayrollPaymentRow {
@@ -20711,6 +21999,100 @@ function PayrollOvertimePaymentTable({
   )
 }
 
+function PayrollWeeklyBonusTable({
+  rows,
+  loading,
+  errorMessage,
+  page,
+  pageSize,
+  totalRows,
+  scrollProps,
+  onPayWeeklyBonus,
+  onPageChange,
+  onPageSizeChange,
+}: {
+  rows: WeeklyShiftBonusRow[]
+  loading: boolean
+  errorMessage: string
+  page: number
+  pageSize: number
+  totalRows: number
+  scrollProps: ReturnType<typeof useHorizontalDragScroll<HTMLDivElement>>
+  onPayWeeklyBonus: (row: WeeklyShiftBonusRow) => void
+  onPageChange: (page: number) => void
+  onPageSizeChange: (pageSize: number) => void
+}) {
+  return (
+    <>
+      <div className="tableScroller uiDataTableScroller uiDataTableHasColumns payrollBonusTableScroller" {...scrollProps}>
+        <table>
+          <colgroup>
+            <col className="tableNumberColumn" />
+            <col style={{ width: "240px" }} />
+            <col style={{ width: "210px" }} />
+            <col style={{ width: "160px" }} />
+            <col style={{ width: "210px" }} />
+            <col style={{ width: "150px" }} />
+            <col style={{ width: "160px" }} />
+            <col style={{ width: "150px" }} />
+            <col className="tableActionColumn" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th className="tableNumberHeader">No</th>
+              <th>Karyawan</th>
+              <th>Periode</th>
+              <th>Jadwal Bayar</th>
+              <th>Policy</th>
+              <th>Hari Bonus</th>
+              <th>Total Bonus</th>
+              <th>Status</th>
+              <th className="tableActionHeader">Aksi</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading && <tr><td className="tableStateCell" colSpan={9}><TableState title="Memuat bonus" description="Mengambil bonus shift mingguan." icon={BadgeDollarSign} /></td></tr>}
+            {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={9}><TableState title="Gagal memuat" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
+            {!loading && !errorMessage && rows.map((row, index) => {
+              const blockReason = getWeeklyBonusPaymentBlockReason(row)
+
+              return (
+                <tr key={row.id}>
+                  <td><TableNumberCell value={(page - 1) * pageSize + index + 1} /></td>
+                  <td><EmployeeIdentityCell fullName={row.employeeName} code={`${row.employeeCode} / ${row.divisionName}`} /></td>
+                  <td><TableText primary={formatPayrollPaymentPeriod(row)} secondary={formatUserDateTime(row.calculatedAt, "Belum dihitung")} /></td>
+                  <td><TableText primary={formatEmployeeDate(row.paymentDueDate)} secondary="Mingguan / custom" /></td>
+                  <td><TableText primary={row.policyName || row.policyCode || "Bonus shift"} secondary={row.policyCode || "Policy aktif"} /></td>
+                  <td><TableText primary={`${row.eligibleDays}/${row.targetDays} hari`} secondary={row.eligibleDays >= row.targetDays ? "Target penuh" : "Prorata otomatis"} /></td>
+                  <td><TableText primary={formatCurrency(row.bonusAmount)} secondary={`Full ${formatCurrency(row.fullAmount)}`} /></td>
+                  <td><WeeklyShiftBonusStatusBadge status={row.status} /></td>
+                  <td className="tableActionCell">
+                    <RowActionMenu label={`Aksi bonus ${row.employeeName}`}>
+                      <RowActionMenuItem disabled={Boolean(blockReason)} onClick={() => onPayWeeklyBonus(row)}>
+                        <CreditCard size={15} />
+                        Bayar Bonus
+                      </RowActionMenuItem>
+                    </RowActionMenu>
+                  </td>
+                </tr>
+              )
+            })}
+            {!loading && !errorMessage && totalRows === 0 && <tr><td className="tableStateCell" colSpan={9}><TableState title="Tidak ada bonus belum dibayar" description="Bonus shift mingguan yang siap dibayar akan muncul di sini." icon={BadgeDollarSign} /></td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <DataTablePagination
+        page={page}
+        pageSize={pageSize}
+        totalRows={totalRows}
+        pageSizeOptions={[10, 25, 50, 100]}
+        onPageChange={onPageChange}
+        onPageSizeChange={onPageSizeChange}
+      />
+    </>
+  )
+}
+
 function PayrollUnifiedPaymentHistoryTable({
   rows,
   loading,
@@ -20720,6 +22102,7 @@ function PayrollUnifiedPaymentHistoryTable({
   totalRows,
   scrollProps,
   onVoidOvertimePayment,
+  onVoidWeeklyBonusPayment,
   onPageChange,
   onPageSizeChange,
 }: {
@@ -20731,6 +22114,7 @@ function PayrollUnifiedPaymentHistoryTable({
   totalRows: number
   scrollProps: ReturnType<typeof useHorizontalDragScroll<HTMLDivElement>>
   onVoidOvertimePayment: (row: OvertimePaymentRow) => void
+  onVoidWeeklyBonusPayment: (row: WeeklyBonusPaymentRow) => void
   onPageChange: (page: number) => void
   onPageSizeChange: (pageSize: number) => void
 }) {
@@ -20772,7 +22156,7 @@ function PayrollUnifiedPaymentHistoryTable({
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td className="tableStateCell" colSpan={11}><TableState title="Memuat riwayat bayar" description="Mengambil transaksi gaji dan lembur." icon={CreditCard} /></td></tr>}
+            {loading && <tr><td className="tableStateCell" colSpan={11}><TableState title="Memuat riwayat bayar" description="Mengambil transaksi gaji, lembur, dan bonus." icon={CreditCard} /></td></tr>}
             {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={11}><TableState title="Gagal memuat" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
             {!loading && !errorMessage && rows.map((row, index) => (
               <tr key={row.id || row.paymentNo}>
@@ -20782,13 +22166,18 @@ function PayrollUnifiedPaymentHistoryTable({
                     {getPayrollPaymentSourceLabel(row.source)}
                   </span>
                 </td>
-                <td><TableText primary={row.paymentNo || "-"} secondary={row.source === "salary" ? `Cycle ${row.cycleNumber || "-"}` : `${formatNumber(row.requestCount)} request`} /></td>
+                <td>
+                  <TableText
+                    primary={row.paymentNo || "-"}
+                    secondary={row.source === "salary" ? `Cycle ${row.cycleNumber || "-"}` : row.source === "bonus" ? `${row.eligibleDays}/${row.targetDays} hari` : `${formatNumber(row.requestCount)} request`}
+                  />
+                </td>
                 <td><TableText primary={row.employeeName} secondary={row.employeeCode || "-"} /></td>
                 <td><TableText primary={formatPayrollPaymentPeriod(row)} secondary={row.notes || ""} /></td>
                 <td>
                   <TableText
-                    primary={row.source === "salary" ? `Gaji ${formatCurrency(row.grossAmount)}` : `${formatMinutesDuration(row.overtimeMinutes)} lembur`}
-                    secondary={row.source === "salary" ? `Lembur ikut gaji ${formatCurrency(row.overtimeAmount)}` : `Nominal lembur ${formatCurrency(row.overtimeAmount)}`}
+                    primary={row.source === "salary" ? `Gaji ${formatCurrency(row.grossAmount)}` : row.source === "bonus" ? `Bonus ${formatCurrency(row.bonusAmount)}` : `${formatMinutesDuration(row.overtimeMinutes)} lembur`}
+                    secondary={row.source === "salary" ? `Lembur ikut gaji ${formatCurrency(row.overtimeAmount)}` : row.source === "bonus" ? `${row.eligibleDays}/${row.targetDays} hari bonus` : `Nominal lembur ${formatCurrency(row.overtimeAmount)}`}
                   />
                 </td>
                 <td><TableText primary={formatCurrency(row.paidAmount)} secondary={row.paidByName || "Finance"} /></td>
@@ -20805,11 +22194,15 @@ function PayrollUnifiedPaymentHistoryTable({
                       <RotateCcw size={15} />
                       Batalkan Bayar Lembur
                     </RowActionMenuItem>
+                    <RowActionMenuItem danger disabled={row.source !== "bonus" || row.status !== "paid" || !row.weeklyBonusPayment} onClick={() => row.weeklyBonusPayment && onVoidWeeklyBonusPayment(row.weeklyBonusPayment)}>
+                      <RotateCcw size={15} />
+                      Batalkan Bayar Bonus
+                    </RowActionMenuItem>
                   </RowActionMenu>
                 </td>
               </tr>
             ))}
-            {!loading && !errorMessage && totalRows === 0 && <tr><td className="tableStateCell" colSpan={11}><TableState title="Belum ada riwayat bayar" description="Transaksi muncul setelah gaji atau lembur dicatat sebagai terbayar." icon={CreditCard} /></td></tr>}
+            {!loading && !errorMessage && totalRows === 0 && <tr><td className="tableStateCell" colSpan={11}><TableState title="Belum ada riwayat bayar" description="Transaksi muncul setelah gaji, lembur, atau bonus dicatat sebagai terbayar." icon={CreditCard} /></td></tr>}
           </tbody>
         </table>
       </div>
@@ -20910,6 +22303,22 @@ function getOvertimeStatusLabel(status: OvertimeStatus) {
 
 function isOvertimePayrollFinal(row: Pick<OvertimeReviewRow, "payrollStatus">) {
   return row.payrollStatus === "locked" || row.payrollStatus === "paid"
+}
+
+function chunkBatch<T>(items: T[], size: number) {
+  const chunks: T[][] = []
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size))
+  }
+  return chunks
+}
+
+function canBulkApproveOvertimeRow(row: OvertimeReviewRow) {
+  return row.status === "pending" && Boolean(row.actualCheckOutAt) && row.overtimeMinutes > 0 && !isOvertimePayrollFinal(row)
+}
+
+function canBulkRejectOvertimeRow(row: OvertimeReviewRow) {
+  return (row.status === "pending" || row.status === "draft") && !isOvertimePayrollFinal(row)
 }
 
 function getOvertimePayrollFinalLabel(row: Pick<OvertimeReviewRow, "payrollStatus">) {
@@ -21729,20 +23138,31 @@ function OvertimeReviewTable({
   loading,
   errorMessage,
   onReview,
+  onBulkReview,
 }: {
   rows: OvertimeReviewRow[]
   loading: boolean
   errorMessage: string
   onReview: (row: OvertimeReviewRow) => void
+  onBulkReview: (rows: OvertimeReviewRow[], decision: "approve" | "reject") => void
 }) {
   const [openOvertimeId, setOpenOvertimeId] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(25)
+  const selectAllRef = useRef<HTMLInputElement | null>(null)
   const overtimeTableDrag = useHorizontalDragScroll<HTMLDivElement>()
   const safePageSize = Math.min(pageSize, 100)
   const pageCount = Math.max(1, Math.ceil(rows.length / safePageSize))
   const currentPage = Math.min(page, pageCount)
   const paginatedRows = rows.slice((currentPage - 1) * safePageSize, currentPage * safePageSize)
+  const selectableRows = rows.filter(canBulkRejectOvertimeRow)
+  const selectablePageRows = paginatedRows.filter(canBulkRejectOvertimeRow)
+  const selectedRows = rows.filter((row) => selectedIds.includes(row.id))
+  const selectedApproveRows = selectedRows.filter(canBulkApproveOvertimeRow)
+  const selectedRejectRows = selectedRows.filter(canBulkRejectOvertimeRow)
+  const allPageSelected = selectablePageRows.length > 0 && selectablePageRows.every((row) => selectedIds.includes(row.id))
+  const somePageSelected = selectablePageRows.some((row) => selectedIds.includes(row.id))
 
   useEffect(() => {
     setPage(1)
@@ -21754,20 +23174,88 @@ function OvertimeReviewTable({
     }
   }, [openOvertimeId, rows])
 
+  useEffect(() => {
+    setSelectedIds((current) => current.filter((id) => rows.some((row) => row.id === id && canBulkRejectOvertimeRow(row))))
+  }, [rows])
+
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = somePageSelected && !allPageSelected
+    }
+  }, [allPageSelected, somePageSelected])
+
   const plannedRows = rows.filter((row) => row.status === "draft" && row.requestSource === "planned")
   const pendingRows = rows.filter((row) => row.status === "pending")
   const approvedRows = rows.filter((row) => row.status === "approved")
   const approvedTotal = rows.reduce((sum, row) => sum + (row.status === "approved" ? row.totalAmount : 0), 0)
+  const toggleSelected = (rowId: string) => {
+    setSelectedIds((current) => current.includes(rowId) ? current.filter((id) => id !== rowId) : [...current, rowId])
+  }
+  const togglePageSelection = () => {
+    const pageIds = selectablePageRows.map((row) => row.id)
+    setSelectedIds((current) => {
+      if (allPageSelected) return current.filter((id) => !pageIds.includes(id))
+      return Array.from(new Set([...current, ...pageIds]))
+    })
+  }
+  const selectFilteredRows = () => {
+    setSelectedIds(selectableRows.map((row) => row.id))
+  }
+  const selectPageRows = () => {
+    setSelectedIds((current) => Array.from(new Set([...current, ...selectablePageRows.map((row) => row.id)])))
+  }
+  const submitBulkReview = (decision: "approve" | "reject") => {
+    const targetRows = decision === "approve" ? selectedApproveRows : selectedRejectRows
+    if (!targetRows.length) return
+    onBulkReview(targetRows, decision)
+  }
 
   return (
     <OperationalTableCard>
       <div className="tableHeader">
         <div>
           <h2>Approval Lembur</h2>
-          <p>Request terencana dan kandidat lembur payable dari settlement absensi. Klik baris untuk membuka detail.</p>
+          <p>Request terencana dan kandidat lembur payable dari settlement absensi. Centang beberapa baris untuk proses massal.</p>
         </div>
         <InlinePageStats items={[`${plannedRows.length} terencana`, `${pendingRows.length} pending`, `${approvedRows.length} approved`, `${formatCurrency(approvedTotal)} approved`]} />
       </div>
+      {!loading && !errorMessage && selectedRows.length === 0 && selectableRows.length > 0 && (
+        <div className="overtimeBulkHint">
+          <div>
+            <span>Proses massal tersedia</span>
+            <small>Pilih kandidat lembur yang bukan lembur, lalu tolak sekaligus.</small>
+          </div>
+          <div className="overtimeBulkActions">
+            <button className="secondaryButton compactButton" type="button" onClick={selectPageRows} disabled={selectablePageRows.length === 0}>
+              Pilih halaman ini
+            </button>
+            <button className="secondaryButton compactButton" type="button" onClick={selectFilteredRows} disabled={selectableRows.length === 0}>
+              Pilih semua hasil filter
+            </button>
+          </div>
+        </div>
+      )}
+      {!loading && !errorMessage && selectedRows.length > 0 && (
+        <div className="overtimeBulkToolbar">
+          <div className="overtimeBulkCopy">
+            <span>{selectedRows.length} request dipilih</span>
+            <small>{selectedApproveRows.length} siap approve · {selectedRejectRows.length} bisa ditolak</small>
+          </div>
+          <div className="overtimeBulkActions">
+            <button className="secondaryButton compactButton" type="button" onClick={() => submitBulkReview("approve")} disabled={selectedApproveRows.length === 0}>
+              <FileCheck2 size={16} />
+              Setujui
+            </button>
+            <button className="secondaryButton dangerSoftButton compactButton" type="button" onClick={() => submitBulkReview("reject")} disabled={selectedRejectRows.length === 0}>
+              <X size={16} />
+              Tolak
+            </button>
+            <button className="secondaryButton compactButton" type="button" onClick={() => setSelectedIds([])}>
+              Bersihkan
+            </button>
+          </div>
+        </div>
+      )}
       <div
         className={clsx("tableScroller uiDataTableScroller uiDataTableHasColumns overtimeReviewTableScroller", overtimeTableDrag.dragging && "dragging")}
         ref={overtimeTableDrag.ref}
@@ -21775,6 +23263,7 @@ function OvertimeReviewTable({
       >
         <table>
           <colgroup>
+            <col className="tableSelectColumn" />
             <col className="tableNumberColumn" />
             <col style={{ width: "270px" }} />
             <col style={{ width: "160px" }} />
@@ -21787,6 +23276,19 @@ function OvertimeReviewTable({
           </colgroup>
           <thead>
             <tr>
+              <th className="tableSelectHeader">
+                <label className="tableCheckControl" aria-label="Pilih semua lembur di halaman ini">
+                  <input
+                    ref={selectAllRef}
+                    type="checkbox"
+                    checked={allPageSelected}
+                    disabled={selectablePageRows.length === 0}
+                    onChange={togglePageSelection}
+                    onClick={(event) => event.stopPropagation()}
+                  />
+                  <span />
+                </label>
+              </th>
               <th className="tableNumberHeader">No</th>
               <th>Karyawan</th>
               <th>Tanggal</th>
@@ -21799,8 +23301,8 @@ function OvertimeReviewTable({
             </tr>
           </thead>
           <tbody>
-            {loading && <FoundationTableSkeletonRows colSpan={9} columns={9} />}
-            {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={9}><TableState title="Gagal memuat lembur" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
+            {loading && <FoundationTableSkeletonRows colSpan={10} columns={10} />}
+            {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={10}><TableState title="Gagal memuat lembur" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
             {!loading && !errorMessage && paginatedRows.map((row, index) => {
               const hasRealization = Boolean(row.actualCheckOutAt)
               const displayMinutes = row.overtimeMinutes || row.plannedMinutes
@@ -21809,6 +23311,8 @@ function OvertimeReviewTable({
               const canApproveOvertime = row.status === "pending" && hasRealization && row.overtimeMinutes > 0 && !payrollFinal
               const isFinal = row.status === "approved" || row.status === "rejected"
               const isOpen = openOvertimeId === row.id
+              const canSelectRow = canBulkRejectOvertimeRow(row)
+              const isSelected = selectedIds.includes(row.id)
               const actionLabel = payrollFinal || row.status === "approved" || row.status === "rejected"
                 ? "Lihat Detail"
                 : canApproveOvertime
@@ -21818,7 +23322,7 @@ function OvertimeReviewTable({
               return (
                 <Fragment key={row.id}>
                   <tr
-                    className={clsx("clickableTableRow overtimeReviewRow", isOpen && "active")}
+                    className={clsx("clickableTableRow overtimeReviewRow", isOpen && "active", isSelected && "selected")}
                     tabIndex={0}
                     onClick={() => setOpenOvertimeId(isOpen ? null : row.id)}
                     onKeyDown={(event) => {
@@ -21828,6 +23332,17 @@ function OvertimeReviewTable({
                       }
                     }}
                   >
+                    <td className="tableSelectCell" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+                      <label className="tableCheckControl" aria-label={`Pilih lembur ${row.fullName}`}>
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          disabled={!canSelectRow}
+                          onChange={() => toggleSelected(row.id)}
+                        />
+                        <span />
+                      </label>
+                    </td>
                     <td className="tableNumberCell"><TableNumberCell value={(currentPage - 1) * safePageSize + index + 1} /></td>
                     <td>
                       <EmployeeIdentityCell fullName={row.fullName} code={row.employeeCode} photoUrl={row.employeePhotoUrl} secondary={`${row.employeeCode} / ${row.divisionName}`} />
@@ -21864,7 +23379,7 @@ function OvertimeReviewTable({
                   </tr>
                   {isOpen && (
                     <tr className="overtimeReviewExpandRow">
-                      <td colSpan={9}>
+                      <td colSpan={10}>
                         <OvertimeReviewExpandPanel row={row} onReview={onReview} />
                       </td>
                     </tr>
@@ -21872,7 +23387,7 @@ function OvertimeReviewTable({
                 </Fragment>
               )
             })}
-            {!loading && !errorMessage && rows.length === 0 && <tr><td className="tableStateCell" colSpan={9}><TableState title="Belum ada lembur" description="Kandidat lembur muncul otomatis saat jam kerja aktual melebihi kewajiban shift." icon={Search} /></td></tr>}
+            {!loading && !errorMessage && rows.length === 0 && <tr><td className="tableStateCell" colSpan={10}><TableState title="Belum ada lembur" description="Kandidat lembur muncul otomatis saat jam kerja aktual melebihi kewajiban shift." icon={Search} /></td></tr>}
           </tbody>
         </table>
       </div>

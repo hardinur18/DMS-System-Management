@@ -1,12 +1,24 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0"
 
-type PayrollProcessAction = "lock" | "mark_paid" | "unlock" | "void" | "restore" | "mark_overtime_paid" | "void_overtime_payment"
+type PayrollProcessAction = "lock" | "mark_paid" | "unlock" | "void" | "restore" | "mark_overtime_paid" | "void_overtime_payment" | "save_weekly_bonus_policy" | "mark_weekly_bonus_paid" | "void_weekly_bonus_payment"
 type PayrollPaymentMethod = "cash" | "bank_transfer" | "ewallet" | "other"
 
 interface PayrollProcessPayload {
   cycleId?: string
   overtimeRequestIds?: string[]
   overtimePaymentId?: string
+  weeklyBonusCycleIds?: string[]
+  weeklyBonusPaymentId?: string
+  weeklyBonusPolicyId?: string
+  weeklyBonusPolicyCode?: string
+  weeklyBonusPolicyName?: string
+  weeklyBonusPolicyDescription?: string
+  weeklyBonusTargetDays?: number | string
+  weeklyBonusFullAmount?: number | string
+  weeklyBonusWeekStartDow?: number | string
+  weeklyBonusPaymentDayDow?: number | string
+  weeklyBonusIsActive?: boolean
+  weeklyBonusShiftIds?: string[]
   notes?: string
   paymentMethod?: PayrollPaymentMethod
   paymentReference?: string
@@ -59,13 +71,25 @@ function normalizePaidAmount(value: unknown, fallback: number) {
   return amount
 }
 
+function normalizeInteger(value: unknown, message: string, min: number, max: number) {
+  const parsed = Number(value)
+  assertPayload(Number.isInteger(parsed) && parsed >= min && parsed <= max, message)
+  return parsed
+}
+
+function normalizeBonusAmount(value: unknown) {
+  const amount = Number(value)
+  assertPayload(Number.isFinite(amount) && amount >= 0, "Nominal bonus wajib angka dan minimal 0.")
+  return amount
+}
+
 function isMissingLedgerError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error || "")
-  return /payroll_payments|payroll_cycle_items|overtime_payments|overtime_payment_items|overtime_payment_status|overtime_payment_policy|target_payment_policy|set_overtime_payment_policy|mark_payroll_cycle_paid|mark_overtime_requests_paid|void_overtime_payment|rebuild_payroll_cycle_items|schema cache|PGRST202/i.test(message)
+  return /payroll_payments|payroll_cycle_items|overtime_payments|overtime_payment_items|overtime_payment_status|overtime_payment_policy|weekly_bonus_policies|weekly_bonus_policy_shifts|weekly_shift_bonus_cycles|weekly_shift_bonus_payments|weekly_shift_bonus_payment_items|target_payment_policy|set_overtime_payment_policy|mark_payroll_cycle_paid|mark_overtime_requests_paid|void_overtime_payment|refresh_weekly_shift_bonus_cycles|mark_weekly_shift_bonus_paid|void_weekly_bonus_payment|rebuild_payroll_cycle_items|schema cache|PGRST202/i.test(message)
 }
 
 function ledgerMigrationMessage() {
-  return "Migration payment ledger belum diterapkan. Jalankan migration payroll/overtime ledger terbaru lalu deploy ulang edge function."
+  return "Migration payment ledger belum diterapkan. Jalankan migration payroll/lembur/bonus terbaru lalu deploy ulang edge function."
 }
 
 async function assertNoOpenPayrollDependencies(adminClient: any, cycle: Record<string, unknown>) {
@@ -147,7 +171,10 @@ Deno.serve(async (request) => {
       || action === "void"
       || action === "restore"
       || action === "mark_overtime_paid"
-      || action === "void_overtime_payment",
+      || action === "void_overtime_payment"
+      || action === "save_weekly_bonus_policy"
+      || action === "mark_weekly_bonus_paid"
+      || action === "void_weekly_bonus_payment",
       "Aksi gaji tidak valid.",
     )
 
@@ -176,6 +203,105 @@ Deno.serve(async (request) => {
     if (!permission) return jsonResponse({ error: "Role tidak punya permission Proses Payroll." }, 403)
 
     const notes = payload.notes?.trim()
+
+    if (action === "save_weekly_bonus_policy") {
+      const code = String(payload.weeklyBonusPolicyCode || "").trim().toUpperCase()
+      const name = String(payload.weeklyBonusPolicyName || "").trim()
+      const description = String(payload.weeklyBonusPolicyDescription || "").trim()
+      const targetDays = normalizeInteger(payload.weeklyBonusTargetDays, "Target hari bonus wajib 1 sampai 31.", 1, 31)
+      const fullAmount = normalizeBonusAmount(payload.weeklyBonusFullAmount)
+      const weekStartDow = normalizeInteger(payload.weeklyBonusWeekStartDow ?? 1, "Hari mulai periode wajib Minggu sampai Sabtu.", 0, 6)
+      const paymentDayDow = normalizeInteger(payload.weeklyBonusPaymentDayDow ?? 6, "Hari bayar wajib Minggu sampai Sabtu.", 0, 6)
+      const shiftIds = Array.from(new Set(
+        Array.isArray(payload.weeklyBonusShiftIds)
+          ? payload.weeklyBonusShiftIds.map((id) => String(id || "").trim()).filter(Boolean)
+          : [],
+      ))
+
+      assertPayload(code, "Kode policy bonus wajib diisi.")
+      assertPayload(name, "Nama policy bonus wajib diisi.")
+      assertPayload(shiftIds.length > 0, "Minimal satu shift bonus wajib dipilih.")
+
+      const policyPayload = {
+        code,
+        name,
+        description,
+        target_days: targetDays,
+        full_amount: fullAmount,
+        week_start_dow: weekStartDow,
+        payment_day_dow: paymentDayDow,
+        status: payload.weeklyBonusIsActive === false ? "inactive" : "active",
+        is_active: payload.weeklyBonusIsActive !== false,
+      }
+
+      const policyQuery = payload.weeklyBonusPolicyId
+        ? adminClient
+          .from("weekly_bonus_policies")
+          .update({ ...policyPayload, updated_at: new Date().toISOString() })
+          .eq("id", payload.weeklyBonusPolicyId)
+          .select("id, code, name, target_days, full_amount")
+          .single()
+        : adminClient
+          .from("weekly_bonus_policies")
+          .upsert(policyPayload, { onConflict: "code" })
+          .select("id, code, name, target_days, full_amount")
+          .single()
+
+      const { data: policy, error: policyError } = await policyQuery
+
+      if (policyError) {
+        if (isMissingLedgerError(policyError)) throw new Error(ledgerMigrationMessage())
+        throw policyError
+      }
+
+      const { error: resetShiftError } = await adminClient
+        .from("weekly_bonus_policy_shifts")
+        .update({ is_active: false, updated_at: new Date().toISOString() })
+        .eq("policy_id", policy.id)
+
+      if (resetShiftError) {
+        if (isMissingLedgerError(resetShiftError)) throw new Error(ledgerMigrationMessage())
+        throw resetShiftError
+      }
+
+      const { error: shiftError } = await adminClient
+        .from("weekly_bonus_policy_shifts")
+        .upsert(
+          shiftIds.map((shiftId) => ({
+            policy_id: policy.id,
+            shift_id: shiftId,
+            is_active: true,
+          })),
+          { onConflict: "policy_id,shift_id" },
+        )
+
+      if (shiftError) {
+        if (isMissingLedgerError(shiftError)) throw new Error(ledgerMigrationMessage())
+        throw shiftError
+      }
+
+      const { error: refreshError } = await adminClient.rpc("refresh_weekly_shift_bonus_cycles")
+      if (refreshError && !isMissingLedgerError(refreshError)) throw refreshError
+
+      await adminClient.from("audit_logs").insert({
+        actor_user_id: actor.id,
+        actor_name: actor.full_name,
+        action: payload.weeklyBonusPolicyId ? "Update pengaturan bonus shift" : "Tambah pengaturan bonus shift",
+        target_table: "weekly_bonus_policies",
+        target_id: policy.id,
+        status: "success",
+        metadata: {
+          policy_code: policy.code,
+          policy_name: policy.name,
+          target_days: targetDays,
+          full_amount: fullAmount,
+          shift_ids: shiftIds,
+          source: "edge-function",
+        },
+      })
+
+      return jsonResponse({ ok: true, policy })
+    }
 
     if (action === "mark_overtime_paid") {
       const requestIds = Array.isArray(payload.overtimeRequestIds)
@@ -211,6 +337,53 @@ Deno.serve(async (request) => {
 
       const { data: paymentResult, error: paymentError } = await adminClient.rpc("void_overtime_payment", {
         target_payment_id: payload.overtimePaymentId,
+        actor_user_id: actor.id,
+        actor_name: String(actor.full_name || actor.email || "Finance"),
+        note_text: notes || "",
+      })
+
+      if (paymentError) {
+        if (isMissingLedgerError(paymentError)) throw new Error(ledgerMigrationMessage())
+        throw paymentError
+      }
+
+      return jsonResponse({ ok: true, ...paymentResult })
+    }
+
+    if (action === "mark_weekly_bonus_paid") {
+      const cycleIds = Array.isArray(payload.weeklyBonusCycleIds)
+        ? payload.weeklyBonusCycleIds.map((id) => String(id || "").trim()).filter(Boolean)
+        : []
+      const paidAmount = payload.paidAmount === undefined || payload.paidAmount === null || payload.paidAmount === ""
+        ? null
+        : normalizePaidAmount(payload.paidAmount, 1)
+
+      assertPayload(cycleIds.length > 0, "Minimal satu bonus shift wajib dipilih.")
+
+      const { data: paymentResult, error: paymentError } = await adminClient.rpc("mark_weekly_shift_bonus_paid", {
+        target_bonus_cycle_ids: cycleIds,
+        actor_user_id: actor.id,
+        actor_name: String(actor.full_name || actor.email || "Finance"),
+        target_payment_method: normalizePaymentMethod(payload.paymentMethod),
+        target_payment_reference: payload.paymentReference?.trim() || null,
+        target_paid_at: normalizePaidAt(payload.paidAt),
+        target_paid_amount: paidAmount,
+        note_text: notes || "",
+      })
+
+      if (paymentError) {
+        if (isMissingLedgerError(paymentError)) throw new Error(ledgerMigrationMessage())
+        throw paymentError
+      }
+
+      return jsonResponse({ ok: true, ...paymentResult })
+    }
+
+    if (action === "void_weekly_bonus_payment") {
+      assertPayload(payload.weeklyBonusPaymentId, "ID pembayaran bonus wajib ada.")
+
+      const { data: paymentResult, error: paymentError } = await adminClient.rpc("void_weekly_bonus_payment", {
+        target_payment_id: payload.weeklyBonusPaymentId,
         actor_user_id: actor.id,
         actor_name: String(actor.full_name || actor.email || "Finance"),
         note_text: notes || "",
