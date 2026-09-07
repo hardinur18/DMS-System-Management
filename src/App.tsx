@@ -17578,7 +17578,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
 
       setBulkOvertimeRows([])
       showToast({
-        tone: failedCount > 0 ? "warning" : "success",
+        tone: failedCount > 0 ? "error" : "success",
         title: decision === "approve" ? "Lembur massal disetujui" : "Lembur massal ditolak",
         description: `${successCount} request berhasil diproses${failedCount > 0 ? `, ${failedCount} gagal` : ""}.`,
       })
@@ -21068,29 +21068,6 @@ function WeeklyBonusPolicyDialog({
         </div>
 
         <div className="payrollProcessBody weeklyBonusPolicyBody">
-          <section className="weeklyBonusPolicySummary">
-            <div>
-              <small>Policy aktif</small>
-              <strong>{name || "Bonus Shift Mingguan"}</strong>
-              <span>{isActive ? "Aktif dipakai payroll" : "Nonaktif sementara"}</span>
-            </div>
-            <div>
-              <small>Nominal</small>
-              <strong>{formatCurrency(Number.isFinite(amount) ? amount : 0)}</strong>
-              <span>{`${formatCurrency(dailyAmount)} per hari bonus`}</span>
-            </div>
-            <div>
-              <small>Target</small>
-              <strong>{`${Number.isFinite(days) ? days : 0} hari`}</strong>
-              <span>{`Dibayar tiap ${getWeeklyBonusWeekdayLabel(Number(paymentDayDow))}`}</span>
-            </div>
-            <div>
-              <small>Shift terpilih</small>
-              <strong>{selectedShiftIds.length}</strong>
-              <span>{`Periode mulai ${getWeeklyBonusWeekdayLabel(Number(weekStartDow))}`}</span>
-            </div>
-          </section>
-
           <div className="weeklyBonusPolicyLayout">
             <section className="weeklyBonusPolicyForm">
               {policyOptions.length > 1 && (
