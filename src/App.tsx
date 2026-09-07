@@ -113,6 +113,7 @@ type PayrollWorkspaceTab = "cycle" | "overtime" | "bonus" | "history"
 type PayrollPaymentSource = "salary" | "overtime" | "bonus"
 type OvertimePaymentStatus = "unpaid" | "paid" | "void"
 type OvertimePaymentPolicy = "separate" | "salary_cycle"
+type BulkOvertimePaymentPolicyMode = "keep" | OvertimePaymentPolicy
 type WeeklyBonusPolicyStatus = "active" | "inactive"
 type WeeklyShiftBonusStatus = "draft" | "ready" | "paid" | "void"
 type AttendanceLogStatus = "valid" | "review" | "rejected"
@@ -17534,9 +17535,16 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
     }
   }
 
-  const handleBulkOvertimeReviewSubmit = async () => {
+  const handleBulkOvertimeReviewSubmit = async ({
+    paymentPolicyMode = "keep",
+    notes = "",
+  }: {
+    paymentPolicyMode?: BulkOvertimePaymentPolicyMode
+    notes?: string
+  } = {}) => {
     const decision = bulkOvertimeDecision
     const targetRows = bulkOvertimeRows.filter((row) => decision === "approve" ? canBulkApproveOvertimeRow(row) : canBulkRejectOvertimeRow(row))
+    const trimmedNotes = notes.trim()
 
     if (!targetRows.length) {
       showToast({
@@ -17558,10 +17566,10 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
           row.id,
           decision,
           decision === "approve" ? row.overtimeMinutes : 0,
-          row.overtimePaymentPolicy || "separate",
-          decision === "approve"
+          decision === "approve" && paymentPolicyMode !== "keep" ? paymentPolicyMode : row.overtimePaymentPolicy || "separate",
+          trimmedNotes || (decision === "approve"
             ? "Disetujui massal dari Approval Lembur."
-            : "Ditolak massal dari Approval Lembur karena bukan lembur.",
+            : "Ditolak massal dari Approval Lembur karena bukan lembur."),
         )))
 
         successCount += results.filter((result) => result.status === "fulfilled").length
@@ -18665,28 +18673,15 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
         onClose={() => setOvertimeTarget(null)}
         onSubmit={handleOvertimeReviewSubmit}
       />
-      <ConfirmDialog
-        open={bulkOvertimeRows.length > 0}
-        tone={bulkOvertimeDecision === "reject" ? "danger" : "warning"}
-        icon={bulkOvertimeDecision === "reject" ? X : FileCheck2}
-        eyebrow="Review Lembur Massal"
-        title={bulkOvertimeDecision === "reject" ? `Tolak ${bulkOvertimeRows.length} lembur terpilih?` : `Setujui ${bulkOvertimeRows.length} lembur terpilih?`}
-        description={bulkOvertimeDecision === "reject"
-          ? "Semua request terpilih akan ditandai ditolak dan tidak masuk pembayaran lembur."
-          : "Semua request terpilih yang sudah punya checkout dan durasi payable akan disetujui memakai durasi real serta jadwal bayar masing-masing."}
-        confirmLabel={bulkOvertimeDecision === "reject" ? "Tolak Pilihan" : "Setujui Pilihan"}
-        loading={overtimeSubmitting}
+      <BulkOvertimeReviewDialog
+        rows={bulkOvertimeRows}
+        decision={bulkOvertimeDecision}
+        saving={overtimeSubmitting}
         onClose={() => {
           if (!overtimeSubmitting) setBulkOvertimeRows([])
         }}
-        onConfirm={() => void handleBulkOvertimeReviewSubmit()}
-      >
-        <div className="confirmDialogPreview">
-          <span>Total pilihan</span>
-          <strong>{bulkOvertimeRows.length} request lembur</strong>
-          <small>{bulkOvertimeDecision === "reject" ? "Cocok untuk kandidat lembur yang sebenarnya bukan lembur." : "Durasi approved mengikuti durasi real dari settlement absensi."}</small>
-        </div>
-      </ConfirmDialog>
+        onSubmit={(options) => void handleBulkOvertimeReviewSubmit(options)}
+      />
       <LeaveReviewDialog
         row={leaveTarget}
         saving={leaveSubmitting}
@@ -22321,6 +22316,159 @@ function canBulkRejectOvertimeRow(row: OvertimeReviewRow) {
   return (row.status === "pending" || row.status === "draft") && !isOvertimePayrollFinal(row)
 }
 
+function BulkOvertimeReviewDialog({
+  rows,
+  decision,
+  saving,
+  onClose,
+  onSubmit,
+}: {
+  rows: OvertimeReviewRow[]
+  decision: "approve" | "reject"
+  saving: boolean
+  onClose: () => void
+  onSubmit: (options: { paymentPolicyMode: BulkOvertimePaymentPolicyMode; notes: string }) => void
+}) {
+  const [paymentPolicyMode, setPaymentPolicyMode] = useState<BulkOvertimePaymentPolicyMode>("keep")
+  const [notes, setNotes] = useState("")
+  const [noteError, setNoteError] = useState("")
+
+  useEffect(() => {
+    setPaymentPolicyMode("keep")
+    setNotes("")
+    setNoteError("")
+  }, [decision, rows.length])
+
+  if (rows.length === 0) return null
+
+  const approveRows = rows.filter(canBulkApproveOvertimeRow)
+  const rejectRows = rows.filter(canBulkRejectOvertimeRow)
+  const targetRows = decision === "approve" ? approveRows : rejectRows
+  const skippedCount = rows.length - targetRows.length
+  const totalMinutes = targetRows.reduce((sum, row) => sum + (decision === "approve" ? row.overtimeMinutes : row.overtimeMinutes || row.plannedMinutes), 0)
+  const totalAmount = decision === "approve"
+    ? targetRows.reduce((sum, row) => sum + Math.round((row.overtimeMinutes / 60) * row.rateAmount), 0)
+    : 0
+  const isApprove = decision === "approve"
+  const title = isApprove ? `Setujui ${targetRows.length} lembur?` : `Tolak ${targetRows.length} request lembur?`
+  const description = isApprove
+    ? "Durasi approved memakai realisasi masing-masing karyawan. Jadwal bayar bisa dibiarkan mengikuti data row atau disamakan massal."
+    : "Request terpilih akan ditolak atau dibatalkan dari antrian lembur. Catatan wajib diisi agar audit jelas."
+
+  const submit = () => {
+    const trimmedNotes = notes.trim()
+    if (targetRows.length === 0) {
+      setNoteError("Tidak ada request yang memenuhi syarat untuk proses massal.")
+      return
+    }
+    if (!isApprove && trimmedNotes.length < 5) {
+      setNoteError("Catatan wajib diisi minimal 5 karakter untuk tolak massal.")
+      return
+    }
+
+    setNoteError("")
+    onSubmit({ paymentPolicyMode, notes: trimmedNotes })
+  }
+
+  return (
+    <FoundationDialog
+      open={rows.length > 0}
+      labelledBy="bulk-overtime-review-title"
+      describedBy="bulk-overtime-review-description"
+      className="bulkOvertimeReviewDialog"
+      closeOnBackdrop={!saving}
+      onClose={onClose}
+    >
+      <div className="attendanceReviewHeader bulkOvertimeReviewHeader">
+        <span className={clsx("attendanceReviewHeaderAvatar", isApprove ? "valid" : "danger")}>
+          {isApprove ? <FileCheck2 size={25} /> : <X size={25} />}
+        </span>
+        <div>
+          <span>Approval Massal</span>
+          <h2 id="bulk-overtime-review-title">{title}</h2>
+          <p id="bulk-overtime-review-description">{description}</p>
+        </div>
+        <FoundationDialogCloseButton label="Tutup approval massal" onClose={onClose} disabled={saving} />
+      </div>
+
+      <div className="bulkOvertimeReviewBody">
+        <div className="bulkOvertimeReviewStats" aria-label="Ringkasan pilihan lembur">
+          <div>
+            <span>Diproses</span>
+            <strong>{targetRows.length}</strong>
+            <small>dari {rows.length} pilihan</small>
+          </div>
+          <div>
+            <span>Durasi</span>
+            <strong>{totalMinutes ? formatMinutesDuration(totalMinutes) : "-"}</strong>
+            <small>{isApprove ? "total approved" : "total kandidat"}</small>
+          </div>
+          <div>
+            <span>Estimasi</span>
+            <strong>{isApprove ? formatCurrency(totalAmount) : "-"}</strong>
+            <small>{isApprove ? "berdasarkan rate row" : "tidak dibayar"}</small>
+          </div>
+          <div>
+            <span>Dilewati</span>
+            <strong>{skippedCount}</strong>
+            <small>final atau belum valid</small>
+          </div>
+        </div>
+
+        {isApprove && (
+          <div className="bulkOvertimePolicyBlock">
+            <div>
+              <span>Jadwal bayar</span>
+              <small>Pilih "ikuti data row" kalau tiap request sudah punya jadwal bayar masing-masing.</small>
+            </div>
+            <div className="bulkOvertimePolicyGrid" role="radiogroup" aria-label="Jadwal bayar lembur massal">
+              {([
+                ["keep", "Ikuti data row", "Tidak mengubah jadwal bayar per request."],
+                ["separate", overtimePaymentPolicyLabel.separate, overtimePaymentPolicyDescription.separate],
+                ["salary_cycle", overtimePaymentPolicyLabel.salary_cycle, overtimePaymentPolicyDescription.salary_cycle],
+              ] as Array<[BulkOvertimePaymentPolicyMode, string, string]>).map(([value, label, helper]) => (
+                <button
+                  key={value}
+                  className={clsx("bulkOvertimePolicyOption", paymentPolicyMode === value && "active")}
+                  type="button"
+                  role="radio"
+                  aria-checked={paymentPolicyMode === value}
+                  disabled={saving}
+                  onClick={() => setPaymentPolicyMode(value)}
+                >
+                  <strong>{label}</strong>
+                  <small>{helper}</small>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <FormField label={isApprove ? "Catatan Approval" : "Catatan Penolakan"} required={!isApprove} helperText={isApprove ? "Opsional. Kosongkan untuk memakai catatan otomatis." : "Wajib agar alasan tolak massal terekam."}>
+          <textarea
+            value={notes}
+            onChange={(event) => setNotes(event.target.value)}
+            placeholder={isApprove ? "Contoh: lembur produksi disetujui massal sesuai laporan supervisor." : "Contoh: mayoritas bukan lembur, hanya scan pulang terlambat."}
+            disabled={saving}
+          />
+        </FormField>
+
+        {noteError && <p className="foundationFieldError">{noteError}</p>}
+      </div>
+
+      <div className="attendanceReviewActions bulkOvertimeReviewActions">
+        <button className="secondaryButton" type="button" onClick={onClose} disabled={saving}>
+          Batal
+        </button>
+        <button className={clsx("primaryButton", !isApprove && "dangerButton")} type="button" onClick={submit} disabled={saving || targetRows.length === 0}>
+          {isApprove ? <FileCheck2 size={16} /> : <X size={16} />}
+          {saving ? "Memproses..." : isApprove ? "Setujui Pilihan" : "Tolak Pilihan"}
+        </button>
+      </div>
+    </FoundationDialog>
+  )
+}
+
 function getOvertimePayrollFinalLabel(row: Pick<OvertimeReviewRow, "payrollStatus">) {
   if (row.payrollStatus === "paid") return "Gaji sudah terbayar"
   if (row.payrollStatus === "locked") return "Gaji sedang menunggu bayar"
@@ -23147,6 +23295,7 @@ function OvertimeReviewTable({
   onBulkReview: (rows: OvertimeReviewRow[], decision: "approve" | "reject") => void
 }) {
   const [openOvertimeId, setOpenOvertimeId] = useState<string | null>(null)
+  const [bulkModeEnabled, setBulkModeEnabled] = useState(false)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(25)
@@ -23163,6 +23312,7 @@ function OvertimeReviewTable({
   const selectedRejectRows = selectedRows.filter(canBulkRejectOvertimeRow)
   const allPageSelected = selectablePageRows.length > 0 && selectablePageRows.every((row) => selectedIds.includes(row.id))
   const somePageSelected = selectablePageRows.some((row) => selectedIds.includes(row.id))
+  const tableColumnCount = bulkModeEnabled ? 10 : 9
 
   useEffect(() => {
     setPage(1)
@@ -23177,6 +23327,12 @@ function OvertimeReviewTable({
   useEffect(() => {
     setSelectedIds((current) => current.filter((id) => rows.some((row) => row.id === id && canBulkRejectOvertimeRow(row))))
   }, [rows])
+
+  useEffect(() => {
+    if (!bulkModeEnabled && selectedIds.length > 0) {
+      setSelectedIds([])
+    }
+  }, [bulkModeEnabled, selectedIds.length])
 
   useEffect(() => {
     if (selectAllRef.current) {
@@ -23215,11 +23371,27 @@ function OvertimeReviewTable({
       <div className="tableHeader">
         <div>
           <h2>Approval Lembur</h2>
-          <p>Request terencana dan kandidat lembur payable dari settlement absensi. Centang beberapa baris untuk proses massal.</p>
+          <p>Request terencana dan kandidat lembur payable dari settlement absensi. Aktifkan mode massal hanya saat perlu proses banyak data.</p>
         </div>
-        <InlinePageStats items={[`${plannedRows.length} terencana`, `${pendingRows.length} pending`, `${approvedRows.length} approved`, `${formatCurrency(approvedTotal)} approved`]} />
+        <div className="overtimeHeaderActions">
+          <InlinePageStats items={[`${plannedRows.length} terencana`, `${pendingRows.length} pending`, `${approvedRows.length} approved`, `${formatCurrency(approvedTotal)} approved`]} />
+          {!loading && !errorMessage && selectableRows.length > 0 && (
+            <button
+              className={clsx("bulkModeSwitchButton", bulkModeEnabled && "active")}
+              type="button"
+              role="switch"
+              aria-checked={bulkModeEnabled}
+              onClick={() => setBulkModeEnabled((value) => !value)}
+            >
+              <span className="bulkModeSwitchTrack" aria-hidden="true">
+                <span />
+              </span>
+              <span>{bulkModeEnabled ? "Mode massal aktif" : "Pilih massal"}</span>
+            </button>
+          )}
+        </div>
       </div>
-      {!loading && !errorMessage && selectedRows.length === 0 && selectableRows.length > 0 && (
+      {!loading && !errorMessage && bulkModeEnabled && selectedRows.length === 0 && selectableRows.length > 0 && (
         <div className="overtimeBulkHint">
           <div>
             <span>Proses massal tersedia</span>
@@ -23235,11 +23407,11 @@ function OvertimeReviewTable({
           </div>
         </div>
       )}
-      {!loading && !errorMessage && selectedRows.length > 0 && (
+      {!loading && !errorMessage && bulkModeEnabled && selectedRows.length > 0 && (
         <div className="overtimeBulkToolbar">
           <div className="overtimeBulkCopy">
             <span>{selectedRows.length} request dipilih</span>
-            <small>{selectedApproveRows.length} siap approve · {selectedRejectRows.length} bisa ditolak</small>
+            <small>{selectedApproveRows.length} siap approve / {selectedRejectRows.length} bisa ditolak</small>
           </div>
           <div className="overtimeBulkActions">
             <button className="secondaryButton compactButton" type="button" onClick={() => submitBulkReview("approve")} disabled={selectedApproveRows.length === 0}>
@@ -23263,7 +23435,7 @@ function OvertimeReviewTable({
       >
         <table>
           <colgroup>
-            <col className="tableSelectColumn" />
+            {bulkModeEnabled && <col className="tableSelectColumn" />}
             <col className="tableNumberColumn" />
             <col style={{ width: "270px" }} />
             <col style={{ width: "160px" }} />
@@ -23276,19 +23448,21 @@ function OvertimeReviewTable({
           </colgroup>
           <thead>
             <tr>
-              <th className="tableSelectHeader">
-                <label className="tableCheckControl" aria-label="Pilih semua lembur di halaman ini">
-                  <input
-                    ref={selectAllRef}
-                    type="checkbox"
-                    checked={allPageSelected}
-                    disabled={selectablePageRows.length === 0}
-                    onChange={togglePageSelection}
-                    onClick={(event) => event.stopPropagation()}
-                  />
-                  <span />
-                </label>
-              </th>
+              {bulkModeEnabled && (
+                <th className="tableSelectHeader">
+                  <label className="tableCheckControl" aria-label="Pilih semua lembur di halaman ini">
+                    <input
+                      ref={selectAllRef}
+                      type="checkbox"
+                      checked={allPageSelected}
+                      disabled={selectablePageRows.length === 0}
+                      onChange={togglePageSelection}
+                      onClick={(event) => event.stopPropagation()}
+                    />
+                    <span />
+                  </label>
+                </th>
+              )}
               <th className="tableNumberHeader">No</th>
               <th>Karyawan</th>
               <th>Tanggal</th>
@@ -23301,8 +23475,8 @@ function OvertimeReviewTable({
             </tr>
           </thead>
           <tbody>
-            {loading && <FoundationTableSkeletonRows colSpan={10} columns={10} />}
-            {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={10}><TableState title="Gagal memuat lembur" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
+            {loading && <FoundationTableSkeletonRows colSpan={tableColumnCount} columns={tableColumnCount} />}
+            {!loading && errorMessage && <tr><td className="tableStateCell" colSpan={tableColumnCount}><TableState title="Gagal memuat lembur" description={errorMessage} icon={AlertTriangle} tone="danger" /></td></tr>}
             {!loading && !errorMessage && paginatedRows.map((row, index) => {
               const hasRealization = Boolean(row.actualCheckOutAt)
               const displayMinutes = row.overtimeMinutes || row.plannedMinutes
@@ -23332,17 +23506,19 @@ function OvertimeReviewTable({
                       }
                     }}
                   >
-                    <td className="tableSelectCell" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
-                      <label className="tableCheckControl" aria-label={`Pilih lembur ${row.fullName}`}>
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          disabled={!canSelectRow}
-                          onChange={() => toggleSelected(row.id)}
-                        />
-                        <span />
-                      </label>
-                    </td>
+                    {bulkModeEnabled && (
+                      <td className="tableSelectCell" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+                        <label className="tableCheckControl" aria-label={`Pilih lembur ${row.fullName}`}>
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            disabled={!canSelectRow}
+                            onChange={() => toggleSelected(row.id)}
+                          />
+                          <span />
+                        </label>
+                      </td>
+                    )}
                     <td className="tableNumberCell"><TableNumberCell value={(currentPage - 1) * safePageSize + index + 1} /></td>
                     <td>
                       <EmployeeIdentityCell fullName={row.fullName} code={row.employeeCode} photoUrl={row.employeePhotoUrl} secondary={`${row.employeeCode} / ${row.divisionName}`} />
@@ -23379,7 +23555,7 @@ function OvertimeReviewTable({
                   </tr>
                   {isOpen && (
                     <tr className="overtimeReviewExpandRow">
-                      <td colSpan={10}>
+                      <td colSpan={tableColumnCount}>
                         <OvertimeReviewExpandPanel row={row} onReview={onReview} />
                       </td>
                     </tr>
@@ -23387,7 +23563,7 @@ function OvertimeReviewTable({
                 </Fragment>
               )
             })}
-            {!loading && !errorMessage && rows.length === 0 && <tr><td className="tableStateCell" colSpan={10}><TableState title="Belum ada lembur" description="Kandidat lembur muncul otomatis saat jam kerja aktual melebihi kewajiban shift." icon={Search} /></td></tr>}
+            {!loading && !errorMessage && rows.length === 0 && <tr><td className="tableStateCell" colSpan={tableColumnCount}><TableState title="Belum ada lembur" description="Kandidat lembur muncul otomatis saat jam kerja aktual melebihi kewajiban shift." icon={Search} /></td></tr>}
           </tbody>
         </table>
       </div>
