@@ -759,7 +759,7 @@ type EmployeeStatus = "active" | "review" | "inactive"
 type EmployeeSalaryType = "daily" | "monthly"
 type EmployeePayrollMethod = "attendance_cycle" | "calendar_month" | "custom"
 type EmployeePayPolicy = "salary" | "allowance" | "unpaid" | "not_counted"
-type EmployeeDirectoryTab = "all" | EmployeeStatus | "archived"
+type EmployeeDirectoryTab = "all" | EmployeeStatus | "archived" | "budgeting"
 
 interface EmploymentTypeOption extends EmployeeOption {
   description: string
@@ -4704,6 +4704,383 @@ function getEmploymentTypeSummary(row: Pick<EmployeeDirectoryRow, "payrollEligib
   const payrollLabel = row.payrollEligible ? employeePayPolicyLabel[row.employeePayPolicy] : "Tidak ikut payroll"
   const allowanceLabel = row.employeePayPolicy === "allowance" ? ` ${formatCurrency(row.allowanceAmount)}` : ""
   return `${payrollLabel}${allowanceLabel} · Absensi ${row.attendanceRequired ? "wajib" : "opsional"}`
+}
+
+function getEmployeeBudgetMeta(row: EmployeeDirectoryRow) {
+  if (!row.payrollEligible || row.employeePayPolicy === "unpaid" || row.employeePayPolicy === "not_counted") return "Tidak ikut budget payroll"
+  if (row.employeePayPolicy === "allowance") return `Uang saku / ${row.attendanceRequired ? "absensi wajib" : "absensi opsional"}`
+  return `${employeeSalaryTypeLabel[row.salaryType]} / ${employeePayrollMethodLabel[row.payrollMethod]}`
+}
+
+function getEmployeeTenureLabel(joinDate?: string | null) {
+  if (!joinDate) return "-"
+  const startDate = new Date(`${joinDate}T00:00:00`)
+  if (Number.isNaN(startDate.getTime())) return "-"
+
+  const today = new Date()
+  let years = today.getFullYear() - startDate.getFullYear()
+  let months = today.getMonth() - startDate.getMonth()
+  let days = today.getDate() - startDate.getDate()
+
+  if (days < 0) {
+    months -= 1
+    days += new Date(today.getFullYear(), today.getMonth(), 0).getDate()
+  }
+
+  if (months < 0) {
+    years -= 1
+    months += 12
+  }
+
+  if (years > 0) return `${years} Thn ${months} Bln`
+  if (months > 0) return `${months} Bln ${Math.max(days, 0)} Hr`
+  return `${Math.max(days, 0)} Hr`
+}
+
+type EmployeeBudgetDivisionSummary = {
+  id: string
+  name: string
+  rows: EmployeeDirectoryRow[]
+  budget: number
+  monthlyCount: number
+  dailyCount: number
+  allowanceCount: number
+  nonPayrollCount: number
+}
+
+function EmployeeBudgetBoard({ rows, loading }: { rows: EmployeeDirectoryRow[]; loading: boolean }) {
+  const [expandedDivisionIds, setExpandedDivisionIds] = useState<string[]>([])
+  const budgetRows = useMemo(() => rows.filter((row) => !row.deletedAt && row.status === "active"), [rows])
+  const divisionBudgets = useMemo(() => {
+    const groups = new Map<string, EmployeeBudgetDivisionSummary>()
+
+    budgetRows.forEach((row) => {
+      const id = row.divisionId || "unassigned"
+      const current = groups.get(id) || {
+        id,
+        name: row.divisionName || "Tanpa Divisi",
+        rows: [],
+        budget: 0,
+        monthlyCount: 0,
+        dailyCount: 0,
+        allowanceCount: 0,
+        nonPayrollCount: 0,
+      }
+
+      current.rows.push(row)
+      current.budget += getEmployeeSalaryAmount(row)
+      if (!row.payrollEligible || row.employeePayPolicy === "unpaid" || row.employeePayPolicy === "not_counted") current.nonPayrollCount += 1
+      else if (row.employeePayPolicy === "allowance") current.allowanceCount += 1
+      else if (row.salaryType === "monthly") current.monthlyCount += 1
+      else current.dailyCount += 1
+      groups.set(id, current)
+    })
+
+    return Array.from(groups.values()).sort((a, b) => b.budget - a.budget || b.rows.length - a.rows.length || a.name.localeCompare(b.name, "id-ID"))
+  }, [budgetRows])
+  const totalBudget = divisionBudgets.reduce((sum, division) => sum + division.budget, 0)
+  const averageBudget = budgetRows.length ? Math.round(totalBudget / budgetRows.length) : 0
+  const topDivision = divisionBudgets[0]
+  const nonPayrollCount = divisionBudgets.reduce((sum, division) => sum + division.nonPayrollCount, 0)
+  const monthlyCount = divisionBudgets.reduce((sum, division) => sum + division.monthlyCount, 0)
+  const dailyCount = divisionBudgets.reduce((sum, division) => sum + division.dailyCount, 0)
+  const allowanceCount = divisionBudgets.reduce((sum, division) => sum + division.allowanceCount, 0)
+  const topDivisionRows = divisionBudgets.slice(0, 5)
+  const expandedDivisionSet = new Set(expandedDivisionIds)
+  const toggleDivision = (divisionId: string) => {
+    setExpandedDivisionIds((current) => current.includes(divisionId) ? current.filter((id) => id !== divisionId) : [...current, divisionId])
+  }
+
+  if (loading) {
+    return (
+      <section className="employeeBudgetPanel">
+        <OperationalKpiGrid className="employeeBudgetKpiGrid">
+          {Array.from({ length: 4 }).map((_, index) => <FoundationSkeleton className="employeeBudgetKpiSkeleton" key={index} />)}
+        </OperationalKpiGrid>
+        <section className="dashboardInsights employeeBudgetInsights">
+          <article className="surfacePanel dashboardHealthPanel">
+            <div className="dashboardPanelHeader">
+              <span><ActivityIcon icon={BadgeDollarSign} /></span>
+              <div>
+                <h2>Distribusi Budget</h2>
+                <p>Mengambil ringkasan budget per divisi.</p>
+              </div>
+            </div>
+            <div className="dashboardHealthGrid">
+              <div className="dashboardStatusStack">
+                {Array.from({ length: 4 }).map((_, index) => <FoundationSkeleton className="dashboardProgressSkeleton" key={index} />)}
+              </div>
+              <div className="dashboardSourceList">
+                {Array.from({ length: 4 }).map((_, index) => <FoundationSkeleton className="dashboardSourceSkeleton" key={index} />)}
+              </div>
+            </div>
+          </article>
+          <aside className="surfacePanel dashboardSignalPanel">
+            <div className="dashboardPanelHeader">
+              <span><ActivityIcon icon={WalletCards} /></span>
+              <div>
+                <h2>Insight Payroll</h2>
+                <p>Menunggu data karyawan aktif.</p>
+              </div>
+            </div>
+            <div className="dashboardSignalStack">
+              {Array.from({ length: 4 }).map((_, index) => <FoundationSkeleton className="dashboardSignalSkeleton" key={index} />)}
+            </div>
+          </aside>
+        </section>
+      </section>
+    )
+  }
+
+  return (
+    <section className="employeeBudgetPanel">
+      <OperationalKpiGrid className="employeeBudgetKpiGrid">
+        <OperationalKpiCard label="Total Budget" value={formatCurrency(totalBudget)} detail={`${formatNumber(divisionBudgets.length)} divisi aktif`} icon={BadgeDollarSign} tone="violet" />
+        <OperationalKpiCard label="Karyawan Aktif" value={formatNumber(budgetRows.length)} detail="Masuk report budgeting" icon={UsersRound} tone="blue" />
+        <OperationalKpiCard label="Rata-rata Gaji" value={averageBudget ? formatCurrency(averageBudget) : "-"} detail="per karyawan aktif" icon={WalletCards} tone="green" />
+        <OperationalKpiCard label="Non Payroll" value={formatNumber(nonPayrollCount)} detail="aktif tapi tidak masuk budget" icon={AlertTriangle} tone={nonPayrollCount > 0 ? "amber" : "green"} />
+      </OperationalKpiGrid>
+
+      <section className="dashboardInsights employeeBudgetInsights">
+        <article className="surfacePanel dashboardHealthPanel employeeBudgetOverviewPanel">
+          <div className="dashboardPanelHeader">
+            <span><ActivityIcon icon={BadgeDollarSign} /></span>
+            <div>
+              <h2>Distribusi Budget</h2>
+              <p>Budget payroll aktif per divisi, diurutkan dari nominal terbesar.</p>
+            </div>
+            <strong>{formatCurrency(totalBudget)}</strong>
+          </div>
+          <div className="dashboardHealthGrid employeeBudgetHealthGrid">
+            <div className="dashboardStatusStack">
+              {topDivisionRows.length === 0 ? (
+                <div className="dashboardCleanState">
+                  <BadgeDollarSign size={22} />
+                  <strong>Budget kosong</strong>
+                  <span>Belum ada karyawan aktif yang masuk budget.</span>
+                </div>
+              ) : topDivisionRows.map((division, index) => (
+                <EmployeeBudgetProgressRow
+                  key={division.id}
+                  label={division.name}
+                  amount={division.budget}
+                  total={totalBudget}
+                  tone={index === 0 ? "green" : index === 1 ? "amber" : index === 2 ? "violet" : "slate"}
+                />
+              ))}
+            </div>
+            <div className="dashboardSourceCluster">
+              <div className="dashboardMiniHeader">
+                <span>Komposisi Payroll</span>
+                <strong>{formatNumber(budgetRows.length)} karyawan</strong>
+              </div>
+              <div className="dashboardSourceList employeeBudgetSourceList">
+                <DashboardSourceBadge icon={CalendarCheck2} label="Bulanan" count={monthlyCount} />
+                <DashboardSourceBadge icon={Clock3} label="Harian" count={dailyCount} />
+                <DashboardSourceBadge icon={WalletCards} label="Uang saku" count={allowanceCount} />
+                <DashboardSourceBadge icon={AlertTriangle} label="Non payroll" count={nonPayrollCount} />
+              </div>
+            </div>
+          </div>
+          <div className="dashboardDivisionStrip employeeBudgetTopStrip">
+            {topDivisionRows.length === 0 ? (
+              <span>Belum ada data divisi aktif.</span>
+            ) : topDivisionRows.map((division) => (
+              <EmployeeBudgetDivisionPill key={division.id} division={division} total={totalBudget} />
+            ))}
+          </div>
+        </article>
+        <aside className="surfacePanel dashboardSignalPanel employeeBudgetSignalPanel">
+          <div className="dashboardPanelHeader">
+            <span><ActivityIcon icon={WalletCards} /></span>
+            <div>
+              <h2>Insight Payroll</h2>
+              <p>Snapshot untuk baca budget tanpa buka detail satu-satu.</p>
+            </div>
+          </div>
+          <div className="dashboardSignalStack">
+            <EmployeeBudgetSignalItem icon={BadgeDollarSign} tone="violet" title="Budget terbesar" value={topDivision ? topDivision.name : "-"} detail={topDivision ? formatCurrency(topDivision.budget) : "Belum ada data"} />
+            <EmployeeBudgetSignalItem icon={UsersRound} tone="blue" title="Populasi payroll" value={formatNumber(budgetRows.length)} detail={`${formatNumber(divisionBudgets.length)} divisi terisi`} />
+            <EmployeeBudgetSignalItem icon={WalletCards} tone="green" title="Rata-rata gaji" value={averageBudget ? formatCurrency(averageBudget) : "-"} detail="Nominal rata-rata karyawan aktif" />
+            <EmployeeBudgetSignalItem icon={AlertTriangle} tone={nonPayrollCount > 0 ? "amber" : "green"} title="Di luar budget" value={formatNumber(nonPayrollCount)} detail="Aktif tapi payroll tidak dihitung" />
+          </div>
+        </aside>
+      </section>
+
+      <div className="employeeBudgetSectionHeader">
+        <div>
+          <span>Breakdown Divisi</span>
+          <h2>Budget per tim</h2>
+        </div>
+        <p>Klik card untuk melihat daftar karyawan, lama kerja dari tanggal masuk, dan gaji yang dipakai report.</p>
+      </div>
+
+      <div className="employeeBudgetDivisionGrid">
+        {divisionBudgets.length === 0 ? (
+          <div className="employeeBudgetEmpty">
+            <BadgeDollarSign size={22} />
+            <strong>Belum ada budget karyawan aktif</strong>
+            <span>Data karyawan aktif dengan payroll akan muncul di report ini.</span>
+          </div>
+        ) : divisionBudgets.map((division) => {
+          const expanded = expandedDivisionSet.has(division.id)
+          const averageDivisionBudget = division.rows.length ? Math.round(division.budget / division.rows.length) : 0
+          const budgetShare = totalBudget ? Math.max(2, Math.round((division.budget / totalBudget) * 100)) : 0
+          const sortedRows = division.rows
+            .slice()
+            .sort((a, b) => getEmployeeSalaryAmount(b) - getEmployeeSalaryAmount(a) || a.fullName.localeCompare(b.fullName, "id-ID"))
+
+          return (
+            <article className={clsx("employeeBudgetDivisionCard", expanded && "expanded")} key={division.id}>
+              <button className="employeeBudgetDivisionButton" type="button" aria-expanded={expanded} onClick={() => toggleDivision(division.id)}>
+                <span>
+                  <small>Tim {division.name}</small>
+                  <strong>{division.name}</strong>
+                  <em>{formatNumber(division.rows.length)} karyawan / rata-rata {averageDivisionBudget ? formatCurrency(averageDivisionBudget) : "-"}</em>
+                </span>
+                <span className="employeeBudgetDivisionTotal">
+                  <strong>{formatCurrency(division.budget)}</strong>
+                  <small>{division.monthlyCount} bulanan / {division.dailyCount} harian / {division.allowanceCount} uang saku</small>
+                </span>
+                <ChevronDown size={18} />
+              </button>
+              <div className="employeeBudgetDivisionVisual">
+                <div className="employeeBudgetDivisionVisualHeader">
+                  <span>
+                    <strong>{budgetShare}%</strong>
+                    <small>Porsi dari total budget</small>
+                  </span>
+                  <span>
+                    <strong>{formatCurrency(averageDivisionBudget)}</strong>
+                    <small>Rata-rata per orang</small>
+                  </span>
+                </div>
+                <span className="employeeBudgetDivisionProgress" aria-hidden="true"><span style={{ width: `${budgetShare}%` }} /></span>
+                <div className="employeeBudgetDivisionBadges">
+                  <span><UsersRound size={14} /> {formatNumber(division.rows.length)} orang</span>
+                  <span><CalendarCheck2 size={14} /> {formatNumber(division.monthlyCount)} bulanan</span>
+                  <span><Clock3 size={14} /> {formatNumber(division.dailyCount)} harian</span>
+                  {division.allowanceCount > 0 && <span><WalletCards size={14} /> {formatNumber(division.allowanceCount)} uang saku</span>}
+                </div>
+              </div>
+
+              {expanded && (
+                <div className="employeeBudgetReportTableWrap">
+                  <table className="employeeBudgetReportTable">
+                    <thead>
+                      <tr>
+                        <th>No</th>
+                        <th>Nama</th>
+                        <th>Lama Kerja</th>
+                        <th>Jabatan</th>
+                        <th>Gaji</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortedRows.map((row, index) => (
+                        <tr key={row.id}>
+                          <td>{String(index + 1).padStart(2, "0")}</td>
+                          <td>
+                            <strong>{row.fullName}</strong>
+                            <small>{row.employeeCode}</small>
+                          </td>
+                          <td>{getEmployeeTenureLabel(row.joinDate)}</td>
+                          <td>{row.positionName || "-"}</td>
+                          <td>
+                            <strong>{formatCurrency(getEmployeeSalaryAmount(row))}</strong>
+                            <small>{getEmployeeBudgetMeta(row)}</small>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr>
+                        <td colSpan={4}>Total Tim {division.name}</td>
+                        <td>{formatCurrency(division.budget)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )}
+            </article>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
+function EmployeeBudgetProgressRow({
+  label,
+  amount,
+  total,
+  tone,
+}: {
+  label: string
+  amount: number
+  total: number
+  tone: string
+}) {
+  const percent = total <= 0 ? 0 : Math.min(100, Math.round((amount / total) * 100))
+
+  return (
+    <div className={clsx("dashboardProgressRow employeeBudgetProgressRow", tone)}>
+      <div className="dashboardProgressMeta">
+        <span>{label}</span>
+        <strong>{formatCurrency(amount)} <small>{percent}%</small></strong>
+      </div>
+      <span className="dashboardProgressTrack">
+        <i style={{ width: `${percent}%` }} />
+      </span>
+    </div>
+  )
+}
+
+function EmployeeBudgetDivisionPill({
+  division,
+  total,
+}: {
+  division: EmployeeBudgetDivisionSummary
+  total: number
+}) {
+  const percent = total <= 0 ? 0 : Math.min(100, Math.round((division.budget / total) * 100))
+
+  return (
+    <span className="dashboardDivisionItem employeeBudgetDivisionPill">
+      <span>
+        <strong>{division.name}</strong>
+        <small>{formatNumber(division.rows.length)} orang</small>
+      </span>
+      <em>{percent}%</em>
+    </span>
+  )
+}
+
+function EmployeeBudgetSignalItem({
+  icon: Icon,
+  tone,
+  title,
+  value,
+  detail,
+}: {
+  icon: LucideIcon
+  tone: string
+  title: string
+  value: ReactNode
+  detail: string
+}) {
+  return (
+    <div className={clsx("dashboardSignalItem employeeBudgetSignalItem", tone)}>
+      <span className="dashboardSignalIcon">
+        <Icon size={17} />
+      </span>
+      <span>
+        <strong>{title}</strong>
+        <small>{detail}</small>
+      </span>
+      <em>{value}</em>
+    </div>
+  )
 }
 
 function getEmployeePhotoPublicUrl(path: string) {
@@ -9355,7 +9732,9 @@ function EmployeesPage({
   const archivedRows = rows.filter((row) => row.deletedAt)
   const visibleRows = activeTab === "archived"
     ? archivedRows
-    : liveRows.filter((row) => activeTab === "all" || row.status === activeTab)
+    : activeTab === "budgeting"
+      ? liveRows
+      : liveRows.filter((row) => activeTab === "all" || row.status === activeTab)
   const filteredRows = visibleRows.filter((row) => {
     const normalizedTerm = searchTerm.trim().toLowerCase()
     const matchesSearch = normalizedTerm
@@ -9369,14 +9748,18 @@ function EmployeesPage({
   const pageCount = Math.max(1, Math.ceil(filteredRows.length / Math.min(pageSize, 50)))
   const currentPage = Math.min(page, pageCount)
   const paginatedRows = filteredRows.slice((currentPage - 1) * Math.min(pageSize, 50), currentPage * Math.min(pageSize, 50))
-  const activeRows = liveRows.filter((row) => row.status === "active").length
+  const budgetReportRows = liveRows.filter((row) => row.status === "active")
+  const budgetReportTotal = budgetReportRows.reduce((sum, row) => sum + getEmployeeSalaryAmount(row), 0)
+  const budgetReportDivisionCount = new Set(budgetReportRows.map((row) => row.divisionId || row.divisionName || "unassigned")).size
+  const activeRows = budgetReportRows.length
   const reviewRows = liveRows.filter((row) => row.status === "review").length
   const averageSalary = activeRows
-    ? Math.round(liveRows.filter((row) => row.status === "active").reduce((sum, row) => sum + getEmployeeSalaryAmount(row), 0) / activeRows)
+    ? Math.round(budgetReportTotal / activeRows)
     : 0
   const employeeTabCount = (value: number) => loading ? <FoundationSkeleton className="tabCount" /> : value
   const employeeDirectoryTabs: Array<{ id: EmployeeDirectoryTab; label: string; icon: LucideIcon; count: ReactNode }> = [
     { id: "all", label: "Semua", icon: UsersRound, count: employeeTabCount(liveRows.length) },
+    { id: "budgeting", label: "Budgeting", icon: BadgeDollarSign, count: employeeTabCount(activeRows) },
     { id: "active", label: "Aktif", icon: UserRoundCheck, count: employeeTabCount(activeRows) },
     { id: "review", label: "Review", icon: AlertTriangle, count: employeeTabCount(reviewRows) },
     { id: "inactive", label: "Nonaktif", icon: Lock, count: employeeTabCount(liveRows.filter((row) => row.status === "inactive").length) },
@@ -9384,7 +9767,14 @@ function EmployeesPage({
   ]
   const employeeHeaderStats: ReactNode[] = loading
     ? Array.from({ length: 5 }).map((_, index) => <FoundationSkeleton className={clsx("inline", index === 0 && "wide")} key={index} />)
-    : [
+    : activeTab === "budgeting"
+      ? [
+        `${formatNumber(activeRows)} karyawan aktif`,
+        `${formatCurrency(budgetReportTotal)} total budget`,
+        `${formatNumber(budgetReportDivisionCount)} divisi`,
+        `Rata-rata ${formatCurrency(averageSalary)}`,
+      ]
+      : [
         `${filteredRows.length} dari ${visibleRows.length} karyawan`,
         `${activeRows} aktif`,
         `${reviewRows} review`,
@@ -9660,20 +10050,25 @@ function EmployeesPage({
     setStatusFilter("all")
   }
   const employeeTableDrag = useHorizontalDragScroll<HTMLDivElement>()
+  const employeeExportRows = activeTab === "budgeting" ? budgetReportRows : filteredRows
+  const isBudgetingTab = activeTab === "budgeting"
+  const employeePageSubtitle = isBudgetingTab
+    ? "Ringkasan budget gaji karyawan aktif per divisi, termasuk komposisi payroll dan detail tim."
+    : "Direktori karyawan yang terhubung ke divisi, jabatan, shift, lokasi kerja, dan cycle payroll 26 hari."
 
   return (
     <OperationalPageShell>
       <PageHeader
         activeView={activeView}
-        subtitle="Direktori karyawan yang terhubung ke divisi, jabatan, shift, lokasi kerja, dan cycle payroll 26 hari."
+        subtitle={employeePageSubtitle}
         meta={
           <InlinePageStats items={employeeHeaderStats} />
         }
         actions={
           <>
-            <button className="secondaryButton" type="button" onClick={() => exportEmployeeCsv(filteredRows)} disabled={filteredRows.length === 0}>
+            <button className="secondaryButton" type="button" onClick={() => exportEmployeeCsv(employeeExportRows)} disabled={employeeExportRows.length === 0}>
               <FileBarChart size={17} />
-              Export Karyawan
+              {isBudgetingTab ? "Export Budget" : "Export Karyawan"}
             </button>
             <button className="primaryButton" type="button" onClick={openCreateDialog} disabled={!canManage}>
               <UserPlus size={17} />
@@ -9688,7 +10083,7 @@ function EmployeesPage({
 
         <CategoryTabs
           activeId={activeTab}
-          ariaLabel="Filter direktori karyawan"
+          ariaLabel="Tab karyawan"
           items={employeeDirectoryTabs}
           onChange={(id) => {
             setActiveTab(id)
@@ -9696,26 +10091,31 @@ function EmployeesPage({
           }}
         />
 
-        <OperationalFilterPanel className="employeeFilterPanel">
-          <div className="filterField">
-            <label>Search</label>
-            <div className="uiInput inputWithIcon compact">
-              <Search size={16} />
-              <input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Cari nama, kode, NIK, divisi, lokasi..." />
+        {activeTab !== "budgeting" && (
+          <OperationalFilterPanel className="employeeFilterPanel">
+            <div className="filterField">
+              <label>Search</label>
+              <div className="uiInput inputWithIcon compact">
+                <Search size={16} />
+                <input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Cari nama, kode, NIK, divisi, lokasi..." />
+              </div>
             </div>
-          </div>
-          <div className="filterField">
-            <label>Divisi</label>
-            <FoundationSelect label="Filter divisi karyawan" value={divisionFilter} options={divisionFilterOptions} searchable onChange={setDivisionFilter} />
-          </div>
-          <div className="filterField">
-            <label>Status</label>
-            <FoundationSelect label="Filter status karyawan" value={statusFilter} options={statusFilterOptions} onChange={(value) => setStatusFilter(value as EmployeeStatus | "all")} />
-          </div>
-          <button className="secondaryButton" type="button" onClick={resetFilters}>Reset Filter</button>
-        </OperationalFilterPanel>
+            <div className="filterField">
+              <label>Divisi</label>
+              <FoundationSelect label="Filter divisi karyawan" value={divisionFilter} options={divisionFilterOptions} searchable onChange={setDivisionFilter} />
+            </div>
+            <div className="filterField">
+              <label>Status</label>
+              <FoundationSelect label="Filter status karyawan" value={statusFilter} options={statusFilterOptions} onChange={(value) => setStatusFilter(value as EmployeeStatus | "all")} />
+            </div>
+            <button className="secondaryButton" type="button" onClick={resetFilters}>Reset Filter</button>
+          </OperationalFilterPanel>
+        )}
 
-        <OperationalTableCard>
+        {activeTab === "budgeting" ? (
+          <EmployeeBudgetBoard rows={liveRows} loading={loading} />
+        ) : (
+          <OperationalTableCard>
           <div className="tableHeader">
             <div>
               <h2>Employee Directory</h2>
@@ -9853,7 +10253,8 @@ function EmployeesPage({
             onPageChange={setPage}
             onPageSizeChange={(value) => setPageSize(Math.min(value, 50))}
           />
-        </OperationalTableCard>
+          </OperationalTableCard>
+        )}
       </section>
 
       <EmployeeDialog

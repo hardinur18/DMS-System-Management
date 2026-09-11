@@ -10698,6 +10698,783 @@ button {
   font-size: 0.65rem;
 }
 
+.employeeBudgetPanel {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+}
+
+.employeeBudgetHeader {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.employeeBudgetHeader > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.employeeBudgetHeader span,
+.employeeBudgetSummaryGrid span,
+.employeeBudgetDivisionButton small {
+  color: var(--ops-muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.employeeBudgetHeader h2 {
+  margin: 0;
+  color: var(--ops-ink);
+  font-size: clamp(1.45rem, 2vw, 2rem);
+  font-weight: 900;
+  line-height: 1.08;
+}
+
+.employeeBudgetHeader p {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.84rem;
+  font-weight: 540;
+  line-height: 1.45;
+}
+
+.employeeBudgetHeaderMeta {
+  display: grid;
+  min-width: 118px;
+  justify-items: end;
+  gap: 2px;
+  padding: 11px 13px;
+  border: 1px solid rgba(34, 174, 202, 0.16);
+  border-radius: 8px;
+  background: rgba(240, 253, 255, 0.72);
+}
+
+.employeeBudgetHeaderMeta strong {
+  color: var(--blue-ink);
+  font-size: 1.28rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.employeeBudgetHeaderMeta small {
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.employeeBudgetSummaryGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.employeeBudgetSummaryGrid > div,
+.employeeBudgetSummarySkeleton {
+  min-height: 86px;
+  padding: 13px 14px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.74));
+}
+
+.employeeBudgetSummaryGrid > div {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  gap: 6px;
+}
+
+.employeeBudgetSummaryGrid strong {
+  overflow: hidden;
+  color: var(--ops-ink);
+  font-size: 1.02rem;
+  font-weight: 860;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.employeeBudgetSummaryGrid small {
+  overflow: hidden;
+  color: #64748b;
+  font-size: 0.74rem;
+  font-weight: 560;
+  line-height: 1.32;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.employeeBudgetDivisionGrid {
+  display: grid;
+  gap: 10px;
+}
+
+.employeeBudgetDivisionCard {
+  overflow: hidden;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.employeeBudgetDivisionCard.expanded {
+  border-color: rgba(34, 174, 202, 0.22);
+  box-shadow: 0 18px 34px -30px rgba(7, 24, 74, 0.46);
+}
+
+.employeeBudgetDivisionButton {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(0, 1.2fr) minmax(180px, 0.75fr) 34px;
+  gap: 14px;
+  align-items: center;
+  padding: 14px 16px;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.employeeBudgetDivisionButton:hover,
+.employeeBudgetDivisionButton:focus-visible {
+  outline: 0;
+  background: rgba(240, 253, 255, 0.66);
+}
+
+.employeeBudgetDivisionButton > span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.employeeBudgetDivisionButton strong {
+  overflow: hidden;
+  color: var(--ops-ink);
+  font-size: 0.95rem;
+  font-weight: 850;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.employeeBudgetDivisionButton em {
+  overflow: hidden;
+  color: #64748b;
+  font-size: 0.76rem;
+  font-style: normal;
+  font-weight: 560;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.employeeBudgetDivisionTotal {
+  justify-items: end;
+  text-align: right;
+}
+
+.employeeBudgetDivisionTotal strong {
+  color: var(--blue-ink);
+}
+
+.employeeBudgetDivisionTotal small {
+  overflow: hidden;
+  max-width: 100%;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 560;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-transform: none;
+}
+
+.employeeBudgetDivisionButton svg {
+  justify-self: end;
+  color: #64748b;
+  transition: transform 180ms ease;
+}
+
+.employeeBudgetDivisionCard.expanded .employeeBudgetDivisionButton svg {
+  transform: rotate(180deg);
+}
+
+.employeeBudgetPeopleList {
+  display: grid;
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(248, 250, 252, 0.56);
+}
+
+.employeeBudgetPersonRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(140px, auto);
+  gap: 14px;
+  align-items: center;
+  min-height: 58px;
+  padding: 10px 16px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.employeeBudgetPersonRow:last-child {
+  border-bottom: 0;
+}
+
+.employeeBudgetPersonRow > span {
+  display: grid;
+  min-width: 0;
+  justify-items: end;
+  gap: 2px;
+  text-align: right;
+}
+
+.employeeBudgetPersonRow > span strong {
+  color: var(--ops-ink);
+  font-size: 0.88rem;
+  font-weight: 850;
+  line-height: 1.2;
+}
+
+.employeeBudgetPersonRow > span small {
+  overflow: hidden;
+  max-width: 220px;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 560;
+  line-height: 1.28;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.employeeBudgetEmpty {
+  display: grid;
+  min-height: 132px;
+  place-items: center;
+  gap: 6px;
+  padding: 20px;
+  border: 1px dashed rgba(15, 23, 42, 0.14);
+  border-radius: 8px;
+  color: #64748b;
+  text-align: center;
+  background: rgba(248, 250, 252, 0.68);
+}
+
+.employeeBudgetEmpty svg {
+  color: var(--cyan);
+}
+
+.employeeBudgetEmpty strong {
+  color: var(--ops-ink);
+  font-size: 0.92rem;
+  font-weight: 840;
+}
+
+.employeeBudgetEmpty span {
+  font-size: 0.78rem;
+  font-weight: 560;
+}
+
+.employeeBudgetPanel {
+  display: grid;
+  gap: 16px;
+  padding: 0;
+}
+
+.employeeBudgetHero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(420px, 0.72fr);
+  gap: 18px;
+  align-items: stretch;
+  padding: 22px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(6, 95, 120, 0.08), rgba(255, 255, 255, 0) 42%),
+    #ffffff;
+  box-shadow: var(--shadow-soft);
+}
+
+.employeeBudgetHeroCopy {
+  display: grid;
+  min-width: 0;
+  align-content: center;
+  gap: 5px;
+}
+
+.employeeBudgetHeroCopy span,
+.employeeBudgetHeroMetrics span,
+.employeeBudgetSummaryGrid span,
+.employeeBudgetDivisionButton small {
+  color: var(--ops-muted);
+  font-size: 0.68rem;
+  font-weight: 850;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.employeeBudgetHeroCopy h2 {
+  margin: 0;
+  color: var(--ops-ink);
+  font-size: clamp(2rem, 3.2vw, 3.15rem);
+  font-weight: 920;
+  letter-spacing: 0;
+  line-height: 0.98;
+}
+
+.employeeBudgetHeroCopy p {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.employeeBudgetHeroMetrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.employeeBudgetHeroMetrics > div {
+  display: grid;
+  align-content: center;
+  min-width: 0;
+  min-height: 108px;
+  gap: 7px;
+  padding: 14px;
+  border: 1px solid rgba(34, 174, 202, 0.16);
+  border-radius: 8px;
+  background: rgba(240, 253, 255, 0.72);
+}
+
+.employeeBudgetHeroMetrics strong {
+  overflow: hidden;
+  color: var(--blue-ink);
+  font-size: 1.3rem;
+  font-weight: 900;
+  line-height: 1.05;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.employeeBudgetSummaryGrid {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.employeeBudgetSummaryGrid > div,
+.employeeBudgetSummarySkeleton {
+  min-height: 92px;
+  background: #ffffff;
+  box-shadow: 0 14px 30px -28px rgba(7, 24, 74, 0.45);
+}
+
+.employeeBudgetDivisionGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 14px;
+}
+
+.employeeBudgetDivisionCard {
+  display: grid;
+  min-width: 0;
+  border-color: rgba(15, 23, 42, 0.09);
+  box-shadow: 0 18px 38px -32px rgba(7, 24, 74, 0.55);
+}
+
+.employeeBudgetDivisionButton {
+  grid-template-columns: minmax(0, 1fr) minmax(150px, auto) 26px;
+  gap: 12px;
+  padding: 16px;
+}
+
+.employeeBudgetDivisionButton strong {
+  font-size: 1.05rem;
+}
+
+.employeeBudgetDivisionButton em {
+  font-size: 0.75rem;
+}
+
+.employeeBudgetDivisionTotal strong {
+  font-size: 1.02rem;
+}
+
+.employeeBudgetDivisionTotal small {
+  font-size: 0.68rem;
+}
+
+.employeeBudgetDivisionProgress {
+  height: 4px;
+  margin: 0 16px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.07);
+}
+
+.employeeBudgetDivisionProgress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--cyan), var(--blue-ink));
+}
+
+.employeeBudgetDivisionMetrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 12px 16px 15px;
+}
+
+.employeeBudgetDivisionMetrics span {
+  overflow: hidden;
+  padding: 7px 8px;
+  border-radius: 8px;
+  color: #48607e;
+  background: #f8fafc;
+  font-size: 0.7rem;
+  font-weight: 760;
+  line-height: 1.2;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.employeeBudgetReportTableWrap {
+  overflow: auto;
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+  background: #ffffff;
+}
+
+.employeeBudgetReportTable {
+  width: 100%;
+  min-width: 620px;
+  border-collapse: collapse;
+}
+
+.employeeBudgetReportTable th {
+  padding: 9px 10px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  color: #526783;
+  background: #f8fafc;
+  font-size: 0.64rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.employeeBudgetReportTable td {
+  padding: 9px 10px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+  color: var(--ops-ink);
+  font-size: 0.73rem;
+  font-weight: 700;
+  vertical-align: top;
+}
+
+.employeeBudgetReportTable th:first-child,
+.employeeBudgetReportTable td:first-child {
+  width: 42px;
+  color: #7185a1;
+  text-align: center;
+}
+
+.employeeBudgetReportTable th:last-child,
+.employeeBudgetReportTable td:last-child {
+  text-align: right;
+}
+
+.employeeBudgetReportTable td strong {
+  display: block;
+  color: var(--ops-ink);
+  font-size: 0.76rem;
+  font-weight: 860;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.employeeBudgetReportTable td small {
+  display: block;
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 0.65rem;
+  font-weight: 650;
+  line-height: 1.25;
+  text-transform: none;
+}
+
+.employeeBudgetReportTable tfoot td {
+  border-bottom: 0;
+  color: var(--ops-ink);
+  background: rgba(255, 247, 237, 0.86);
+  font-size: 0.75rem;
+  font-weight: 900;
+}
+
+.employeeBudgetReportTable tfoot td:last-child {
+  color: var(--blue-ink);
+}
+
+.employeeBudgetKpiGrid {
+  gap: 14px;
+}
+
+.employeeBudgetKpiGrid .metricCard {
+  min-height: 108px;
+  border-radius: 20px;
+}
+
+.employeeBudgetKpiGrid .metricCard strong {
+  font-size: clamp(1.18rem, 1.6vw, 1.45rem);
+}
+
+.employeeBudgetKpiSkeleton {
+  min-height: 108px;
+  border-radius: 20px;
+}
+
+.employeeBudgetInsights {
+  grid-template-columns: minmax(0, 1.35fr) minmax(330px, 0.78fr);
+}
+
+.employeeBudgetOverviewPanel,
+.employeeBudgetSignalPanel {
+  border-radius: 22px;
+  box-shadow: var(--shadow);
+}
+
+.employeeBudgetHealthGrid {
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 0.78fr);
+}
+
+.employeeBudgetProgressRow .dashboardProgressMeta strong {
+  color: var(--blue-ink);
+  font-size: 0.86rem;
+}
+
+.employeeBudgetProgressRow .dashboardProgressMeta {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 3px;
+}
+
+.employeeBudgetProgressRow .dashboardProgressMeta strong {
+  justify-content: space-between;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.dashboardProgressRow.blue .dashboardProgressTrack i {
+  background: linear-gradient(90deg, #22aeca, #3b82f6);
+}
+
+.dashboardProgressRow.violet .dashboardProgressTrack i {
+  background: linear-gradient(90deg, #07184a, #22aeca);
+}
+
+.employeeBudgetSourceList .dashboardSourceBadge {
+  min-height: 48px;
+}
+
+.employeeBudgetTopStrip {
+  padding-top: 2px;
+}
+
+.employeeBudgetDivisionPill {
+  min-width: 214px;
+}
+
+.employeeBudgetSignalItem.blue .dashboardSignalIcon {
+  color: #0f6f93;
+  background: rgba(34, 174, 202, 0.13);
+}
+
+.employeeBudgetSignalItem em {
+  max-width: 132px;
+  color: var(--blue-ink);
+  font-size: 0.9rem;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.employeeBudgetSectionHeader {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 4px 4px;
+}
+
+.employeeBudgetSectionHeader div {
+  display: grid;
+  gap: 3px;
+}
+
+.employeeBudgetSectionHeader span {
+  color: var(--ops-muted);
+  font-size: 0.7rem;
+  font-weight: 850;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.employeeBudgetSectionHeader h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 1.05rem;
+  font-weight: 820;
+}
+
+.employeeBudgetSectionHeader p {
+  max-width: 560px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 500;
+  line-height: 1.45;
+  text-align: right;
+}
+
+.employeeBudgetDivisionGrid {
+  grid-template-columns: 1fr;
+  gap: 18px;
+  margin-top: 8px;
+}
+
+.employeeBudgetDivisionCard {
+  border-color: rgba(148, 163, 184, 0.18);
+  border-radius: 20px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.76)),
+    #ffffff;
+  box-shadow: 0 18px 42px -34px rgba(7, 24, 74, 0.54);
+}
+
+.employeeBudgetDivisionCard.expanded {
+  border-color: rgba(34, 174, 202, 0.24);
+  box-shadow: 0 24px 54px -36px rgba(7, 24, 74, 0.58);
+}
+
+.employeeBudgetDivisionButton {
+  grid-template-columns: minmax(0, 1fr) minmax(150px, auto) 30px;
+  padding: 18px 18px 18px;
+}
+
+.employeeBudgetDivisionButton:hover,
+.employeeBudgetDivisionButton:focus-visible {
+  background: rgba(34, 174, 202, 0.06);
+}
+
+.employeeBudgetDivisionButton small {
+  font-size: 0.65rem;
+}
+
+.employeeBudgetDivisionButton strong {
+  font-size: 1.03rem;
+  font-weight: 820;
+}
+
+.employeeBudgetDivisionTotal strong {
+  font-size: 1.02rem;
+}
+
+.employeeBudgetDivisionProgress {
+  height: 10px;
+  margin: 0;
+  background: #edf3f8;
+}
+
+.employeeBudgetDivisionVisual {
+  display: grid;
+  gap: 12px;
+  margin: 8px 18px 18px;
+  padding: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 16px;
+  background:
+    linear-gradient(135deg, rgba(34, 174, 202, 0.08), rgba(255, 255, 255, 0.72)),
+    #f8fafc;
+}
+
+.employeeBudgetDivisionVisualHeader {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.employeeBudgetDivisionVisualHeader span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.employeeBudgetDivisionVisualHeader span:last-child {
+  justify-items: end;
+  text-align: right;
+}
+
+.employeeBudgetDivisionVisualHeader strong {
+  color: var(--ops-ink);
+  font-size: 0.96rem;
+  font-weight: 900;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.employeeBudgetDivisionVisualHeader small {
+  color: #64748b;
+  font-size: 0.7rem;
+  font-weight: 680;
+  line-height: 1.25;
+}
+
+.employeeBudgetDivisionBadges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.employeeBudgetDivisionBadges span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 6px 10px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 999px;
+  color: #48607e;
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 0.72rem;
+  font-weight: 760;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.employeeBudgetDivisionBadges svg {
+  color: var(--blue-ink);
+}
+
+.employeeBudgetReportTableWrap {
+  margin: 0 14px 14px;
+  overflow: auto;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 16px;
+}
+
+.employeeBudgetReportTable th {
+  background: #f8fafc;
+}
+
+.employeeBudgetReportTable tfoot td {
+  background: linear-gradient(90deg, rgba(240, 253, 255, 0.92), rgba(255, 247, 237, 0.84));
+}
+
 .employeeTableIdentity {
   display: inline-grid;
   grid-template-columns: 42px minmax(0, 1fr);
@@ -16018,6 +16795,77 @@ button {
 
   .employeeFaceActions {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .employeeBudgetPanel {
+    padding: 0;
+  }
+
+  .employeeBudgetHero {
+    grid-template-columns: 1fr;
+    padding: 18px;
+  }
+
+  .employeeBudgetInsights,
+  .employeeBudgetHealthGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .employeeBudgetSectionHeader {
+    display: grid;
+    align-items: start;
+  }
+
+  .employeeBudgetSectionHeader p {
+    max-width: none;
+    text-align: left;
+  }
+
+  .employeeBudgetHeroMetrics {
+    grid-template-columns: 1fr;
+  }
+
+  .employeeBudgetHeroMetrics > div {
+    min-height: 82px;
+  }
+
+  .employeeBudgetSummaryGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .employeeBudgetDivisionGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .employeeBudgetDivisionButton {
+    grid-template-columns: 1fr;
+  }
+
+  .employeeBudgetDivisionTotal {
+    justify-items: start;
+    text-align: left;
+  }
+
+  .employeeBudgetDivisionButton svg {
+    justify-self: start;
+  }
+
+  .employeeBudgetDivisionVisualHeader {
+    display: grid;
+    gap: 8px;
+  }
+
+  .employeeBudgetDivisionVisualHeader span:last-child {
+    justify-items: start;
+    text-align: left;
+  }
+
+  .employeeBudgetDivisionBadges span {
+    white-space: normal;
+  }
+
+  .employeeBudgetReportTable {
+    min-width: 560px;
   }
 
   .employeeDetailList.compact {
