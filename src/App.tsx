@@ -114,6 +114,7 @@ type PayrollPaymentSource = "salary" | "overtime" | "bonus"
 type OvertimePaymentStatus = "unpaid" | "paid" | "void"
 type OvertimePaymentPolicy = "separate" | "salary_cycle"
 type BulkOvertimePaymentPolicyMode = "keep" | OvertimePaymentPolicy
+type OvertimeTimingFilter = "all" | "pre_shift" | "post_shift" | "split_shift" | "full_duration" | "pending_realization"
 type WeeklyBonusPolicyStatus = "active" | "inactive"
 type WeeklyShiftBonusStatus = "draft" | "ready" | "paid" | "void"
 type AttendanceLogStatus = "valid" | "review" | "rejected"
@@ -22240,6 +22241,36 @@ function getOvertimeOutsideShiftLabel(row: Pick<OvertimeReviewRow, "preShiftMinu
   return "Belum ada realisasi"
 }
 
+const overtimeTimingFilterOptions: Array<{ value: OvertimeTimingFilter; label: string; helper: string }> = [
+  { value: "all", label: "Semua", helper: "Semua request" },
+  { value: "pre_shift", label: "Sebelum saja", helper: "Check-in awal" },
+  { value: "post_shift", label: "Setelah saja", helper: "Checkout lewat" },
+  { value: "split_shift", label: "Sebelum + Setelah", helper: "Dua sisi shift" },
+  { value: "full_duration", label: "Full durasi", helper: "Minggu/libur" },
+  { value: "pending_realization", label: "Belum realisasi", helper: "Menunggu checkout" },
+]
+
+function getOvertimeTimingBucket(row: Pick<OvertimeReviewRow, "actualCheckOutAt" | "dayType" | "overtimeBasis" | "overtimeMinutes" | "preShiftMinutes" | "postShiftMinutes">): Exclude<OvertimeTimingFilter, "all"> {
+  const hasPreShift = row.preShiftMinutes > 0
+  const hasPostShift = row.postShiftMinutes > 0
+
+  if (hasPreShift && hasPostShift) return "split_shift"
+  if (hasPreShift) return "pre_shift"
+  if (hasPostShift) return "post_shift"
+  if (row.overtimeBasis === "full_duration" || row.dayType === "sunday" || row.dayType === "holiday") return "full_duration"
+  if (!row.actualCheckOutAt || row.overtimeMinutes <= 0) return "pending_realization"
+  return "full_duration"
+}
+
+function getOvertimeTimingFilterLabel(filter: OvertimeTimingFilter) {
+  return overtimeTimingFilterOptions.find((option) => option.value === filter)?.label || "Semua"
+}
+
+function matchesOvertimeTimingFilter(row: OvertimeReviewRow, filter: OvertimeTimingFilter) {
+  if (filter === "all") return true
+  return getOvertimeTimingBucket(row) === filter
+}
+
 function getOvertimeRealizationLabel(row: OvertimeReviewRow) {
   if (!row.actualCheckOutAt) return "Menunggu checkout"
   if (row.requestSource !== "planned") return getOvertimeOutsideShiftLabel(row)
@@ -23274,36 +23305,48 @@ function OvertimeReviewTable({
   const [openOvertimeId, setOpenOvertimeId] = useState<string | null>(null)
   const [bulkModeEnabled, setBulkModeEnabled] = useState(false)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [timingFilter, setTimingFilter] = useState<OvertimeTimingFilter>("all")
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(25)
   const selectAllRef = useRef<HTMLInputElement | null>(null)
   const overtimeTableDrag = useHorizontalDragScroll<HTMLDivElement>()
   const safePageSize = Math.min(pageSize, 100)
-  const pageCount = Math.max(1, Math.ceil(rows.length / safePageSize))
+  const timingFilteredRows = useMemo(() => rows.filter((row) => matchesOvertimeTimingFilter(row, timingFilter)), [rows, timingFilter])
+  const timingCounts = useMemo(() => {
+    const counts = new Map<OvertimeTimingFilter, number>(overtimeTimingFilterOptions.map((option) => [option.value, 0]))
+    counts.set("all", rows.length)
+    rows.forEach((row) => {
+      const bucket = getOvertimeTimingBucket(row)
+      counts.set(bucket, (counts.get(bucket) || 0) + 1)
+    })
+    return counts
+  }, [rows])
+  const pageCount = Math.max(1, Math.ceil(timingFilteredRows.length / safePageSize))
   const currentPage = Math.min(page, pageCount)
-  const paginatedRows = rows.slice((currentPage - 1) * safePageSize, currentPage * safePageSize)
-  const selectableRows = rows.filter(canBulkRejectOvertimeRow)
+  const paginatedRows = timingFilteredRows.slice((currentPage - 1) * safePageSize, currentPage * safePageSize)
+  const selectableRows = timingFilteredRows.filter(canBulkRejectOvertimeRow)
   const selectablePageRows = paginatedRows.filter(canBulkRejectOvertimeRow)
-  const selectedRows = rows.filter((row) => selectedIds.includes(row.id))
+  const selectedRows = timingFilteredRows.filter((row) => selectedIds.includes(row.id))
   const selectedApproveRows = selectedRows.filter(canBulkApproveOvertimeRow)
   const selectedRejectRows = selectedRows.filter(canBulkRejectOvertimeRow)
   const allPageSelected = selectablePageRows.length > 0 && selectablePageRows.every((row) => selectedIds.includes(row.id))
   const somePageSelected = selectablePageRows.some((row) => selectedIds.includes(row.id))
-  const tableColumnCount = bulkModeEnabled ? 10 : 9
+  const tableColumnCount = bulkModeEnabled ? 12 : 11
+  const activeTimingLabel = getOvertimeTimingFilterLabel(timingFilter)
 
   useEffect(() => {
     setPage(1)
-  }, [rows.length, pageSize])
+  }, [rows.length, pageSize, timingFilter])
 
   useEffect(() => {
-    if (openOvertimeId && !rows.some((row) => row.id === openOvertimeId)) {
+    if (openOvertimeId && !timingFilteredRows.some((row) => row.id === openOvertimeId)) {
       setOpenOvertimeId(null)
     }
-  }, [openOvertimeId, rows])
+  }, [openOvertimeId, timingFilteredRows])
 
   useEffect(() => {
-    setSelectedIds((current) => current.filter((id) => rows.some((row) => row.id === id && canBulkRejectOvertimeRow(row))))
-  }, [rows])
+    setSelectedIds((current) => current.filter((id) => timingFilteredRows.some((row) => row.id === id && canBulkRejectOvertimeRow(row))))
+  }, [timingFilteredRows])
 
   useEffect(() => {
     if (!bulkModeEnabled && selectedIds.length > 0) {
@@ -23317,10 +23360,10 @@ function OvertimeReviewTable({
     }
   }, [allPageSelected, somePageSelected])
 
-  const plannedRows = rows.filter((row) => row.status === "draft" && row.requestSource === "planned")
-  const pendingRows = rows.filter((row) => row.status === "pending")
-  const approvedRows = rows.filter((row) => row.status === "approved")
-  const approvedTotal = rows.reduce((sum, row) => sum + (row.status === "approved" ? row.totalAmount : 0), 0)
+  const plannedRows = timingFilteredRows.filter((row) => row.status === "draft" && row.requestSource === "planned")
+  const pendingRows = timingFilteredRows.filter((row) => row.status === "pending")
+  const approvedRows = timingFilteredRows.filter((row) => row.status === "approved")
+  const approvedTotal = timingFilteredRows.reduce((sum, row) => sum + (row.status === "approved" ? row.totalAmount : 0), 0)
   const toggleSelected = (rowId: string) => {
     setSelectedIds((current) => current.includes(rowId) ? current.filter((id) => id !== rowId) : [...current, rowId])
   }
@@ -23348,10 +23391,10 @@ function OvertimeReviewTable({
       <div className="tableHeader">
         <div>
           <h2>Approval Lembur</h2>
-          <p>Request terencana dan kandidat lembur payable dari settlement absensi. Aktifkan mode massal hanya saat perlu proses banyak data.</p>
+          <p>Request terencana dan kandidat lembur payable dari settlement absensi. Lembur sebelum dan setelah shift dipisah agar review massal lebih presisi.</p>
         </div>
         <div className="overtimeHeaderActions">
-          <InlinePageStats items={[`${plannedRows.length} terencana`, `${pendingRows.length} pending`, `${approvedRows.length} approved`, `${formatCurrency(approvedTotal)} approved`]} />
+          <InlinePageStats items={[`${activeTimingLabel}`, `${plannedRows.length} terencana`, `${pendingRows.length} pending`, `${approvedRows.length} approved`, `${formatCurrency(approvedTotal)} approved`]} />
           {!loading && !errorMessage && selectableRows.length > 0 && (
             <button
               className={clsx("bulkModeSwitchButton", bulkModeEnabled && "active")}
@@ -23363,16 +23406,37 @@ function OvertimeReviewTable({
               <span className="bulkModeSwitchTrack" aria-hidden="true">
                 <span />
               </span>
-              <span>{bulkModeEnabled ? "Mode massal aktif" : "Pilih massal"}</span>
+              <span>{bulkModeEnabled ? "Edit massal aktif" : "Edit massal"}</span>
             </button>
           )}
         </div>
       </div>
+      <div className="overtimeTimingFilterBar" role="group" aria-label="Filter posisi lembur terhadap shift">
+        {overtimeTimingFilterOptions.map((option) => {
+          const count = timingCounts.get(option.value) || 0
+          const active = timingFilter === option.value
+
+          return (
+            <button
+              key={option.value}
+              className={clsx("overtimeTimingFilterButton", active && "active")}
+              type="button"
+              aria-pressed={active}
+              disabled={loading}
+              onClick={() => setTimingFilter(option.value)}
+            >
+              <span>{option.label}</span>
+              <strong>{formatNumber(count)}</strong>
+              <small>{option.helper}</small>
+            </button>
+          )
+        })}
+      </div>
       {!loading && !errorMessage && bulkModeEnabled && selectedRows.length === 0 && selectableRows.length > 0 && (
         <div className="overtimeBulkHint">
           <div>
-            <span>Proses massal tersedia</span>
-            <small>Pilih kandidat lembur yang bukan lembur, lalu tolak sekaligus.</small>
+            <span>Edit massal tersedia</span>
+            <small>{activeTimingLabel}: pilih halaman atau semua hasil filter untuk proses massal.</small>
           </div>
           <div className="overtimeBulkActions">
             <button className="secondaryButton compactButton" type="button" onClick={selectPageRows} disabled={selectablePageRows.length === 0}>
@@ -23388,7 +23452,7 @@ function OvertimeReviewTable({
         <div className="overtimeBulkToolbar">
           <div className="overtimeBulkCopy">
             <span>{selectedRows.length} request dipilih</span>
-            <small>{selectedApproveRows.length} siap approve / {selectedRejectRows.length} bisa ditolak</small>
+            <small>{activeTimingLabel} / {selectedApproveRows.length} siap approve / {selectedRejectRows.length} bisa ditolak</small>
           </div>
           <div className="overtimeBulkActions">
             <button className="secondaryButton compactButton" type="button" onClick={() => submitBulkReview("approve")} disabled={selectedApproveRows.length === 0}>
@@ -23414,11 +23478,13 @@ function OvertimeReviewTable({
           <colgroup>
             {bulkModeEnabled && <col className="tableSelectColumn" />}
             <col className="tableNumberColumn" />
-            <col style={{ width: "270px" }} />
+            <col style={{ width: "260px" }} />
+            <col style={{ width: "150px" }} />
             <col style={{ width: "160px" }} />
-            <col style={{ width: "180px" }} />
-            <col style={{ width: "170px" }} />
-            <col style={{ width: "190px" }} />
+            <col style={{ width: "145px" }} />
+            <col style={{ width: "145px" }} />
+            <col style={{ width: "145px" }} />
+            <col style={{ width: "175px" }} />
             <col style={{ width: "150px" }} />
             <col style={{ width: "130px" }} />
             <col className="tableActionColumn" />
@@ -23444,7 +23510,9 @@ function OvertimeReviewTable({
               <th>Karyawan</th>
               <th>Tanggal</th>
               <th>Jam Kerja</th>
-              <th>Durasi</th>
+              <th>Sebelum Shift</th>
+              <th>Setelah Shift</th>
+              <th>Total</th>
               <th>Rate</th>
               <th>Preview</th>
               <th>Status</th>
@@ -23464,6 +23532,8 @@ function OvertimeReviewTable({
               const isOpen = openOvertimeId === row.id
               const canSelectRow = canBulkRejectOvertimeRow(row)
               const isSelected = selectedIds.includes(row.id)
+              const timingBucket = getOvertimeTimingBucket(row)
+              const timingLabel = getOvertimeTimingFilterLabel(timingBucket)
               const actionLabel = payrollFinal || row.status === "approved" || row.status === "rejected"
                 ? "Lihat Detail"
                 : canApproveOvertime
@@ -23502,7 +23572,9 @@ function OvertimeReviewTable({
                     </td>
                     <td><TableText primary={formatWorkDate(row.overtimeDate)} secondary={`${getPayrollDayTypeLabel(row.dayType)} / ${getOvertimeSourceLabel(row.requestSource)}`} /></td>
                     <td><TableText primary={`${row.shiftStartTime || "--:--"} - ${row.shiftEndTime || "--:--"}`} secondary="Shift kerja" /></td>
-                    <td><TableText primary={displayMinutes ? formatMinutesDuration(displayMinutes) : "-"} secondary={hasRealization ? getOvertimeOutsideShiftLabel(row) : "Menunggu checkout"} /></td>
+                    <td><TableText primary={row.preShiftMinutes ? formatMinutesDuration(row.preShiftMinutes) : "-"} secondary={row.preShiftMinutes ? "Check-in awal" : hasRealization ? "Tidak ada" : "Menunggu"} /></td>
+                    <td><TableText primary={row.postShiftMinutes ? formatMinutesDuration(row.postShiftMinutes) : "-"} secondary={row.postShiftMinutes ? "Checkout lewat" : hasRealization ? "Tidak ada" : "Menunggu"} /></td>
+                    <td><TableText primary={displayMinutes ? formatMinutesDuration(displayMinutes) : "-"} secondary={timingLabel} /></td>
                     <td><TableText primary={`${formatCurrency(row.rateAmount)}/jam`} secondary={row.componentName} /></td>
                     <td><TableText primary={previewAmount > 0 ? formatCurrency(previewAmount) : "-"} secondary={getOvertimeBasisLabel(row.overtimeBasis)} /></td>
                     <td><OvertimeStatusBadge status={row.status} source={row.requestSource} /></td>
@@ -23540,7 +23612,7 @@ function OvertimeReviewTable({
                 </Fragment>
               )
             })}
-            {!loading && !errorMessage && rows.length === 0 && <tr><td className="tableStateCell" colSpan={tableColumnCount}><TableState title="Belum ada lembur" description="Kandidat lembur muncul otomatis saat jam kerja aktual melebihi kewajiban shift." icon={Search} /></td></tr>}
+            {!loading && !errorMessage && timingFilteredRows.length === 0 && <tr><td className="tableStateCell" colSpan={tableColumnCount}><TableState title={rows.length > 0 ? "Tidak ada lembur di filter ini" : "Belum ada lembur"} description={rows.length > 0 ? "Pilih posisi lembur lain atau reset filter halaman untuk melihat request lain." : "Kandidat lembur muncul otomatis saat jam kerja aktual melebihi kewajiban shift."} icon={Search} /></td></tr>}
           </tbody>
         </table>
       </div>
@@ -23548,7 +23620,7 @@ function OvertimeReviewTable({
         <DataTablePagination
           page={currentPage}
           pageSize={safePageSize}
-          totalRows={rows.length}
+          totalRows={timingFilteredRows.length}
           pageSizeOptions={[25, 50, 100]}
           onPageChange={setPage}
           onPageSizeChange={(value) => setPageSize(Math.min(value, 100))}
