@@ -64,7 +64,7 @@ import dmsLogo from "../assets/brand/dms-logo.jpeg"
 import { CategoryTabs } from "./components/category-tabs"
 import { ConfirmDialog } from "./components/confirm-dialog"
 import { ClickableTableRow, DataTablePagination, RowActionButton, RowActionMenu, RowActionMenuItem, TableNumberCell, TableText } from "./components/data-table"
-import { DateModePicker, type DateModePickerMode } from "./components/date-mode-picker"
+import { DateModePicker, getDateModePickerLabel, type DateModePickerMode } from "./components/date-mode-picker"
 import { FoundationDialog, FoundationDialogCloseButton } from "./components/foundation-dialog"
 import { FoundationRefreshButton } from "./components/foundation-refresh-button"
 import { FoundationSkeleton, FoundationTableSkeletonRows, useFoundationCachedData } from "./components/foundation-loading"
@@ -115,6 +115,7 @@ type OvertimePaymentStatus = "unpaid" | "paid" | "void"
 type OvertimePaymentPolicy = "separate" | "salary_cycle"
 type BulkOvertimePaymentPolicyMode = "keep" | OvertimePaymentPolicy
 type OvertimeTimingFilter = "all" | "pre_shift" | "post_shift" | "split_shift" | "full_duration" | "pending_realization"
+type OvertimeReviewScope = "total" | "pre_shift" | "post_shift"
 type WeeklyBonusPolicyStatus = "active" | "inactive"
 type WeeklyShiftBonusStatus = "draft" | "ready" | "paid" | "void"
 type AttendanceLogStatus = "valid" | "review" | "rejected"
@@ -141,6 +142,7 @@ interface AttendanceMonitorRow {
   employeePhotoPath: string
   employeePhotoUrl: string
   divisionName: string
+  positionName: string
   workLocationName: string
   shiftId: string
   shiftName: string
@@ -332,6 +334,7 @@ interface FieldReadinessRow {
 type OvertimeStatus = "draft" | "pending" | "approved" | "rejected"
 type OvertimeRequestSource = "auto" | "planned" | "manual"
 type OvertimeCalculationBasis = "extra_after_shift" | "full_duration"
+type OvertimeSegment = "total" | "pre_shift" | "post_shift" | "full_duration"
 
 interface OvertimeReviewRow {
   id: string
@@ -354,6 +357,7 @@ interface OvertimeReviewRow {
   totalAmount: number
   dayType: "weekday" | "sunday" | "holiday"
   overtimeBasis: OvertimeCalculationBasis
+  overtimeSegment: OvertimeSegment
   status: OvertimeStatus
   requestSource: OvertimeRequestSource
   plannedStartAt: string
@@ -5507,6 +5511,7 @@ function isMissingOvertimeTimingSchema(error: unknown) {
   const errorObject = error && typeof error === "object" ? error as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown } : null
   const message = `${String(errorObject?.code || "")} ${String(errorObject?.message || "")} ${String(errorObject?.details || "")} ${String(errorObject?.hint || "")}`.toLowerCase()
   const schemaHints = [
+    "overtime_segment",
     "actual_check_in_at",
     "pre_shift_minutes",
     "post_shift_minutes",
@@ -7574,7 +7579,7 @@ async function fetchWeeklyBonusPolicyRows() {
 
 const overtimeRequestBaseColumns = "id, employee_id, attendance_log_id, payroll_cycle_id, payroll_component_id, overtime_date, shift_start_time, shift_end_time, actual_check_out_at, overtime_minutes, approved_minutes, rate_amount, total_amount, day_type, overtime_basis, status, request_source, planned_start_at, planned_end_at, planned_minutes, request_reason, requested_at, matched_attendance, notes, created_at"
 const overtimeRequestPaymentColumns = `${overtimeRequestBaseColumns}, overtime_payment_status, overtime_payment_policy, overtime_payment_id, overtime_paid_at, overtime_payment_note`
-const overtimeRequestTimingColumns = `${overtimeRequestPaymentColumns}, actual_check_in_at, pre_shift_minutes, post_shift_minutes`
+const overtimeRequestTimingColumns = `${overtimeRequestPaymentColumns}, overtime_segment, actual_check_in_at, pre_shift_minutes, post_shift_minutes`
 
 async function fetchOvertimeRequestRows(startDate: string, endDate: string, dateScoped = true) {
   const runQuery = (columns: string) => fetchSupabaseRangeRows<Record<string, unknown>>(() => {
@@ -8296,13 +8301,14 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
   }
 
   const attendanceLogColumns = "id, employee_id, work_location_id, attendance_date, event_type, event_at, latitude, longitude, distance_m, radius_m, gps_status, face_status, face_score, face_snapshot_path, status, workday_counted, source, attendance_media, attendance_device_id, biofinger_event_id, notes"
-  const [employeeResult, divisionResult, locationResult, shiftResult, attendanceRows, dailySummaryRows, reviewAttendanceResult, payrollRows, overtimeResult, payrollComponentResult, appUserResult, faceProfileResult, leaveResult, payrollPaymentResult, overtimePaymentResult, weeklyBonusResult, weeklyBonusPaymentResult, weeklyBonusPolicyResult] = await Promise.all([
+  const [employeeResult, divisionResult, positionResult, locationResult, shiftResult, attendanceRows, dailySummaryRows, reviewAttendanceResult, payrollRows, overtimeResult, payrollComponentResult, appUserResult, faceProfileResult, leaveResult, payrollPaymentResult, overtimePaymentResult, weeklyBonusResult, weeklyBonusPaymentResult, weeklyBonusPolicyResult] = await Promise.all([
     supabase
       .from("employees")
-      .select("id, employee_code, full_name, photo_path, division_id, work_location_id, shift_id, salary_type, daily_salary, monthly_salary, payroll_cycle_days, payroll_eligible, employee_pay_policy, allowance_amount, employment_type_id, status, deleted_at")
+      .select("id, employee_code, full_name, photo_path, division_id, position_id, work_location_id, shift_id, salary_type, daily_salary, monthly_salary, payroll_cycle_days, payroll_eligible, employee_pay_policy, allowance_amount, employment_type_id, status, deleted_at")
       .is("deleted_at", null)
       .order("employee_code", { ascending: true }),
     supabase.from("divisions").select("id, name"),
+    supabase.from("positions").select("id, name"),
     supabase.from("work_locations").select("id, code, name, address, latitude, longitude, radius_m, is_active").order("sort_order", { ascending: true }).order("code", { ascending: true }),
     supabase.from("shifts").select("id, code, name, start_time, end_time, late_tolerance_minutes, early_leave_tolerance_minutes, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
     fetchSupabaseRangeRows<Record<string, unknown>>(() => supabase
@@ -8362,11 +8368,12 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
   const weeklyBonusError = weeklyBonusResult.error && !isMissingWeeklyBonusSchema(weeklyBonusResult.error) ? weeklyBonusResult.error : null
   const weeklyBonusPaymentError = weeklyBonusPaymentResult.error && !isMissingWeeklyBonusSchema(weeklyBonusPaymentResult.error) ? weeklyBonusPaymentResult.error : null
   const weeklyBonusPolicyError = weeklyBonusPolicyResult.error && !isMissingWeeklyBonusSchema(weeklyBonusPolicyResult.error) ? weeklyBonusPolicyResult.error : null
-  const error = employeeResult.error || divisionResult.error || locationResult.error || shiftResult.error || reviewAttendanceResult.error || overtimeResult.error || payrollComponentResult.error || appUserResult.error || faceProfileResult.error || leaveResult.error || payrollPaymentError || overtimePaymentError || weeklyBonusError || weeklyBonusPaymentError || weeklyBonusPolicyError
+  const error = employeeResult.error || divisionResult.error || positionResult.error || locationResult.error || shiftResult.error || reviewAttendanceResult.error || overtimeResult.error || payrollComponentResult.error || appUserResult.error || faceProfileResult.error || leaveResult.error || payrollPaymentError || overtimePaymentError || weeklyBonusError || weeklyBonusPaymentError || weeklyBonusPolicyError
 
   if (error) throw error
 
   const divisionMap = new Map((divisionResult.data || []).map((row) => [String(row.id), String(row.name || "")]))
+  const positionMap = new Map((positionResult.data || []).map((row) => [String(row.id), String(row.name || "")]))
   const locationRows = (locationResult.data || []) as Array<Record<string, unknown>>
   const locationMap = new Map(locationRows.map((row) => [String(row.id), row]))
   const shiftRows = (shiftResult.data || []) as Array<Record<string, unknown>>
@@ -8548,6 +8555,7 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
       employeePhotoPath: String(employee.photo_path || ""),
       employeePhotoUrl: getEmployeePhotoPublicUrl(String(employee.photo_path || "")),
       divisionName: divisionMap.get(String(employee.division_id || "")) || "Belum pilih divisi",
+      positionName: positionMap.get(String(employee.position_id || "")) || "Belum pilih jabatan",
       workLocationName: String(location?.name || "Belum pilih lokasi"),
       shiftId,
       shiftName,
@@ -8797,6 +8805,12 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
     const dayType = String(overtime.day_type || "weekday")
     const requestSource = String(overtime.request_source || "auto")
     const overtimeBasis = String(overtime.overtime_basis || component?.overtime_basis || "extra_after_shift")
+    const preShiftMinutes = Number(overtime.pre_shift_minutes || 0)
+    const postShiftMinutes = Number(overtime.post_shift_minutes || 0)
+    const overtimeSegment = String(
+      overtime.overtime_segment
+      || (overtimeBasis === "full_duration" ? "full_duration" : preShiftMinutes > 0 && postShiftMinutes <= 0 ? "pre_shift" : postShiftMinutes > 0 && preShiftMinutes <= 0 ? "post_shift" : "total"),
+    )
 
     return {
       id: String(overtime.id),
@@ -8811,14 +8825,15 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
       shiftEndTime: String(overtime.shift_end_time || "").slice(0, 5),
       actualCheckInAt: String(overtime.actual_check_in_at || ""),
       actualCheckOutAt: String(overtime.actual_check_out_at || ""),
-      preShiftMinutes: Number(overtime.pre_shift_minutes || 0),
-      postShiftMinutes: Number(overtime.post_shift_minutes || 0),
+      preShiftMinutes,
+      postShiftMinutes,
       overtimeMinutes: Number(overtime.overtime_minutes || 0),
       approvedMinutes: Number(overtime.approved_minutes || 0),
       rateAmount: Number(overtime.rate_amount || component?.rate_amount || 0),
       totalAmount: Number(overtime.total_amount || 0),
       dayType: dayType === "sunday" || dayType === "holiday" ? dayType : "weekday",
       overtimeBasis: overtimeBasis === "full_duration" ? "full_duration" : "extra_after_shift",
+      overtimeSegment: overtimeSegment === "pre_shift" || overtimeSegment === "post_shift" || overtimeSegment === "full_duration" ? overtimeSegment : "total",
       status: overtimeStatus === "approved" || overtimeStatus === "rejected" || overtimeStatus === "draft" ? overtimeStatus : "pending",
       requestSource: requestSource === "planned" || requestSource === "manual" ? requestSource : "auto",
       plannedStartAt: String(overtime.planned_start_at || ""),
@@ -17682,8 +17697,10 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
   const [overtimeRequestOpen, setOvertimeRequestOpen] = useState(false)
   const [overtimeRequestSubmitting, setOvertimeRequestSubmitting] = useState(false)
   const [overtimeTarget, setOvertimeTarget] = useState<OvertimeReviewRow | null>(null)
+  const [overtimeReviewScope, setOvertimeReviewScope] = useState<OvertimeReviewScope>("total")
   const [bulkOvertimeRows, setBulkOvertimeRows] = useState<OvertimeReviewRow[]>([])
   const [bulkOvertimeDecision, setBulkOvertimeDecision] = useState<"approve" | "reject">("reject")
+  const [bulkOvertimeScope, setBulkOvertimeScope] = useState<OvertimeReviewScope>("total")
   const [overtimeSubmitting, setOvertimeSubmitting] = useState(false)
   const [leaveRequestOpen, setLeaveRequestOpen] = useState(false)
   const [leaveRequestSubmitting, setLeaveRequestSubmitting] = useState(false)
@@ -17913,18 +17930,28 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
     }
   }
 
+  const openOvertimeReviewDialog = (row: OvertimeReviewRow, scope: OvertimeReviewScope = "total") => {
+    setOvertimeReviewScope(scope)
+    setOvertimeTarget(row)
+  }
+
   const handleOvertimeReviewSubmit = async (decision: "approve" | "reject", approvedMinutes: number, paymentPolicy: OvertimePaymentPolicy, notes: string) => {
     if (!overtimeTarget) return
 
+    const scopedNotes = decision === "approve" && overtimeReviewScope !== "total"
+      ? [notes.trim(), `Scope approval: ${getOvertimeReviewScopeLabel(overtimeReviewScope)}.`].filter(Boolean).join(" ")
+      : notes
+
     setOvertimeSubmitting(true)
     try {
-      await reviewOvertimeRequest(overtimeTarget.id, decision, approvedMinutes, paymentPolicy, notes)
+      await reviewOvertimeRequest(overtimeTarget.id, decision, approvedMinutes, paymentPolicy, scopedNotes)
       showToast({
         tone: "success",
         title: decision === "approve" ? "Lembur disetujui" : "Lembur ditolak",
-        description: `${overtimeTarget.fullName} - ${formatMinutesDuration(approvedMinutes)} - ${overtimePaymentPolicyLabel[paymentPolicy]}.`,
+        description: `${overtimeTarget.fullName} - ${getOvertimeReviewScopeLabel(overtimeReviewScope)} - ${formatMinutesDuration(approvedMinutes)} - ${overtimePaymentPolicyLabel[paymentPolicy]}.`,
       })
       setOvertimeTarget(null)
+      setOvertimeReviewScope("total")
       await refreshData()
     } catch (error) {
       showToast({
@@ -17945,7 +17972,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
     notes?: string
   } = {}) => {
     const decision = bulkOvertimeDecision
-    const targetRows = bulkOvertimeRows.filter((row) => decision === "approve" ? canBulkApproveOvertimeRow(row) : canBulkRejectOvertimeRow(row))
+    const targetRows = bulkOvertimeRows.filter((row) => decision === "approve" ? canBulkApproveOvertimeRow(row, bulkOvertimeScope) : canBulkRejectOvertimeRow(row))
     const trimmedNotes = notes.trim()
 
     if (!targetRows.length) {
@@ -17967,10 +17994,10 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
         const results = await Promise.allSettled(batch.map((row) => reviewOvertimeRequest(
           row.id,
           decision,
-          decision === "approve" ? row.overtimeMinutes : 0,
+          decision === "approve" ? getOvertimeScopedMinutes(row, bulkOvertimeScope) : 0,
           decision === "approve" && paymentPolicyMode !== "keep" ? paymentPolicyMode : row.overtimePaymentPolicy || "separate",
           trimmedNotes || (decision === "approve"
-            ? "Disetujui massal dari Approval Lembur."
+            ? `Disetujui massal dari Approval Lembur. Scope approval: ${getOvertimeReviewScopeLabel(bulkOvertimeScope)}.`
             : "Ditolak massal dari Approval Lembur karena bukan lembur."),
         )))
 
@@ -17979,6 +18006,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
       }
 
       setBulkOvertimeRows([])
+      setBulkOvertimeScope("total")
       showToast({
         tone: failedCount > 0 ? "error" : "success",
         title: decision === "approve" ? "Lembur massal disetujui" : "Lembur massal ditolak",
@@ -18976,9 +19004,10 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
             rows={filteredOvertimeRows}
             loading={loading || overtimeSubmitting}
             errorMessage={errorMessage}
-            onReview={setOvertimeTarget}
-            onBulkReview={(rows, decision) => {
+            onReview={openOvertimeReviewDialog}
+            onBulkReview={(rows, decision, scope = "total") => {
               setBulkOvertimeDecision(decision)
+              setBulkOvertimeScope(scope)
               setBulkOvertimeRows(rows)
             }}
           />
@@ -19071,16 +19100,24 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
       />
       <OvertimeReviewDialog
         row={overtimeTarget}
+        reviewScope={overtimeReviewScope}
         saving={overtimeSubmitting}
-        onClose={() => setOvertimeTarget(null)}
+        onClose={() => {
+          setOvertimeTarget(null)
+          setOvertimeReviewScope("total")
+        }}
         onSubmit={handleOvertimeReviewSubmit}
       />
       <BulkOvertimeReviewDialog
         rows={bulkOvertimeRows}
         decision={bulkOvertimeDecision}
+        reviewScope={bulkOvertimeScope}
         saving={overtimeSubmitting}
         onClose={() => {
-          if (!overtimeSubmitting) setBulkOvertimeRows([])
+          if (!overtimeSubmitting) {
+            setBulkOvertimeRows([])
+            setBulkOvertimeScope("total")
+          }
         }}
         onSubmit={(options) => void handleBulkOvertimeReviewSubmit(options)}
       />
@@ -21639,6 +21676,8 @@ function PayrollPreviewTable({
   const [workspaceTab, setWorkspaceTab] = useState<PayrollWorkspaceTab>("cycle")
   const [cycleTab, setCycleTab] = useState<PayrollCycleTab>("ready")
   const [detailRow, setDetailRow] = useState<AttendanceMonitorRow | null>(null)
+  const [payslipRow, setPayslipRow] = useState<AttendanceMonitorRow | null>(null)
+  const [historySlipRow, setHistorySlipRow] = useState<PayrollUnifiedPaymentRow | null>(null)
   const [cyclePage, setCyclePage] = useState(1)
   const [cyclePageSize, setCyclePageSize] = useState(25)
   const [overtimePage, setOvertimePage] = useState(1)
@@ -21647,6 +21686,8 @@ function PayrollPreviewTable({
   const [bonusPageSize, setBonusPageSize] = useState(25)
   const [historyPage, setHistoryPage] = useState(1)
   const [historyPageSize, setHistoryPageSize] = useState(25)
+  const [historyDate, setHistoryDate] = useState(getLocalDateKey())
+  const [historyDateMode, setHistoryDateMode] = useState<AttendanceDateMode>("all")
   const cycleScrollProps = useHorizontalDragScroll<HTMLDivElement>()
   const overtimeScrollProps = useHorizontalDragScroll<HTMLDivElement>()
   const bonusScrollProps = useHorizontalDragScroll<HTMLDivElement>()
@@ -21663,6 +21704,18 @@ function PayrollPreviewTable({
     return buildPayrollPaymentHistoryRows([...ledgerRows, ...fallbackRows])
   }, [paidCycleRows, payments])
   const unifiedPaymentRows = useMemo(() => buildPayrollUnifiedPaymentRows(paymentRows, overtimePayments, weeklyBonusPayments), [overtimePayments, paymentRows, weeklyBonusPayments])
+  const historyDateRange = useMemo(() => getAttendanceDateRange(historyDate, historyDateMode), [historyDate, historyDateMode])
+  const filteredUnifiedPaymentRows = useMemo(() => {
+    if (historyDateMode === "all") return unifiedPaymentRows
+
+    return unifiedPaymentRows.filter((row) => {
+      const paidDate = getPayrollPaymentPaidDateKey(row)
+      if (!paidDate) return false
+      const matchesStart = historyDateRange.start ? paidDate >= historyDateRange.start : true
+      const matchesEnd = historyDateRange.end ? paidDate <= historyDateRange.end : true
+      return matchesStart && matchesEnd
+    })
+  }, [historyDateMode, historyDateRange.end, historyDateRange.start, unifiedPaymentRows])
   const overtimePayableRows = useMemo(() => sortPayrollOvertimeRows(overtimeRows.filter((row) => row.overtimePaymentPolicy === "separate" && row.status === "approved" && row.overtimePaymentStatus !== "paid" && row.overtimePaymentStatus !== "void" && row.approvedMinutes > 0 && row.totalAmount > 0)), [overtimeRows])
   const weeklyBonusPayableRows = useMemo(() => sortWeeklyShiftBonusRows(weeklyBonuses.filter((row) => row.status === "ready" && !row.paymentId && row.eligibleDays > 0 && row.bonusAmount > 0)), [weeklyBonuses])
   const readyRows = useMemo(() => sortedRows.filter((row) => row.payrollStatus === "ready"), [sortedRows])
@@ -21682,12 +21735,21 @@ function PayrollPreviewTable({
   const pagedCycleRows = visibleCycleRows.slice((cyclePage - 1) * cyclePageSize, cyclePage * cyclePageSize)
   const pagedOvertimeRows = overtimePayableRows.slice((overtimePage - 1) * overtimePageSize, overtimePage * overtimePageSize)
   const pagedBonusRows = weeklyBonusPayableRows.slice((bonusPage - 1) * bonusPageSize, bonusPage * bonusPageSize)
-  const pagedPaymentRows = unifiedPaymentRows.slice((historyPage - 1) * historyPageSize, historyPage * historyPageSize)
+  const pagedPaymentRows = filteredUnifiedPaymentRows.slice((historyPage - 1) * historyPageSize, historyPage * historyPageSize)
   const payableAmount = payableRows.reduce((total, row) => total + row.payrollAmount, 0)
   const lockedAmount = lockedRows.reduce((total, row) => total + row.payrollAmount, 0)
   const overtimePayableAmount = overtimePayableRows.reduce((total, row) => total + row.totalAmount, 0)
   const weeklyBonusPayableAmount = weeklyBonusPayableRows.reduce((total, row) => total + row.bonusAmount, 0)
-  const paidAmount = unifiedPaymentRows.filter((row) => row.status === "paid").reduce((total, row) => total + row.paidAmount, 0)
+  const paidAmount = filteredUnifiedPaymentRows.filter((row) => row.status === "paid").reduce((total, row) => total + row.paidAmount, 0)
+  const historySalaryAmount = filteredUnifiedPaymentRows.filter((row) => row.status === "paid" && row.source === "salary").reduce((total, row) => total + row.paidAmount, 0)
+  const historyOvertimeAmount = filteredUnifiedPaymentRows.filter((row) => row.status === "paid" && row.source === "overtime").reduce((total, row) => total + row.paidAmount, 0)
+  const historyBonusAmount = filteredUnifiedPaymentRows.filter((row) => row.status === "paid" && row.source === "bonus").reduce((total, row) => total + row.paidAmount, 0)
+  const historyVoidedRows = filteredUnifiedPaymentRows.filter((row) => row.status !== "paid").length
+  const historyRangeLabel = historyDateMode === "all"
+    ? "Semua waktu"
+    : historyDateRange.start && historyDateRange.start !== historyDateRange.end
+      ? `${formatPayrollDate(historyDateRange.start)} - ${formatPayrollDate(historyDateRange.end)}`
+      : getDateModePickerLabel(historyDate, historyDateMode)
   const activeWeeklyBonusPolicy = useMemo(
     () => weeklyBonusPolicies.find((policy) => policy.isActive && policy.status === "active") || weeklyBonusPolicies[0] || null,
     [weeklyBonusPolicies],
@@ -21699,8 +21761,8 @@ function PayrollPreviewTable({
     { id: "cycle" as const, label: "Gaji 26 Hari", icon: WalletCards, count: payableRows.length },
     { id: "overtime" as const, label: "Bayar Lembur", icon: BadgeDollarSign, count: overtimePayableRows.length },
     { id: "bonus" as const, label: "Bayar Bonus", icon: BadgeDollarSign, count: weeklyBonusPayableRows.length },
-    { id: "history" as const, label: "Riwayat Bayar", icon: FileCheck2, count: unifiedPaymentRows.length },
-  ]), [overtimePayableRows.length, payableRows.length, unifiedPaymentRows.length, weeklyBonusPayableRows.length])
+    { id: "history" as const, label: "Riwayat Bayar", icon: FileCheck2, count: filteredUnifiedPaymentRows.length },
+  ]), [filteredUnifiedPaymentRows.length, overtimePayableRows.length, payableRows.length, weeklyBonusPayableRows.length])
   const payrollCycleTabs = useMemo(() => ([
     { id: "ready" as const, label: "Siap Dicek", icon: WalletCards, count: readyRows.length },
     { id: "locked" as const, label: "Menunggu Bayar", icon: Lock, count: lockedRows.length },
@@ -21725,7 +21787,7 @@ function PayrollPreviewTable({
     setOvertimePage(1)
     setBonusPage(1)
     setHistoryPage(1)
-  }, [cycleTab, overtimePayableRows.length, rows.length, unifiedPaymentRows.length, weeklyBonusPayableRows.length, workspaceTab])
+  }, [cycleTab, filteredUnifiedPaymentRows.length, historyDateMode, historyDateRange.end, historyDateRange.start, overtimePayableRows.length, rows.length, weeklyBonusPayableRows.length, workspaceTab])
 
   return (
     <>
@@ -21754,7 +21816,7 @@ function PayrollPreviewTable({
                   <Download size={15} />
                   Export Bonus
                 </RowActionMenuItem>
-                <RowActionMenuItem disabled={loading || unifiedPaymentRows.length === 0} onClick={() => exportPayrollUnifiedPaymentCsv(unifiedPaymentRows)}>
+                <RowActionMenuItem disabled={loading || filteredUnifiedPaymentRows.length === 0} onClick={() => exportPayrollUnifiedPaymentCsv(filteredUnifiedPaymentRows)}>
                   <Download size={15} />
                   Export Riwayat
                 </RowActionMenuItem>
@@ -21767,7 +21829,7 @@ function PayrollPreviewTable({
           <PayrollFinanceMetric icon={WalletCards} label="Gaji perlu diproses" value={formatCurrency(payableAmount)} meta={`${formatNumber(payableRows.length)} gaji siap diproses`} tone="info" />
           <PayrollFinanceMetric icon={BadgeDollarSign} label="Lembur belum dibayar" value={formatCurrency(overtimePayableAmount)} meta={`${formatNumber(overtimePayableRows.length)} request bayar terpisah`} tone="warning" />
           <PayrollFinanceMetric icon={BadgeDollarSign} label="Bonus belum dibayar" value={formatCurrency(weeklyBonusPayableAmount)} meta={`${formatNumber(weeklyBonusPayableRows.length)} bonus shift mingguan`} tone="success" />
-          <PayrollFinanceMetric icon={FileCheck2} label="Sudah terbayar" value={formatCurrency(paidAmount)} meta={`${formatNumber(unifiedPaymentRows.length)} transaksi gaji/lembur/bonus`} tone="success" />
+          <PayrollFinanceMetric icon={FileCheck2} label="Sudah terbayar" value={formatCurrency(paidAmount)} meta={`${formatNumber(filteredUnifiedPaymentRows.length)} transaksi / ${historyRangeLabel}`} tone="success" />
           <PayrollFinanceMetric icon={BadgeDollarSign} label="Masih berjalan" value={formatNumber(activeRows.length)} meta="masih mengikuti absensi" tone="neutral" />
         </div>
 
@@ -21831,6 +21893,10 @@ function PayrollPreviewTable({
                       </td>
                       <td className="tableActionCell">
                         <RowActionMenu label={`Aksi payroll ${row.fullName}`}>
+                          <RowActionMenuItem disabled={!row.payrollCycleId} onClick={() => setPayslipRow(row)}>
+                            <Printer size={15} />
+                            Slip Gaji
+                          </RowActionMenuItem>
                           <RowActionMenuItem disabled={!row.payrollCycleId || row.payrollStatus !== "ready"} onClick={() => onProcess(row, "lock")}>
                             <Lock size={15} />
                             Kunci Gaji
@@ -21910,27 +21976,463 @@ function PayrollPreviewTable({
         )}
 
         {workspaceTab === "history" && (
-          <PayrollUnifiedPaymentHistoryTable
-            rows={pagedPaymentRows}
-            loading={loading}
-            errorMessage={errorMessage}
-            page={historyPage}
-            pageSize={historyPageSize}
-            totalRows={unifiedPaymentRows.length}
-            scrollProps={historyScrollProps}
-            onVoidOvertimePayment={onVoidOvertimePayment}
-            onVoidWeeklyBonusPayment={onVoidWeeklyBonusPayment}
-            onPageChange={setHistoryPage}
-            onPageSizeChange={(nextSize) => {
-              setHistoryPageSize(nextSize)
-              setHistoryPage(1)
-            }}
-          />
+          <>
+            <div className="payrollHistoryFilterPanel">
+              <div className="payrollHistoryFilterRow">
+                <div className="filterField dateFilterField payrollHistoryDateField">
+                  <label>Tanggal Bayar</label>
+                  <DateModePicker
+                    value={historyDate}
+                    mode={historyDateMode}
+                    onChange={(nextDate, nextMode) => {
+                      setHistoryDate(nextDate)
+                      setHistoryDateMode(nextMode)
+                    }}
+                  />
+                </div>
+                <button className="secondaryButton" type="button" onClick={() => {
+                  setHistoryDate(getLocalDateKey())
+                  setHistoryDateMode("all")
+                }}>
+                  Reset Waktu
+                </button>
+              </div>
+              <div className="payrollHistoryExpenseSummary">
+                <PayrollFinanceMetric icon={CreditCard} label="Pengeluaran" value={formatCurrency(paidAmount)} meta={`${formatNumber(filteredUnifiedPaymentRows.length)} transaksi / ${historyRangeLabel}`} tone="success" />
+                <PayrollFinanceMetric icon={WalletCards} label="Gaji" value={formatCurrency(historySalaryAmount)} meta="Gaji 26 hari" tone="info" />
+                <PayrollFinanceMetric icon={BadgeDollarSign} label="Lembur" value={formatCurrency(historyOvertimeAmount)} meta="Bayar terpisah" tone="warning" />
+                <PayrollFinanceMetric icon={BadgeDollarSign} label="Bonus" value={formatCurrency(historyBonusAmount)} meta="Bonus shift" tone="success" />
+                <PayrollFinanceMetric icon={RotateCcw} label="Void" value={formatNumber(historyVoidedRows)} meta="Transaksi dibatalkan" tone="neutral" />
+              </div>
+            </div>
+            <PayrollUnifiedPaymentHistoryTable
+              rows={pagedPaymentRows}
+              loading={loading}
+              errorMessage={errorMessage}
+              page={historyPage}
+              pageSize={historyPageSize}
+              totalRows={filteredUnifiedPaymentRows.length}
+              scrollProps={historyScrollProps}
+              onOpenSlip={setHistorySlipRow}
+              onVoidOvertimePayment={onVoidOvertimePayment}
+              onVoidWeeklyBonusPayment={onVoidWeeklyBonusPayment}
+              onPageChange={setHistoryPage}
+              onPageSizeChange={(nextSize) => {
+                setHistoryPageSize(nextSize)
+                setHistoryPage(1)
+              }}
+            />
+          </>
         )}
       </OperationalTableCard>
       <AttendanceMonitorDetailDialog row={detailRow} onClose={() => setDetailRow(null)} />
+      <PayrollPayslipDialog row={payslipRow} onClose={() => setPayslipRow(null)} />
+      <PayrollPaymentSlipDialog row={historySlipRow} onClose={() => setHistorySlipRow(null)} />
     </>
   )
+}
+
+function PayrollPayslipDialog({ row, onClose }: { row: AttendanceMonitorRow | null; onClose: () => void }) {
+  if (!row) return null
+
+  const baseAmount = Math.max(0, row.basePayrollAmount)
+  const overtimeAmount = Math.max(0, row.overtimeAmount)
+  const netAmount = Math.max(0, row.payrollAmount)
+  const allowanceAmount = Math.max(0, netAmount - baseAmount - overtimeAmount)
+  const deductionAmount = Math.max(0, baseAmount + overtimeAmount + allowanceAmount - netAmount)
+  const totalIncome = baseAmount + overtimeAmount + allowanceAmount
+  const positionLabel = row.positionName && row.positionName !== "Belum pilih jabatan" ? row.positionName : "-"
+  const departmentLabel = row.divisionName && row.divisionName !== "Belum pilih divisi" ? row.divisionName : "-"
+  const periodLabel = row.periodStartedAt || row.periodClosedAt
+    ? formatPayrollPaymentPeriod({ periodStartedAt: row.periodStartedAt, periodClosedAt: row.periodClosedAt })
+    : formatPayrollPeriod(row)
+  const incomeRows = [
+    { label: "Gaji Pokok", value: baseAmount ? formatCurrency(baseAmount) : "-" },
+    { label: "T. Jabatan", value: "-" },
+    { label: "Tunjangan / Koreksi", value: allowanceAmount ? formatCurrency(allowanceAmount) : "-" },
+    { label: "Lembur", value: overtimeAmount ? formatCurrency(overtimeAmount) : "-" },
+  ]
+  const deductionRows = [
+    { label: "Hutang", value: deductionAmount ? formatCurrency(deductionAmount) : "Rp0,00" },
+  ]
+
+  return (
+    <FoundationDialog className="payrollPayslipDialog" open onClose={onClose}>
+      <div className="payrollPayslipToolbar">
+        <div>
+          <span>Slip Gaji</span>
+          <strong>{row.fullName}</strong>
+        </div>
+        <div className="payrollPayslipActions">
+          <button className="secondaryButton" type="button" onClick={onClose}>
+            Tutup
+          </button>
+          <button className="primaryButton" type="button" onClick={printPayrollPayslip}>
+            <Printer size={16} />
+            Print Slip
+          </button>
+        </div>
+      </div>
+
+      <article className="payrollPayslipSheet" id="payroll-payslip-print">
+        <header className="payrollPayslipHeader">
+          <div className="payrollPayslipCompany">
+            <img src={dmsLogo} alt="DMS" />
+            <strong>Digital Marketing Strategy</strong>
+            <span>Kp. Rancakuya 001/003</span>
+            <span>Des, Sukamantri, Kec. Ciawi,</span>
+            <span>Kabupaten Tasikmalaya</span>
+          </div>
+          <div className="payrollPayslipTitle">
+            <h2>SLIP GAJI</h2>
+          </div>
+        </header>
+
+        <dl className="payrollPayslipInlineIdentity">
+          <div>
+            <dt>Nama</dt>
+            <span>:</span>
+            <dd>{row.fullName || "-"}</dd>
+          </div>
+          <div>
+            <dt>Jabatan</dt>
+            <span>:</span>
+            <dd>{positionLabel}</dd>
+          </div>
+          <div>
+            <dt>Departemen</dt>
+            <span>:</span>
+            <dd>{departmentLabel}</dd>
+          </div>
+        </dl>
+
+        <div className="payrollPayslipPeriod">
+          <strong>Periode Gaji</strong>
+          <span>:</span>
+          <b>{periodLabel}</b>
+        </div>
+
+        <section className="payrollPayslipGrid">
+          <div className="payrollPayslipColumn">
+            <h3>Pendapatan</h3>
+            <dl>
+              {incomeRows.map((item) => (
+                <div key={item.label}>
+                  <dt>{item.label}</dt>
+                  <span>:</span>
+                  <dd>{item.value}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+          <div className="payrollPayslipColumn">
+            <h3>Potongan</h3>
+            <dl>
+              {deductionRows.map((item) => (
+                <div key={item.label}>
+                  <dt>{item.label}</dt>
+                  <span>:</span>
+                  <dd>{item.value}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        </section>
+
+        <section className="payrollPayslipTotals">
+          <div>
+            <strong>Total Pendapatan</strong>
+            <span>:</span>
+            <b>{formatCurrency(totalIncome)}</b>
+          </div>
+          <div>
+            <strong>Total Potongan</strong>
+            <span>:</span>
+            <b>{formatCurrency(deductionAmount)}</b>
+          </div>
+        </section>
+
+        <footer className="payrollPayslipFooter">
+          <div className="payrollPayslipNote">
+            <strong>Gaji anda telah kami tunaikan</strong>
+            <strong>Terimakasih Telah menjadi Keluarga</strong>
+            <strong>besar DMS Tasikmalaya</strong>
+          </div>
+          <div className="payrollPayslipNet">
+            <span>Pendapatan Netto</span>
+            <strong>{formatCurrency(netAmount)}</strong>
+          </div>
+        </footer>
+      </article>
+    </FoundationDialog>
+  )
+}
+
+function PayrollPaymentSlipDialog({ row, onClose }: { row: PayrollUnifiedPaymentRow | null; onClose: () => void }) {
+  if (!row) return null
+
+  const title = row.source === "salary" ? "SLIP GAJI" : row.source === "overtime" ? "SLIP LEMBUR" : "SLIP BONUS"
+  const toolbarTitle = row.source === "salary" ? "Slip Gaji" : row.source === "overtime" ? "Slip Lembur" : "Slip Bonus"
+  const totalIncome = Math.max(0, row.paidAmount)
+  const deductionAmount = 0
+  const periodLabel = formatPayrollPaymentPeriod(row)
+  const incomeRows = row.source === "salary"
+    ? [
+        { label: "Gaji Pokok", value: row.grossAmount ? formatCurrency(row.grossAmount) : "-" },
+        { label: "T. Jabatan", value: "-" },
+        { label: "Lembur", value: row.overtimeAmount ? formatCurrency(row.overtimeAmount) : "-" },
+      ]
+    : row.source === "overtime"
+      ? [
+          { label: "Lembur", value: row.overtimeAmount ? formatCurrency(row.overtimeAmount) : formatCurrency(row.paidAmount) },
+          { label: "Durasi", value: row.overtimeMinutes ? formatMinutesDuration(row.overtimeMinutes) : "-" },
+          { label: "Request", value: `${formatNumber(row.requestCount)} request` },
+        ]
+      : [
+          { label: "Bonus Shift", value: row.bonusAmount ? formatCurrency(row.bonusAmount) : formatCurrency(row.paidAmount) },
+          { label: "Hari Eligible", value: `${formatNumber(row.eligibleDays)} / ${formatNumber(row.targetDays)} hari` },
+        ]
+  const detailLabel = row.source === "salary"
+    ? `Cycle ${row.cycleNumber || "-"}`
+    : row.source === "overtime"
+      ? `${formatNumber(row.requestCount)} request lembur`
+      : `${formatNumber(row.eligibleDays)} hari bonus`
+
+  return (
+    <FoundationDialog className="payrollPayslipDialog" open onClose={onClose}>
+      <div className="payrollPayslipToolbar">
+        <div>
+          <span>{toolbarTitle}</span>
+          <strong>{row.employeeName}</strong>
+        </div>
+        <div className="payrollPayslipActions">
+          <button className="secondaryButton" type="button" onClick={onClose}>
+            Tutup
+          </button>
+          <button className="primaryButton" type="button" onClick={printPayrollPayslip}>
+            <Printer size={16} />
+            Print Slip
+          </button>
+        </div>
+      </div>
+
+      <article className="payrollPayslipSheet" id="payroll-payment-slip-print">
+        <header className="payrollPayslipHeader">
+          <div className="payrollPayslipCompany">
+            <img src={dmsLogo} alt="DMS" />
+            <strong>Digital Marketing Strategy</strong>
+            <span>Kp. Rancakuya 001/003</span>
+            <span>Des, Sukamantri, Kec. Ciawi,</span>
+            <span>Kabupaten Tasikmalaya</span>
+          </div>
+          <div className="payrollPayslipTitle">
+            <h2>{title}</h2>
+          </div>
+        </header>
+
+        <dl className="payrollPayslipInlineIdentity">
+          <div>
+            <dt>Nama</dt>
+            <span>:</span>
+            <dd>{row.employeeName || "-"}</dd>
+          </div>
+          <div>
+            <dt>No Bayar</dt>
+            <span>:</span>
+            <dd>{row.paymentNo || "-"}</dd>
+          </div>
+          <div>
+            <dt>Rincian</dt>
+            <span>:</span>
+            <dd>{detailLabel}</dd>
+          </div>
+        </dl>
+
+        <div className="payrollPayslipPeriod">
+          <strong>Periode</strong>
+          <span>:</span>
+          <b>{periodLabel}</b>
+        </div>
+
+        <section className="payrollPayslipGrid">
+          <div className="payrollPayslipColumn">
+            <h3>Pendapatan</h3>
+            <dl>
+              {incomeRows.map((item) => (
+                <div key={item.label}>
+                  <dt>{item.label}</dt>
+                  <span>:</span>
+                  <dd>{item.value}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+          <div className="payrollPayslipColumn">
+            <h3>Potongan</h3>
+            <dl>
+              <div>
+                <dt>Hutang</dt>
+                <span>:</span>
+                <dd>Rp0,00</dd>
+              </div>
+            </dl>
+          </div>
+        </section>
+
+        <section className="payrollPayslipTotals">
+          <div>
+            <strong>Total Pendapatan</strong>
+            <span>:</span>
+            <b>{formatCurrency(totalIncome)}</b>
+          </div>
+          <div>
+            <strong>Total Potongan</strong>
+            <span>:</span>
+            <b>{formatCurrency(deductionAmount)}</b>
+          </div>
+        </section>
+
+        <footer className="payrollPayslipFooter">
+          <div className="payrollPayslipNote">
+            <strong>{row.source === "salary" ? "Gaji anda telah kami tunaikan" : "Pembayaran telah kami tunaikan"}</strong>
+            <strong>Terimakasih Telah menjadi Keluarga</strong>
+            <strong>besar DMS Tasikmalaya</strong>
+          </div>
+          <div className="payrollPayslipNet">
+            <span>{row.source === "salary" ? "Pendapatan Netto" : "Total Dibayar"}</span>
+            <strong>{formatCurrency(row.paidAmount)}</strong>
+          </div>
+        </footer>
+      </article>
+    </FoundationDialog>
+  )
+}
+
+function printPayrollPayslip() {
+  const sourceSheet = document.querySelector<HTMLElement>(".payrollPayslipSheet")
+  if (!sourceSheet) {
+    window.print()
+    return
+  }
+
+  const sheet = sourceSheet.cloneNode(true) as HTMLElement
+  sheet.querySelectorAll("img").forEach((image) => {
+    image.setAttribute("src", (image as HTMLImageElement).src)
+  })
+
+  const printWindow = window.open("", "_blank", "width=900,height=1200")
+  if (!printWindow) {
+    window.print()
+    return
+  }
+
+  printWindow.document.write(`<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8" />
+    <title>Slip Gaji</title>
+    <style>
+      @page { size: A4 portrait; margin: 10mm; }
+      * { box-sizing: border-box; }
+      body {
+        display: flex;
+        justify-content: center;
+        min-height: 100vh;
+        margin: 0;
+        padding: 18mm 0;
+        color: #050505;
+        background: #eef1f5;
+        font-family: Arial, Helvetica, sans-serif;
+      }
+      .payrollPayslipSheet {
+        width: 190mm;
+        min-height: 277mm;
+        margin: 0;
+        padding: 12mm;
+        border: 2px solid #3f7be8;
+        color: #050505;
+        background: #fff;
+        font-family: Arial, Helvetica, sans-serif;
+      }
+      @media print {
+        body {
+          display: block;
+          min-height: 0;
+          padding: 0;
+          background: #fff;
+        }
+        .payrollPayslipSheet {
+          width: 100%;
+          min-height: calc(297mm - 20mm);
+        }
+      }
+      .payrollPayslipHeader { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 0.95fr); gap: 44px; align-items: start; }
+      .payrollPayslipCompany { display: grid; gap: 7px; font-size: 0.92rem; line-height: 1.35; }
+      .payrollPayslipCompany img { width: 98px; height: auto; margin: 0 0 24px 48px; object-fit: contain; }
+      .payrollPayslipCompany strong { font-size: 1.02rem; font-weight: 800; }
+      .payrollPayslipTitle h2 { margin: 18px 0 42px; text-align: center; font-size: 1.55rem; font-weight: 900; letter-spacing: 0.03em; }
+      .payrollPayslipInlineIdentity, .payrollPayslipColumn dl { display: grid; gap: 8px; margin: 0; }
+      .payrollPayslipInlineIdentity { margin: 30px 0 0; }
+      .payrollPayslipInlineIdentity > div,
+      .payrollPayslipColumn dl > div,
+      .payrollPayslipTotals > div {
+        display: grid;
+        grid-template-columns: 210px 14px minmax(0, 1fr);
+        gap: 8px;
+        align-items: baseline;
+        font-size: 0.98rem;
+      }
+      .payrollPayslipColumn dl > div,
+      .payrollPayslipTotals > div { grid-template-columns: minmax(120px, 1fr) 14px minmax(0, 1.15fr); }
+      .payrollPayslipInlineIdentity dt,
+      .payrollPayslipInlineIdentity dd,
+      .payrollPayslipTotals strong,
+      .payrollPayslipTotals b { margin: 0; font-weight: 800; }
+      .payrollPayslipColumn dt, .payrollPayslipColumn dd { margin: 0; font-size: 0.98rem; }
+      .payrollPayslipInlineIdentity dd { white-space: nowrap; }
+      .payrollPayslipPeriod {
+        display: grid;
+        grid-template-columns: 210px 14px minmax(0, 1fr);
+        gap: 8px;
+        align-items: baseline;
+        margin: 34px 0 18px;
+        font-size: 0.98rem;
+      }
+      .payrollPayslipPeriod strong, .payrollPayslipPeriod b { font-weight: 800; }
+      .payrollPayslipGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 38px; }
+      .payrollPayslipColumn h3 {
+        margin: 0 0 34px;
+        padding: 7px 12px;
+        text-align: center;
+        color: #000;
+        background: #72aadb;
+        font-size: 1.02rem;
+        font-weight: 900;
+      }
+      .payrollPayslipColumn dl { min-height: 170px; }
+      .payrollPayslipTotals {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 38px;
+        margin-top: 18px;
+        padding-top: 28px;
+        border-top: 2px solid #3f7be8;
+        font-size: 0.98rem;
+      }
+      .payrollPayslipFooter { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 0.9fr); gap: 38px; align-items: end; margin-top: 44px; }
+      .payrollPayslipNote { display: grid; gap: 10px; font-size: 0.9rem; font-weight: 800; line-height: 1.2; }
+      .payrollPayslipNet { display: grid; min-height: 104px; place-items: center; gap: 12px; padding: 10px 24px; border: 2px solid #3f7be8; text-align: center; }
+      .payrollPayslipNet span { font-size: 1.08rem; font-weight: 900; }
+      .payrollPayslipNet strong { font-size: 1.42rem; font-weight: 900; }
+    </style>
+  </head>
+  <body>${sheet.outerHTML}</body>
+</html>`)
+  printWindow.document.close()
+  printWindow.focus()
+  setTimeout(() => {
+    printWindow.print()
+  }, 350)
 }
 
 function PayrollFinanceMetric({
@@ -21988,6 +22490,13 @@ function sortPayrollRows(rows: AttendanceMonitorRow[]) {
 function formatPayrollPaymentPeriod(row: { periodStartedAt: string; periodClosedAt: string }) {
   if (!row.periodStartedAt && !row.periodClosedAt) return "-"
   return `${formatPayrollDate(row.periodStartedAt)} - ${row.periodClosedAt ? formatPayrollDate(row.periodClosedAt) : "berjalan"}`
+}
+
+function getPayrollPaymentPaidDateKey(row: Pick<PayrollUnifiedPaymentRow, "paidAt">) {
+  if (!row.paidAt) return ""
+  const parsed = new Date(row.paidAt)
+  if (Number.isNaN(parsed.getTime())) return String(row.paidAt).slice(0, 10)
+  return getLocalDateKey(parsed)
 }
 
 function buildPayrollPaymentHistoryRows(rows: PayrollPaymentRow[]) {
@@ -22475,6 +22984,7 @@ function PayrollUnifiedPaymentHistoryTable({
   pageSize,
   totalRows,
   scrollProps,
+  onOpenSlip,
   onVoidOvertimePayment,
   onVoidWeeklyBonusPayment,
   onPageChange,
@@ -22487,6 +22997,7 @@ function PayrollUnifiedPaymentHistoryTable({
   pageSize: number
   totalRows: number
   scrollProps: ReturnType<typeof useHorizontalDragScroll<HTMLDivElement>>
+  onOpenSlip: (row: PayrollUnifiedPaymentRow) => void
   onVoidOvertimePayment: (row: OvertimePaymentRow) => void
   onVoidWeeklyBonusPayment: (row: WeeklyBonusPaymentRow) => void
   onPageChange: (page: number) => void
@@ -22560,6 +23071,10 @@ function PayrollUnifiedPaymentHistoryTable({
                 <td><PayrollPaymentStatusBadge status={row.status} /></td>
                 <td className="tableActionCell">
                   <RowActionMenu label={`Aksi pembayaran ${row.paymentNo || row.employeeName}`}>
+                    <RowActionMenuItem onClick={() => onOpenSlip(row)}>
+                      <Printer size={15} />
+                      {row.source === "salary" ? "Slip Gaji" : row.source === "overtime" ? "Slip Lembur" : "Slip Bonus"}
+                    </RowActionMenuItem>
                     <RowActionMenuItem disabled={!row.paymentNo} onClick={() => copyPaymentNo(row.paymentNo)}>
                       <Copy size={15} />
                       Copy No Bayar
@@ -22667,10 +23182,34 @@ function getOvertimeTimingFilterLabel(filter: OvertimeTimingFilter) {
   return overtimeTimingFilterOptions.find((option) => option.value === filter)?.label || "Semua"
 }
 
+function getOvertimeReviewScope(filter: OvertimeTimingFilter): OvertimeReviewScope {
+  if (filter === "pre_shift") return "pre_shift"
+  if (filter === "post_shift") return "post_shift"
+  return "total"
+}
+
+function getOvertimeReviewScopeLabel(scope: OvertimeReviewScope) {
+  if (scope === "pre_shift") return "Sebelum shift"
+  if (scope === "post_shift") return "Setelah shift"
+  return "Total lembur"
+}
+
+function getOvertimeReviewScopeNote(scope: OvertimeReviewScope) {
+  if (scope === "pre_shift") return "Komponen check-in awal saja"
+  if (scope === "post_shift") return "Komponen checkout lewat saja"
+  return "Semua menit payable"
+}
+
+function getOvertimeScopedMinutes(row: Pick<OvertimeReviewRow, "overtimeMinutes" | "preShiftMinutes" | "postShiftMinutes" | "plannedMinutes">, scope: OvertimeReviewScope) {
+  if (scope === "pre_shift") return Math.min(row.preShiftMinutes, row.overtimeMinutes || row.preShiftMinutes)
+  if (scope === "post_shift") return Math.min(row.postShiftMinutes, row.overtimeMinutes || row.postShiftMinutes)
+  return row.overtimeMinutes || row.plannedMinutes
+}
+
 function matchesOvertimeTimingFilter(row: OvertimeReviewRow, filter: OvertimeTimingFilter) {
   if (filter === "all") return true
-  if (filter === "pre_shift") return row.preShiftMinutes > 0
-  if (filter === "post_shift") return row.postShiftMinutes > 0
+  if (filter === "pre_shift") return row.preShiftMinutes > 0 && row.postShiftMinutes <= 0
+  if (filter === "post_shift") return row.postShiftMinutes > 0 && row.preShiftMinutes <= 0
   return getOvertimeTimingBucket(row) === filter
 }
 
@@ -22719,8 +23258,8 @@ function chunkBatch<T>(items: T[], size: number) {
   return chunks
 }
 
-function canBulkApproveOvertimeRow(row: OvertimeReviewRow) {
-  return row.status === "pending" && Boolean(row.actualCheckOutAt) && row.overtimeMinutes > 0 && !isOvertimePayrollFinal(row)
+function canBulkApproveOvertimeRow(row: OvertimeReviewRow, scope: OvertimeReviewScope = "total") {
+  return row.status === "pending" && Boolean(row.actualCheckOutAt) && getOvertimeScopedMinutes(row, scope) > 0 && !isOvertimePayrollFinal(row)
 }
 
 function canBulkRejectOvertimeRow(row: OvertimeReviewRow) {
@@ -22730,12 +23269,14 @@ function canBulkRejectOvertimeRow(row: OvertimeReviewRow) {
 function BulkOvertimeReviewDialog({
   rows,
   decision,
+  reviewScope = "total",
   saving,
   onClose,
   onSubmit,
 }: {
   rows: OvertimeReviewRow[]
   decision: "approve" | "reject"
+  reviewScope?: OvertimeReviewScope
   saving: boolean
   onClose: () => void
   onSubmit: (options: { paymentPolicyMode: BulkOvertimePaymentPolicyMode; notes: string }) => void
@@ -22752,18 +23293,18 @@ function BulkOvertimeReviewDialog({
 
   if (rows.length === 0) return null
 
-  const approveRows = rows.filter(canBulkApproveOvertimeRow)
+  const approveRows = rows.filter((row) => canBulkApproveOvertimeRow(row, reviewScope))
   const rejectRows = rows.filter(canBulkRejectOvertimeRow)
   const targetRows = decision === "approve" ? approveRows : rejectRows
   const skippedCount = rows.length - targetRows.length
-  const totalMinutes = targetRows.reduce((sum, row) => sum + (decision === "approve" ? row.overtimeMinutes : row.overtimeMinutes || row.plannedMinutes), 0)
+  const totalMinutes = targetRows.reduce((sum, row) => sum + (decision === "approve" ? getOvertimeScopedMinutes(row, reviewScope) : row.overtimeMinutes || row.plannedMinutes), 0)
   const totalAmount = decision === "approve"
-    ? targetRows.reduce((sum, row) => sum + Math.round((row.overtimeMinutes / 60) * row.rateAmount), 0)
+    ? targetRows.reduce((sum, row) => sum + Math.round((getOvertimeScopedMinutes(row, reviewScope) / 60) * row.rateAmount), 0)
     : 0
   const isApprove = decision === "approve"
   const title = isApprove ? `Setujui ${targetRows.length} lembur?` : `Tolak ${targetRows.length} request lembur?`
   const description = isApprove
-    ? "Durasi approved memakai realisasi masing-masing karyawan. Jadwal bayar bisa dibiarkan mengikuti data row atau disamakan massal."
+    ? `Durasi approved memakai ${getOvertimeReviewScopeLabel(reviewScope).toLowerCase()} masing-masing karyawan. Jadwal bayar bisa dibiarkan mengikuti data row atau disamakan massal.`
     : "Request terpilih akan ditolak atau dibatalkan dari antrian lembur. Catatan wajib diisi agar audit jelas."
 
   const submit = () => {
@@ -23702,8 +24243,8 @@ function OvertimeReviewTable({
   rows: OvertimeReviewRow[]
   loading: boolean
   errorMessage: string
-  onReview: (row: OvertimeReviewRow) => void
-  onBulkReview: (rows: OvertimeReviewRow[], decision: "approve" | "reject") => void
+  onReview: (row: OvertimeReviewRow, scope?: OvertimeReviewScope) => void
+  onBulkReview: (rows: OvertimeReviewRow[], decision: "approve" | "reject", scope?: OvertimeReviewScope) => void
 }) {
   const [openOvertimeId, setOpenOvertimeId] = useState<string | null>(null)
   const [bulkModeEnabled, setBulkModeEnabled] = useState(false)
@@ -23715,6 +24256,7 @@ function OvertimeReviewTable({
   const overtimeTableDrag = useHorizontalDragScroll<HTMLDivElement>()
   const safePageSize = Math.min(pageSize, 100)
   const timingFilteredRows = useMemo(() => rows.filter((row) => matchesOvertimeTimingFilter(row, timingFilter)), [rows, timingFilter])
+  const activeReviewScope = getOvertimeReviewScope(timingFilter)
   const timingCounts = useMemo(() => {
     const counts = new Map<OvertimeTimingFilter, number>(overtimeTimingFilterOptions.map((option) => [option.value, 0]))
     overtimeTimingFilterOptions.forEach((option) => {
@@ -23728,7 +24270,7 @@ function OvertimeReviewTable({
   const selectableRows = timingFilteredRows.filter(canBulkRejectOvertimeRow)
   const selectablePageRows = paginatedRows.filter(canBulkRejectOvertimeRow)
   const selectedRows = timingFilteredRows.filter((row) => selectedIds.includes(row.id))
-  const selectedApproveRows = selectedRows.filter(canBulkApproveOvertimeRow)
+  const selectedApproveRows = selectedRows.filter((row) => canBulkApproveOvertimeRow(row, activeReviewScope))
   const selectedRejectRows = selectedRows.filter(canBulkRejectOvertimeRow)
   const allPageSelected = selectablePageRows.length > 0 && selectablePageRows.every((row) => selectedIds.includes(row.id))
   const somePageSelected = selectablePageRows.some((row) => selectedIds.includes(row.id))
@@ -23784,7 +24326,7 @@ function OvertimeReviewTable({
   const submitBulkReview = (decision: "approve" | "reject") => {
     const targetRows = decision === "approve" ? selectedApproveRows : selectedRejectRows
     if (!targetRows.length) return
-    onBulkReview(targetRows, decision)
+    onBulkReview(targetRows, decision, activeReviewScope)
   }
 
   return (
@@ -23926,9 +24468,10 @@ function OvertimeReviewTable({
             {!loading && !errorMessage && paginatedRows.map((row, index) => {
               const hasRealization = Boolean(row.actualCheckOutAt)
               const displayMinutes = row.overtimeMinutes || row.plannedMinutes
+              const scopedApproveMinutes = getOvertimeScopedMinutes(row, activeReviewScope)
               const previewAmount = row.status === "approved" ? row.totalAmount : row.overtimeMinutes > 0 ? Math.round((row.overtimeMinutes / 60) * row.rateAmount) : 0
               const payrollFinal = row.overtimePaymentPolicy === "salary_cycle" && isOvertimePayrollFinal(row)
-              const canApproveOvertime = row.status === "pending" && hasRealization && row.overtimeMinutes > 0 && !payrollFinal
+              const canApproveOvertime = row.status === "pending" && hasRealization && scopedApproveMinutes > 0 && !payrollFinal
               const isFinal = row.status === "approved" || row.status === "rejected"
               const isOpen = openOvertimeId === row.id
               const canSelectRow = canBulkRejectOvertimeRow(row)
@@ -23989,12 +24532,12 @@ function OvertimeReviewTable({
                             <Eye size={15} />
                             {isOpen ? "Tutup Detail" : "Lihat Detail"}
                           </RowActionMenuItem>
-                          <RowActionMenuItem disabled={payrollFinal} onClick={() => onReview(row)}>
+                          <RowActionMenuItem disabled={payrollFinal} onClick={() => onReview(row, activeReviewScope)}>
                             <FileCheck2 size={15} />
                             {payrollFinal ? getOvertimePayrollFinalLabel(row) : actionLabel}
                           </RowActionMenuItem>
                           {!isFinal && !payrollFinal && (
-                            <RowActionMenuItem danger onClick={() => onReview(row)}>
+                            <RowActionMenuItem danger onClick={() => onReview(row, activeReviewScope)}>
                               <X size={15} />
                               {canApproveOvertime ? "Reject Lembur" : "Batalkan Request"}
                             </RowActionMenuItem>
@@ -24006,7 +24549,7 @@ function OvertimeReviewTable({
                   {isOpen && (
                     <tr className="overtimeReviewExpandRow">
                       <td colSpan={tableColumnCount}>
-                        <OvertimeReviewExpandPanel row={row} onReview={onReview} />
+                        <OvertimeReviewExpandPanel row={row} reviewScope={activeReviewScope} onReview={onReview} />
                       </td>
                     </tr>
                   )}
@@ -24031,18 +24574,19 @@ function OvertimeReviewTable({
   )
 }
 
-function OvertimeReviewExpandPanel({ row, onReview }: { row: OvertimeReviewRow; onReview: (row: OvertimeReviewRow) => void }) {
+function OvertimeReviewExpandPanel({ row, reviewScope = "total", onReview }: { row: OvertimeReviewRow; reviewScope?: OvertimeReviewScope; onReview: (row: OvertimeReviewRow, scope?: OvertimeReviewScope) => void }) {
   const hasRealization = Boolean(row.actualCheckOutAt)
   const isFinal = row.status === "approved" || row.status === "rejected"
   const payrollFinal = row.overtimePaymentPolicy === "salary_cycle" && isOvertimePayrollFinal(row)
   const paymentPolicyLabel = overtimePaymentPolicyLabel[row.overtimePaymentPolicy]
-  const canApproveOvertime = row.status === "pending" && hasRealization && row.overtimeMinutes > 0 && !payrollFinal
+  const scopedMinutes = getOvertimeScopedMinutes(row, reviewScope)
+  const canApproveOvertime = row.status === "pending" && hasRealization && scopedMinutes > 0 && !payrollFinal
   const plannedRange = getOvertimePlanRange(row)
-  const displayMinutes = row.overtimeMinutes || row.plannedMinutes
+  const displayMinutes = scopedMinutes
   const payableAmount = row.status === "approved"
     ? row.totalAmount
-    : row.overtimeMinutes > 0
-      ? Math.round((row.overtimeMinutes / 60) * row.rateAmount)
+    : scopedMinutes > 0
+      ? Math.round((scopedMinutes / 60) * row.rateAmount)
       : 0
   const decisionLabel = isFinal
     ? "Lihat Detail"
@@ -24068,7 +24612,7 @@ function OvertimeReviewExpandPanel({ row, onReview }: { row: OvertimeReviewRow; 
         <div>
           <span>Detail Lembur</span>
           <strong>{displayMinutes ? formatMinutesDuration(displayMinutes) : "Belum payable"}</strong>
-          <small>{getOvertimeSourceLabel(row.requestSource)} / {getPayrollDayTypeLabel(row.dayType)} / {getOvertimeBasisLabel(row.overtimeBasis)}</small>
+          <small>{getOvertimeSourceLabel(row.requestSource)} / {getOvertimeReviewScopeLabel(reviewScope)} / {getOvertimeBasisLabel(row.overtimeBasis)}</small>
         </div>
         <OvertimeStatusBadge status={row.status} source={row.requestSource} />
       </div>
@@ -24115,8 +24659,8 @@ function OvertimeReviewExpandPanel({ row, onReview }: { row: OvertimeReviewRow; 
             </div>
             <div>
               <span>Payable</span>
-              <strong>{row.overtimeMinutes ? formatMinutesDuration(row.overtimeMinutes) : "-"}</strong>
-              <small>{getOvertimeOutsideShiftLabel(row)}</small>
+              <strong>{displayMinutes ? formatMinutesDuration(displayMinutes) : "-"}</strong>
+              <small>{getOvertimeReviewScopeNote(reviewScope)}</small>
             </div>
             <div>
               <span>Basis</span>
@@ -24170,7 +24714,7 @@ function OvertimeReviewExpandPanel({ row, onReview }: { row: OvertimeReviewRow; 
 
       <div className="overtimeReviewExpandFooter">
         <p>{statusNote}</p>
-        <button className="primaryButton compactButton" type="button" onClick={() => onReview(row)} disabled={payrollFinal}>
+        <button className="primaryButton compactButton" type="button" onClick={() => onReview(row, reviewScope)} disabled={payrollFinal}>
           <FileCheck2 size={16} />
           {payrollFinal ? getOvertimePayrollFinalLabel(row) : decisionLabel}
         </button>
@@ -24181,11 +24725,13 @@ function OvertimeReviewExpandPanel({ row, onReview }: { row: OvertimeReviewRow; 
 
 function OvertimeReviewDialog({
   row,
+  reviewScope = "total",
   saving,
   onClose,
   onSubmit,
 }: {
   row: OvertimeReviewRow | null
+  reviewScope?: OvertimeReviewScope
   saving: boolean
   onClose: () => void
   onSubmit: (decision: "approve" | "reject", approvedMinutes: number, paymentPolicy: OvertimePaymentPolicy, notes: string) => void
@@ -24196,11 +24742,11 @@ function OvertimeReviewDialog({
   const [noteError, setNoteError] = useState("")
 
   useEffect(() => {
-    setApprovedMinutes(String(row?.approvedMinutes || row?.overtimeMinutes || 0))
+    setApprovedMinutes(String(row ? row.approvedMinutes || getOvertimeScopedMinutes(row, reviewScope) || 0 : 0))
     setPaymentPolicy(row?.overtimePaymentPolicy || "separate")
     setNotes("")
     setNoteError("")
-  }, [row])
+  }, [row, reviewScope])
 
   if (!row) return null
 
@@ -24210,15 +24756,18 @@ function OvertimeReviewDialog({
   const paymentPolicyLabel = overtimePaymentPolicyLabel[paymentPolicy]
   const salaryCycleIsFinal = paymentPolicy === "salary_cycle" && isOvertimePayrollFinal(row)
   const approvalDestination = paymentPolicy === "separate" ? "masuk tab Bayar Lembur" : "ikut Gaji 26 Hari"
-  const minutes = Math.max(0, Math.min(row.overtimeMinutes, Number(approvedMinutes || 0)))
+  const maxApproveMinutes = getOvertimeScopedMinutes(row, reviewScope)
+  const minutes = Math.max(0, Math.min(maxApproveMinutes, Number(approvedMinutes || 0)))
   const previewAmount = Math.round((minutes / 60) * row.rateAmount)
-  const canApprovePayroll = !isFinal && !payrollFinal && !salaryCycleIsFinal && row.overtimeMinutes > 0 && Boolean(row.actualCheckOutAt) && row.status !== "draft"
+  const canApprovePayroll = !isFinal && !payrollFinal && !salaryCycleIsFinal && maxApproveMinutes > 0 && Boolean(row.actualCheckOutAt) && row.status !== "draft"
   const canRejectOvertime = !isFinal && !payrollFinal
   const plannedLabel = getOvertimePlanRange(row)
   const sourceLabel = getOvertimeSourceLabel(row.requestSource)
-  const displayMinutes = row.overtimeMinutes || row.plannedMinutes
+  const displayMinutes = maxApproveMinutes || row.plannedMinutes
   const realizationLabel = getOvertimeRealizationLabel(row)
   const rejectActionLabel = isPlannedDraft ? "Batalkan Request" : canApprovePayroll ? "Reject" : "Tolak Request"
+  const scopeLabel = getOvertimeReviewScopeLabel(reviewScope)
+  const scopeNote = getOvertimeReviewScopeNote(reviewScope)
   const submitOvertimeDecision = (decision: "approve" | "reject") => {
     const trimmedNotes = notes.trim()
     if (isFinal) return
@@ -24259,7 +24808,7 @@ function OvertimeReviewDialog({
           <div>
             <span>Overtime Review</span>
             <h2 id="overtime-review-title">{row.requestSource === "planned" && row.status === "draft" ? "Request lembur" : "Review lembur"} {row.fullName}</h2>
-            <p>{payrollFinal ? `${getOvertimePayrollFinalLabel(row)}. Data lembur tidak bisa diubah dari approval.` : isFinal ? "Status lembur sudah final. Gunakan koreksi pembayaran terpisah jika perlu perubahan." : canApprovePayroll ? `Approve menit yang dibayar. Lembur approved akan ${approvalDestination}.` : "Request sudah tercatat, tetapi pembayaran menunggu realisasi checkout dan kalkulasi payable."}</p>
+            <p>{payrollFinal ? `${getOvertimePayrollFinalLabel(row)}. Data lembur tidak bisa diubah dari approval.` : isFinal ? "Status lembur sudah final. Gunakan koreksi pembayaran terpisah jika perlu perubahan." : canApprovePayroll ? `Approve ${scopeLabel.toLowerCase()}. Lembur approved akan ${approvalDestination}.` : "Request sudah tercatat, tetapi pembayaran menunggu realisasi checkout dan kalkulasi payable."}</p>
           </div>
           <FoundationDialogCloseButton label="Tutup review lembur" onClose={onClose} disabled={saving} />
         </div>
@@ -24270,7 +24819,7 @@ function OvertimeReviewDialog({
             <div>
               <small>{sourceLabel} / {row.componentName} / {getPayrollDayTypeLabel(row.dayType)}</small>
               <strong>{displayMinutes ? formatMinutesDuration(displayMinutes) : "-"}</strong>
-              <p>{canApprovePayroll ? `${formatCurrency(row.rateAmount)}/jam / ${getOvertimeBasisLabel(row.overtimeBasis)} / estimasi ${formatCurrency(Math.round((row.overtimeMinutes / 60) * row.rateAmount))}` : "Belum payable sampai checkout dan settlement valid."}</p>
+              <p>{canApprovePayroll ? `${scopeLabel} / ${formatCurrency(row.rateAmount)}/jam / estimasi ${formatCurrency(Math.round((maxApproveMinutes / 60) * row.rateAmount))}` : "Belum payable sampai checkout dan settlement valid."}</p>
             </div>
           </div>
 
@@ -24298,7 +24847,7 @@ function OvertimeReviewDialog({
             <div>
               <span>Realisasi</span>
               <strong>{realizationLabel}</strong>
-              <small>{getOvertimeOutsideShiftLabel(row)}</small>
+              <small>{scopeNote}</small>
             </div>
             <div>
               <span>Dibayar</span>
@@ -24348,7 +24897,7 @@ function OvertimeReviewDialog({
               label="Menit Dibayar"
               type="number"
               min={1}
-              max={row.overtimeMinutes}
+              max={maxApproveMinutes}
               value={approvedMinutes}
               onChange={(event) => setApprovedMinutes(event.target.value)}
               required

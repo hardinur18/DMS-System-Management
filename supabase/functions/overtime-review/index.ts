@@ -83,7 +83,7 @@ Deno.serve(async (request) => {
 
     const { data: overtime, error: overtimeError } = await adminClient
       .from("overtime_requests")
-      .select("id, employee_id, payroll_cycle_id, overtime_date, overtime_minutes, approved_minutes, rate_amount, total_amount, status, request_source, overtime_basis, overtime_payment_policy, actual_check_out_at, notes")
+      .select("id, employee_id, payroll_cycle_id, overtime_date, overtime_segment, overtime_minutes, approved_minutes, rate_amount, total_amount, status, request_source, overtime_basis, overtime_payment_policy, actual_check_out_at, notes")
       .eq("id", payload.id)
       .maybeSingle()
 
@@ -198,6 +198,7 @@ Deno.serve(async (request) => {
       status: "success",
       metadata: {
         overtime_date: overtime.overtime_date,
+        overtime_segment: overtime.overtime_segment || "total",
         previous_status: overtime.status,
         next_status: approved ? "approved" : "rejected",
         overtime_minutes: requestedMinutes,

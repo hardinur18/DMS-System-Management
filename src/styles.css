@@ -18200,19 +18200,84 @@ button {
 }
 
 @media print {
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+
+  html,
+  body,
+  #root {
+    width: 100% !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+
   body * {
     visibility: hidden !important;
   }
 
+  body:has(.payrollPayslipSheet) > *:not(.foundationDialogBackdrop) {
+    display: none !important;
+  }
+
+  body:has(.payrollPayslipSheet) .foundationDialogBackdrop:not(:has(.payrollPayslipSheet)) {
+    display: none !important;
+  }
+
+  .dialogBackdrop,
+  .payrollPayslipDialog,
+  .payrollPayslipDialog *,
   .employeeNametagCard,
-  .employeeNametagCard * {
+  .employeeNametagCard *,
+  .payrollPayslipSheet,
+  .payrollPayslipSheet * {
     visibility: visible !important;
+  }
+
+  .dialogBackdrop,
+  .payrollPayslipDialog {
+    position: static !important;
+    display: block !important;
+    width: auto !important;
+    max-width: none !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: #fff !important;
+    box-shadow: none !important;
   }
 
   .employeeNametagCard {
     position: fixed;
     inset: 24px auto auto 24px;
     width: 360px;
+    box-shadow: none;
+  }
+
+  .payrollPayslipToolbar,
+  .payrollPayslipToolbar * {
+    display: none !important;
+  }
+
+  .payrollPayslipSheet {
+    position: static !important;
+    inset: auto !important;
+    display: block !important;
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0;
+    padding: 12mm !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+    border: 2px solid #3f7be8 !important;
+    background: #fff !important;
     box-shadow: none;
   }
 }
@@ -19624,8 +19689,281 @@ button {
   padding: 0 22px 16px;
 }
 
+.payrollHistoryFilterPanel {
+  position: relative;
+  z-index: 20;
+  display: grid;
+  gap: 12px;
+  padding: 0 22px 16px;
+}
+
+.payrollHistoryFilterRow {
+  display: grid;
+  grid-template-columns: minmax(280px, 430px) auto;
+  gap: 14px;
+  align-items: stretch;
+  justify-content: space-between;
+}
+
+.payrollHistoryDateField {
+  flex: none;
+}
+
+.payrollHistoryExpenseSummary {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 8px;
+  background: rgba(248, 250, 252, 0.76);
+}
+
+.payrollHistoryExpenseSummary .payrollFinanceMetric {
+  min-height: 50px;
+  padding: 7px 12px;
+}
+
+.payrollHistoryExpenseSummary .payrollFinanceMetric strong {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+}
+
+.payrollHistoryExpenseSummary .payrollFinanceMetric em {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+}
+
+.payrollHistoryFilterRow > .secondaryButton {
+  align-self: center;
+  min-width: 132px;
+}
+
 .payrollWorkspaceCard .tableHeader {
   padding-bottom: 14px;
+}
+
+.payrollPayslipDialog {
+  width: min(980px, calc(100vw - 32px));
+  max-height: min(94dvh, 980px);
+  overflow: auto;
+}
+
+.payrollPayslipToolbar {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.payrollPayslipToolbar div:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.payrollPayslipToolbar span {
+  color: var(--ops-muted);
+  font-size: 0.78rem;
+  font-weight: var(--fw-label);
+}
+
+.payrollPayslipToolbar strong {
+  color: var(--ops-ink);
+  font-size: 1rem;
+  font-weight: var(--fw-body-strong);
+}
+
+.payrollPayslipActions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.payrollPayslipSheet {
+  width: min(820px, calc(100vw - 72px));
+  margin: 20px auto 28px;
+  padding: 36px 36px 34px;
+  border: 2px solid #3f7be8;
+  color: #050505;
+  background: #fff;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.payrollPayslipHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.95fr);
+  gap: 44px;
+  align-items: start;
+}
+
+.payrollPayslipTitle {
+  min-width: 0;
+}
+
+.payrollPayslipCompany {
+  display: grid;
+  gap: 7px;
+  font-size: 0.92rem;
+  line-height: 1.35;
+}
+
+.payrollPayslipCompany img {
+  width: 98px;
+  height: auto;
+  margin: 0 0 24px 48px;
+  object-fit: contain;
+}
+
+.payrollPayslipCompany strong {
+  font-size: 1.02rem;
+  font-weight: 800;
+}
+
+.payrollPayslipTitle h2 {
+  margin: 18px 0 42px;
+  text-align: center;
+  font-size: 1.55rem;
+  font-weight: 900;
+  letter-spacing: 0.03em;
+}
+
+.payrollPayslipTitle dl,
+.payrollPayslipInlineIdentity,
+.payrollPayslipColumn dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.payrollPayslipTitle dl > div,
+.payrollPayslipInlineIdentity > div,
+.payrollPayslipColumn dl > div,
+.payrollPayslipTotals > div {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) 14px minmax(0, 1.15fr);
+  gap: 8px;
+  align-items: baseline;
+}
+
+.payrollPayslipTitle dt,
+.payrollPayslipTitle dd,
+.payrollPayslipInlineIdentity dt,
+.payrollPayslipInlineIdentity dd,
+.payrollPayslipColumn dt,
+.payrollPayslipColumn dd,
+.payrollPayslipPeriod,
+.payrollPayslipTotals {
+  font-size: 0.98rem;
+}
+
+.payrollPayslipTitle dt,
+.payrollPayslipTitle dd,
+.payrollPayslipInlineIdentity dt,
+.payrollPayslipInlineIdentity dd,
+.payrollPayslipPeriod strong,
+.payrollPayslipPeriod b,
+.payrollPayslipTotals strong,
+.payrollPayslipTotals b {
+  font-weight: 800;
+}
+
+.payrollPayslipTitle dd,
+.payrollPayslipInlineIdentity dd,
+.payrollPayslipColumn dd {
+  margin: 0;
+}
+
+.payrollPayslipInlineIdentity {
+  margin: 30px 0 0;
+}
+
+.payrollPayslipInlineIdentity > div {
+  grid-template-columns: 210px 14px minmax(0, 1fr);
+}
+
+.payrollPayslipInlineIdentity dd {
+  text-align: left;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.payrollPayslipPeriod {
+  display: grid;
+  grid-template-columns: 210px 14px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+  margin: 34px 0 18px;
+}
+
+.payrollPayslipGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 38px;
+}
+
+.payrollPayslipColumn h3 {
+  margin: 0 0 34px;
+  padding: 7px 12px;
+  text-align: center;
+  color: #000;
+  background: #72aadb;
+  font-size: 1.02rem;
+  font-weight: 900;
+}
+
+.payrollPayslipColumn dl {
+  min-height: 170px;
+}
+
+.payrollPayslipTotals {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 38px;
+  margin-top: 18px;
+  padding-top: 28px;
+  border-top: 2px solid #3f7be8;
+}
+
+.payrollPayslipFooter {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 0.9fr);
+  gap: 38px;
+  align-items: end;
+  margin-top: 44px;
+}
+
+.payrollPayslipNote {
+  display: grid;
+  gap: 10px;
+  font-size: 0.9rem;
+  line-height: 1.2;
+}
+
+.payrollPayslipNet {
+  display: grid;
+  min-height: 104px;
+  place-items: center;
+  gap: 12px;
+  padding: 10px 24px;
+  border: 2px solid #3f7be8;
+  text-align: center;
+}
+
+.payrollPayslipNet span {
+  font-size: 1.08rem;
+  font-weight: 900;
+}
+
+.payrollPayslipNet strong {
+  font-size: 1.42rem;
+  font-weight: 900;
 }
 
 .payrollCycleSubtabs {
@@ -20147,6 +20485,14 @@ button {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .payrollHistoryFilterRow {
+    grid-template-columns: 1fr;
+  }
+
+  .payrollHistoryExpenseSummary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .payrollFinanceMetric:nth-child(odd) {
     border-left: 0;
   }
@@ -20170,6 +20516,31 @@ button {
   .weeklyBonusPolicyLayout {
     grid-template-columns: 1fr;
   }
+
+  .payrollPayslipSheet {
+    width: calc(100vw - 48px);
+    padding: 36px 28px;
+  }
+
+  .payrollPayslipHeader,
+  .payrollPayslipGrid,
+  .payrollPayslipTotals,
+  .payrollPayslipFooter {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+
+  .payrollPayslipCompany img {
+    margin-left: 0;
+  }
+
+  .payrollPayslipTitle h2 {
+    margin: 8px 0 24px;
+  }
+
+  .payrollPayslipInlineIdentity > div {
+    grid-template-columns: 180px 14px minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 620px) {
@@ -20187,6 +20558,18 @@ button {
     padding-inline: 14px;
   }
 
+  .payrollHistoryFilterPanel {
+    padding-inline: 14px;
+  }
+
+  .payrollHistoryExpenseSummary {
+    grid-template-columns: 1fr;
+  }
+
+  .payrollHistoryFilterRow > .secondaryButton {
+    width: 100%;
+  }
+
   .payrollCycleSubtabs {
     padding-inline: 14px;
   }
@@ -20198,6 +20581,24 @@ button {
   .payrollIconButton,
   .payrollTableActions .rowActionButton {
     flex: 0 0 40px;
+  }
+
+  .payrollPayslipToolbar,
+  .payrollPayslipActions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .payrollPayslipSheet {
+    width: calc(100vw - 28px);
+    padding: 26px 18px;
+  }
+
+  .payrollPayslipInlineIdentity > div,
+  .payrollPayslipColumn dl > div,
+  .payrollPayslipTotals > div,
+  .payrollPayslipPeriod {
+    grid-template-columns: 120px 12px minmax(0, 1fr);
   }
 
   .payrollProcessDialog {
