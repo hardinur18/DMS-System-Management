@@ -39,12 +39,12 @@ begin
     and pg_class.relname = 'overtime_requests'
     and pg_constraint.contype = 'u'
     and (
-      select array_agg(pg_attribute.attname order by key_order.ordinality)
+      select array_agg(pg_attribute.attname::text order by key_order.ordinality)
       from unnest(pg_constraint.conkey) with ordinality as key_order(attnum, ordinality)
       join pg_attribute
         on pg_attribute.attrelid = pg_constraint.conrelid
        and pg_attribute.attnum = key_order.attnum
-    ) = array['employee_id', 'overtime_date']
+    ) = array['employee_id', 'overtime_date']::text[]
   limit 1;
 
   if constraint_name is not null then
