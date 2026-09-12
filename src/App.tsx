@@ -22644,8 +22644,8 @@ function getOvertimeOutsideShiftLabel(row: Pick<OvertimeReviewRow, "preShiftMinu
 
 const overtimeTimingFilterOptions: Array<{ value: OvertimeTimingFilter; label: string; helper: string }> = [
   { value: "all", label: "Semua", helper: "Semua request" },
-  { value: "pre_shift", label: "Sebelum saja", helper: "Check-in awal" },
-  { value: "post_shift", label: "Setelah saja", helper: "Checkout lewat" },
+  { value: "pre_shift", label: "Sebelum shift", helper: "Ada check-in awal" },
+  { value: "post_shift", label: "Setelah shift", helper: "Ada checkout lewat" },
   { value: "split_shift", label: "Sebelum + Setelah", helper: "Dua sisi shift" },
   { value: "full_duration", label: "Full durasi", helper: "Minggu/libur" },
   { value: "pending_realization", label: "Belum realisasi", helper: "Menunggu checkout" },
@@ -22669,6 +22669,8 @@ function getOvertimeTimingFilterLabel(filter: OvertimeTimingFilter) {
 
 function matchesOvertimeTimingFilter(row: OvertimeReviewRow, filter: OvertimeTimingFilter) {
   if (filter === "all") return true
+  if (filter === "pre_shift") return row.preShiftMinutes > 0
+  if (filter === "post_shift") return row.postShiftMinutes > 0
   return getOvertimeTimingBucket(row) === filter
 }
 
@@ -23715,10 +23717,8 @@ function OvertimeReviewTable({
   const timingFilteredRows = useMemo(() => rows.filter((row) => matchesOvertimeTimingFilter(row, timingFilter)), [rows, timingFilter])
   const timingCounts = useMemo(() => {
     const counts = new Map<OvertimeTimingFilter, number>(overtimeTimingFilterOptions.map((option) => [option.value, 0]))
-    counts.set("all", rows.length)
-    rows.forEach((row) => {
-      const bucket = getOvertimeTimingBucket(row)
-      counts.set(bucket, (counts.get(bucket) || 0) + 1)
+    overtimeTimingFilterOptions.forEach((option) => {
+      counts.set(option.value, rows.filter((row) => matchesOvertimeTimingFilter(row, option.value)).length)
     })
     return counts
   }, [rows])
