@@ -14858,9 +14858,7 @@ function EmployeeNametagDialog({ row, onClose }: { row: EmployeeDirectoryRow | n
     .map((line, index) => `<text x="270" y="${nameLines.length === 1 ? 374 : 356 + index * 34}" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="${nameLines.length === 1 ? 31 : 28}" font-weight="800" fill="#071332">${escapeSvgText(line)}</text>`)
     .join("")
   const positionLabel = truncateIdCardText(row.positionName || "-", 27)
-  const divisionLabel = truncateIdCardText(row.divisionName || "-", 27)
-  const locationLabel = truncateIdCardText(row.workLocationName || "-", 26)
-  const employmentTypeLabel = truncateIdCardText(row.employmentTypeName || employeeStatusLabel[row.status] || "-", 24)
+  const divisionLabel = truncateIdCardText(row.divisionName || "-", 30)
   const svgInitials = escapeSvgText(getProfileInitials(row.fullName || row.employeeCode))
   const svgEmployeeCode = escapeSvgText(truncateIdCardText(row.employeeCode, 18))
   const svgBarcodeValue = escapeSvgText(truncateIdCardText(barcodeValue, 42))
@@ -14879,12 +14877,8 @@ function EmployeeNametagDialog({ row, onClose }: { row: EmployeeDirectoryRow | n
   ${svgNameLines}
   <text x="270" y="424" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="21" font-weight="800" fill="#0085a0">${escapeSvgText(positionLabel)}</text>
   <line x1="70" y1="460" x2="470" y2="460" stroke="#d8e2ec" stroke-width="2"/>
-  <text x="78" y="502" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="800" fill="#697891">DIVISI</text>
-  <text x="78" y="530" font-family="Arial, Helvetica, sans-serif" font-size="21" font-weight="800" fill="#071332">${escapeSvgText(divisionLabel)}</text>
-  <text x="306" y="502" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="800" fill="#697891">LOKASI</text>
-  <text x="306" y="530" font-family="Arial, Helvetica, sans-serif" font-size="21" font-weight="800" fill="#071332">${escapeSvgText(locationLabel)}</text>
-  <text x="78" y="574" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="800" fill="#697891">STATUS</text>
-  <text x="78" y="602" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="800" fill="#071332">${escapeSvgText(employmentTypeLabel)}</text>
+  <text x="270" y="510" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="800" fill="#697891">DIVISI</text>
+  <text x="270" y="540" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="800" fill="#071332">${escapeSvgText(divisionLabel)}</text>
   <rect x="62" y="638" width="416" height="82" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
   <svg x="78" y="654" width="384" height="46" viewBox="0 0 ${barcode.width} 52" preserveAspectRatio="none">
     <rect width="${barcode.width}" height="52" fill="#ffffff"/>
@@ -14941,14 +14935,6 @@ function EmployeeNametagDialog({ row, onClose }: { row: EmployeeDirectoryRow | n
               <span>
                 <small>Divisi</small>
                 <strong>{row.divisionName || "-"}</strong>
-              </span>
-              <span>
-                <small>Lokasi</small>
-                <strong>{row.workLocationName || "-"}</strong>
-              </span>
-              <span>
-                <small>Status</small>
-                <strong>{row.employmentTypeName || employeeStatusLabel[row.status] || "-"}</strong>
               </span>
             </div>
             <div className="employeeNametagBarcode">

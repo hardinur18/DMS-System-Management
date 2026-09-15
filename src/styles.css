@@ -18416,20 +18416,16 @@ button {
 .employeeNametagInfoGrid {
   width: 100%;
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px 16px;
+  grid-template-columns: 1fr;
+  gap: 10px;
   margin-top: 20px;
   padding-top: 18px;
   border-top: 1px solid #d8e2ec;
-  text-align: left;
+  text-align: center;
 }
 
 .employeeNametagInfoGrid span {
   min-width: 0;
-}
-
-.employeeNametagInfoGrid span:last-child {
-  grid-column: 1 / -1;
 }
 
 .employeeNametagInfoGrid small {
