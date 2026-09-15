@@ -83,8 +83,22 @@ function normalizeBonusAmount(value: unknown) {
   return amount
 }
 
+function getErrorMessage(error: unknown, fallback = "") {
+  if (error instanceof Error) return error.message || fallback
+  if (typeof error === "object" && error) {
+    const errorObject = error as Record<string, unknown>
+    const messageParts = [errorObject.message, errorObject.details, errorObject.hint]
+      .map((part) => typeof part === "string" ? part.trim() : "")
+      .filter(Boolean)
+    if (messageParts.length > 0) return messageParts.join(" ")
+  }
+
+  const text = String(error || "").trim()
+  return text && text !== "[object Object]" ? text : fallback
+}
+
 function isMissingLedgerError(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error || "")
+  const message = getErrorMessage(error)
   return /payroll_payments|payroll_cycle_items|overtime_payments|overtime_payment_items|overtime_payment_status|overtime_payment_policy|weekly_bonus_policies|weekly_bonus_policy_shifts|weekly_shift_bonus_cycles|weekly_shift_bonus_payments|weekly_shift_bonus_payment_items|target_payment_policy|set_overtime_payment_policy|mark_payroll_cycle_paid|mark_overtime_requests_paid|void_overtime_payment|refresh_weekly_shift_bonus_cycles|mark_weekly_shift_bonus_paid|void_weekly_bonus_payment|rebuild_payroll_cycle_items|schema cache|PGRST202/i.test(message)
 }
 
@@ -549,7 +563,7 @@ Deno.serve(async (request) => {
 
     return jsonResponse({ ok: true, payroll: updatedCycle })
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Payroll gagal diproses."
+    const message = getErrorMessage(error, "Payroll gagal diproses.")
     return jsonResponse({ error: message }, 400)
   }
 })
