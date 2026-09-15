@@ -14902,13 +14902,13 @@ function EmployeeNametagDialog({ row, onClose }: { row: EmployeeDirectoryRow | n
   <line x1="70" y1="476" x2="470" y2="476" stroke="#d8e2ec" stroke-width="2"/>
   <text x="270" y="526" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="800" fill="#697891">DIVISI</text>
   <text x="270" y="556" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="800" fill="#071332">${escapeSvgText(divisionLabel)}</text>
-  <rect x="62" y="638" width="416" height="82" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
-  <svg x="78" y="654" width="384" height="46" viewBox="0 0 ${barcode.width} 52" preserveAspectRatio="none">
+  <rect x="62" y="600" width="416" height="82" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+  <svg x="78" y="616" width="384" height="46" viewBox="0 0 ${barcode.width} 52" preserveAspectRatio="none">
     <rect width="${barcode.width}" height="52" fill="#ffffff"/>
     ${barSvg}
   </svg>
-  <text x="270" y="754" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="800" fill="#071332">${svgBarcodeValue}</text>
-  <text x="270" y="794" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="700" fill="#697891">PROPERTY OF DMS</text>
+  <text x="270" y="716" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="800" fill="#071332">${svgBarcodeValue}</text>
+  <text x="270" y="756" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="700" fill="#697891">PROPERTY OF DMS</text>
 </svg>`.trim()
 
   return createPortal(
