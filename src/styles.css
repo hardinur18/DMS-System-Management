@@ -18307,7 +18307,7 @@ button {
   content: "";
   position: absolute;
   inset: 0 0 auto;
-  height: 92px;
+  height: 88px;
   background: #071332;
   z-index: 0;
 }
@@ -18320,7 +18320,7 @@ button {
 .employeeNametagBrand {
   width: 100%;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
   text-align: left;
   color: #ffffff;
@@ -18339,34 +18339,36 @@ button {
 .employeeNametagBrand span {
   display: block;
   color: #bdefff;
-  font-size: 0.68rem;
+  font-size: 0.66rem;
   font-weight: 1000;
   text-transform: uppercase;
 }
 
 .employeeNametagBrand strong {
   color: #ffffff;
-  font-size: 0.95rem;
+  font-size: 0.9rem;
   line-height: 1.05;
 }
 
 .employeeNametagBrand em {
   margin-left: auto;
-  max-width: 118px;
-  color: #ffffff;
-  font-size: 0.78rem;
+  max-width: 112px;
+  padding-top: 4px;
+  color: #bdefff;
+  font-size: 0.68rem;
   font-style: normal;
   font-weight: 1000;
   line-height: 1.1;
   text-align: right;
+  text-transform: uppercase;
   overflow-wrap: anywhere;
 }
 
 .employeeNametagAvatar {
-  width: 94px;
-  height: 108px;
+  width: 92px;
+  height: 106px;
   border-radius: 14px;
-  margin: 32px 0 14px;
+  margin: 24px 0 18px;
   border: 3px solid #ffffff;
   background: #eef7fb;
   box-shadow: 0 14px 30px rgba(15, 23, 42, 0.14);
@@ -18384,30 +18386,38 @@ button {
   object-fit: cover;
 }
 
+.employeeNametagIdentity {
+  width: 100%;
+  display: grid;
+  justify-items: center;
+  gap: 7px;
+}
+
 .employeeNametagIdentity span {
   color: var(--accent-strong);
-  font-size: 0.74rem;
+  font-size: 0.72rem;
   font-weight: 1000;
+  line-height: 1;
 }
 
 .employeeNametagIdentity h3 {
   display: -webkit-box;
-  margin: 5px 0 4px;
-  max-width: 292px;
-  min-height: 40px;
+  margin: 0;
+  max-width: 286px;
   color: var(--ink);
-  font-size: 1.24rem;
-  line-height: 1.08;
+  font-size: 1.18rem;
+  font-weight: 1000;
+  line-height: 1.12;
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
 
 .employeeNametagIdentity p {
-  max-width: 292px;
+  max-width: 286px;
   margin: 0;
-  color: var(--accent-strong);
-  font-size: 0.88rem;
+  color: #172033;
+  font-size: 0.85rem;
   font-weight: 900;
   line-height: 1.25;
   overflow-wrap: anywhere;
@@ -18418,8 +18428,8 @@ button {
   display: grid;
   grid-template-columns: 1fr;
   gap: 10px;
-  margin-top: 20px;
-  padding-top: 18px;
+  margin-top: 17px;
+  padding-top: 15px;
   border-top: 1px solid #d8e2ec;
   text-align: center;
 }
@@ -18431,7 +18441,7 @@ button {
 .employeeNametagInfoGrid small {
   display: block;
   color: var(--muted);
-  font-size: 0.67rem;
+  font-size: 0.64rem;
   font-weight: 900;
   text-transform: uppercase;
 }
@@ -18440,7 +18450,7 @@ button {
   display: block;
   margin-top: 3px;
   color: var(--ink);
-  font-size: 0.82rem;
+  font-size: 0.86rem;
   font-weight: 900;
   line-height: 1.2;
   overflow-wrap: anywhere;

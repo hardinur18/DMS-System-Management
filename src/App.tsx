@@ -5545,6 +5545,25 @@ function truncateIdCardText(value: string, maxLength: number) {
   return `${cleanValue.slice(0, Math.max(0, maxLength - 1)).trim()}...`
 }
 
+function formatIdCardDisplayText(value: string) {
+  const cleanValue = String(value || "").trim().replace(/\s+/g, " ")
+  if (!cleanValue) return "-"
+
+  const acronyms = new Set(["DMS", "HR", "HRD", "IT", "GA", "QC", "QA", "CS", "SEO", "KOL", "PKL", "SPV"])
+  return cleanValue
+    .split(" ")
+    .map((word) => word
+      .split(/([-/])/)
+      .map((part) => {
+        if (!part || part === "-" || part === "/") return part
+        const upperPart = part.toUpperCase()
+        if (acronyms.has(upperPart) || /^\d+$/.test(part)) return upperPart
+        return `${part.charAt(0).toUpperCase()}${part.slice(1).toLowerCase()}`
+      })
+      .join(""))
+    .join(" ")
+}
+
 function getIdCardNameLines(value: string) {
   const cleanValue = String(value || "").trim().replace(/\s+/g, " ")
   if (!cleanValue) return ["-"]
@@ -14853,12 +14872,15 @@ function EmployeeNametagDialog({ row, onClose }: { row: EmployeeDirectoryRow | n
   const safeFileName = `${row.employeeCode || "employee"}-id-card`.toLowerCase().replace(/[^a-z0-9_-]/g, "-")
   const barcode = getCode128Segments(barcodeValue)
   const barSvg = barcode.bars.map((bar) => `<rect x="${bar.x}" y="0" width="${bar.width}" height="52" fill="#071332"/>`).join("")
-  const nameLines = getIdCardNameLines(row.fullName || row.employeeCode)
+  const displayName = formatIdCardDisplayText(row.fullName || row.employeeCode)
+  const displayPosition = formatIdCardDisplayText(row.positionName || "-")
+  const displayDivision = formatIdCardDisplayText(row.divisionName || "-")
+  const nameLines = getIdCardNameLines(displayName)
   const svgNameLines = nameLines
-    .map((line, index) => `<text x="270" y="${nameLines.length === 1 ? 374 : 356 + index * 34}" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="${nameLines.length === 1 ? 31 : 28}" font-weight="800" fill="#071332">${escapeSvgText(line)}</text>`)
+    .map((line, index) => `<text x="270" y="${nameLines.length === 1 ? 386 : 366 + index * 32}" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="${nameLines.length === 1 ? 31 : 27}" font-weight="800" fill="#071332">${escapeSvgText(line)}</text>`)
     .join("")
-  const positionLabel = truncateIdCardText(row.positionName || "-", 27)
-  const divisionLabel = truncateIdCardText(row.divisionName || "-", 30)
+  const positionLabel = truncateIdCardText(displayPosition, 27)
+  const divisionLabel = truncateIdCardText(displayDivision, 30)
   const svgInitials = escapeSvgText(getProfileInitials(row.fullName || row.employeeCode))
   const svgEmployeeCode = escapeSvgText(truncateIdCardText(row.employeeCode, 18))
   const svgBarcodeValue = escapeSvgText(truncateIdCardText(barcodeValue, 42))
@@ -14869,16 +14891,17 @@ function EmployeeNametagDialog({ row, onClose }: { row: EmployeeDirectoryRow | n
   <path d="M40 24h460a16 16 0 0 1 16 16v94H24V40a16 16 0 0 1 16-16Z" fill="#071332"/>
   <text x="54" y="72" font-family="Arial, Helvetica, sans-serif" font-size="31" font-weight="900" fill="#ffffff">DMS</text>
   <text x="54" y="101" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#bdefff">EMPLOYEE ID</text>
-  <text x="486" y="80" text-anchor="end" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="800" fill="#ffffff">${svgEmployeeCode}</text>
-  <text x="486" y="103" text-anchor="end" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="700" fill="#9fb2c9">OFFICIAL CARD</text>
+  <text x="486" y="80" text-anchor="end" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="800" fill="#ffffff">OFFICIAL</text>
+  <text x="486" y="103" text-anchor="end" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="700" fill="#9fb2c9">DMS ID CARD</text>
   <circle cx="270" cy="240" r="82" fill="#f8fbff" stroke="#22aeca" stroke-width="4"/>
   <circle cx="270" cy="240" r="70" fill="#eafaff"/>
   <text x="270" y="262" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="52" font-weight="900" fill="#071332">${svgInitials}</text>
+  <text x="270" y="344" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="800" fill="#0085a0">${svgEmployeeCode}</text>
   ${svgNameLines}
-  <text x="270" y="424" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="21" font-weight="800" fill="#0085a0">${escapeSvgText(positionLabel)}</text>
-  <line x1="70" y1="460" x2="470" y2="460" stroke="#d8e2ec" stroke-width="2"/>
-  <text x="270" y="510" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="800" fill="#697891">DIVISI</text>
-  <text x="270" y="540" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="800" fill="#071332">${escapeSvgText(divisionLabel)}</text>
+  <text x="270" y="440" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="21" font-weight="800" fill="#0085a0">${escapeSvgText(positionLabel)}</text>
+  <line x1="70" y1="476" x2="470" y2="476" stroke="#d8e2ec" stroke-width="2"/>
+  <text x="270" y="526" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="800" fill="#697891">DIVISI</text>
+  <text x="270" y="556" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="800" fill="#071332">${escapeSvgText(divisionLabel)}</text>
   <rect x="62" y="638" width="416" height="82" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
   <svg x="78" y="654" width="384" height="46" viewBox="0 0 ${barcode.width} 52" preserveAspectRatio="none">
     <rect width="${barcode.width}" height="52" fill="#ffffff"/>
@@ -14921,20 +14944,20 @@ function EmployeeNametagDialog({ row, onClose }: { row: EmployeeDirectoryRow | n
                 <span>DMS</span>
                 <strong>Employee ID</strong>
               </div>
-              <em>{row.employeeCode}</em>
+              <em>Official</em>
             </div>
             <div className="employeeNametagAvatar">
               {row.photoUrl ? <img src={row.photoUrl} alt="" /> : <span>{getProfileInitials(row.fullName || row.employeeCode)}</span>}
             </div>
             <div className="employeeNametagIdentity">
               <span>{row.employeeCode}</span>
-              <h3>{row.fullName || row.employeeCode}</h3>
-              <p>{row.positionName || "-"}</p>
+              <h3>{displayName}</h3>
+              <p>{displayPosition}</p>
             </div>
             <div className="employeeNametagInfoGrid">
               <span>
                 <small>Divisi</small>
-                <strong>{row.divisionName || "-"}</strong>
+                <strong>{displayDivision}</strong>
               </span>
             </div>
             <div className="employeeNametagBarcode">
