@@ -763,7 +763,9 @@ type EmployeeStatus = "active" | "review" | "inactive"
 type EmployeeSalaryType = "daily" | "monthly"
 type EmployeePayrollMethod = "attendance_cycle" | "calendar_month" | "custom"
 type EmployeePayPolicy = "salary" | "allowance" | "unpaid" | "not_counted"
-type EmployeeDirectoryTab = "all" | EmployeeStatus | "archived" | "budgeting"
+type EmployeeDirectoryTab = "all" | EmployeeStatus | "archived" | "budgeting" | "tenure"
+type EmployeeContractStatus = "non_contract" | "missing" | "safe" | "watch" | "urgent" | "expired"
+type EmployeeContractFilter = "all" | EmployeeContractStatus
 
 interface EmploymentTypeOption extends EmployeeOption {
   description: string
@@ -809,6 +811,8 @@ interface EmployeeDirectoryRow {
   kioskAccessEnabled: boolean
   lastCardIssuedAt: string
   joinDate: string
+  contractStartDate: string
+  contractEndDate: string
   payrollCycleDays: number
   payrollCycleOpeningDate: string
   status: EmployeeStatus
@@ -857,7 +861,10 @@ interface EmployeeFormValues {
   kioskAccessEnabled: boolean
   kioskSchemaReady: boolean
   payrollOpeningSchemaReady: boolean
+  contractSchemaReady: boolean
   joinDate: string
+  contractStartDate: string
+  contractEndDate: string
   payrollCycleDays: string
   payrollCycleOpeningDate: string
   status: EmployeeStatus
@@ -892,10 +899,11 @@ interface EmployeeDirectoryData {
   policies: AttendancePolicyOption[]
   kioskSchemaReady: boolean
   payrollOpeningSchemaReady: boolean
+  contractSchemaReady: boolean
 }
 
 function createEmptyEmployeeDirectoryData(): EmployeeDirectoryData {
-  return { rows: [], divisions: [], positions: [], locations: [], shifts: [], employmentTypes: [], policies: [], kioskSchemaReady: true, payrollOpeningSchemaReady: true }
+  return { rows: [], divisions: [], positions: [], locations: [], shifts: [], employmentTypes: [], policies: [], kioskSchemaReady: true, payrollOpeningSchemaReady: true, contractSchemaReady: true }
 }
 
 type ShiftScheduleStatus = "active" | "cancelled"
@@ -4741,6 +4749,75 @@ function getEmployeeTenureLabel(joinDate?: string | null) {
   return `${Math.max(days, 0)} Hr`
 }
 
+function parseEmployeeDateKey(value?: string | null) {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null
+  const [year, month, day] = value.split("-").map(Number)
+  const date = new Date(year, month - 1, day)
+
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null
+  return date
+}
+
+function getEmployeeTenureDays(joinDate?: string | null) {
+  const startDate = parseEmployeeDateKey(joinDate)
+  const today = parseEmployeeDateKey(getLocalDateKey())
+
+  if (!startDate || !today) return 0
+  return Math.max(0, Math.floor((today.getTime() - startDate.getTime()) / 86400000))
+}
+
+function isPermanentEmployee(row: Pick<EmployeeDirectoryRow, "employmentTypeCode" | "employmentTypeName">) {
+  const employmentCode = row.employmentTypeCode.trim().toUpperCase()
+  if (!employmentCode) return true
+  return employmentCode === "EMPSTAT-TETAP" || row.employmentTypeName.trim().toLowerCase() === "karyawan tetap"
+}
+
+function getEmployeeContractMeta(row: Pick<EmployeeDirectoryRow, "employmentTypeCode" | "employmentTypeName" | "contractStartDate" | "contractEndDate">): {
+  status: EmployeeContractStatus
+  label: string
+  remainingLabel: string
+  remainingDays: number | null
+  tone: "valid" | "pending" | "failed" | "missing"
+} {
+  if (isPermanentEmployee(row)) {
+    return { status: "non_contract", label: "Non Kontrak", remainingLabel: "Non Kontrak", remainingDays: null, tone: "missing" }
+  }
+
+  const endDate = parseEmployeeDateKey(row.contractEndDate)
+  if (!row.contractStartDate || !row.contractEndDate || !endDate) {
+    return { status: "missing", label: "Belum Lengkap", remainingLabel: "Perlu isi tanggal", remainingDays: null, tone: "missing" }
+  }
+
+  const today = parseEmployeeDateKey(getLocalDateKey()) || new Date()
+  const remainingDays = Math.ceil((endDate.getTime() - today.getTime()) / 86400000)
+
+  if (remainingDays < 0) {
+    return { status: "expired", label: "Expired", remainingLabel: `Lewat ${formatNumber(Math.abs(remainingDays))} hari`, remainingDays, tone: "failed" }
+  }
+
+  if (remainingDays <= 30) {
+    return { status: "urgent", label: "Segera", remainingLabel: `${formatNumber(remainingDays)} hari`, remainingDays, tone: "failed" }
+  }
+
+  if (remainingDays <= 60) {
+    return { status: "watch", label: "Pantau", remainingLabel: `${formatNumber(remainingDays)} hari`, remainingDays, tone: "pending" }
+  }
+
+  return { status: "safe", label: "Aman", remainingLabel: `${formatNumber(remainingDays)} hari`, remainingDays, tone: "valid" }
+}
+
+function getEmployeeContractPeriodLabel(row: Pick<EmployeeDirectoryRow, "contractStartDate" | "contractEndDate" | "employmentTypeCode" | "employmentTypeName">) {
+  if (isPermanentEmployee(row)) return "Non Kontrak"
+  if (!row.contractStartDate && !row.contractEndDate) return "Belum diisi"
+  return `${formatEmployeeDate(row.contractStartDate)} - ${formatEmployeeDate(row.contractEndDate)}`
+}
+
+function addYearsToEmployeeDateKey(value: string, years: number) {
+  const date = parseEmployeeDateKey(value) || parseEmployeeDateKey(getLocalDateKey()) || new Date()
+  date.setFullYear(date.getFullYear() + years)
+  return getLocalDateKey(date)
+}
+
 type EmployeeBudgetDivisionSummary = {
   id: string
   name: string
@@ -5087,6 +5164,170 @@ function EmployeeBudgetSignalItem({
   )
 }
 
+function EmployeeContractStatusBadge({ row }: { row: EmployeeDirectoryRow }) {
+  const contractMeta = getEmployeeContractMeta(row)
+  return <UiStatusBadge tone={contractMeta.tone}>{contractMeta.label}</UiStatusBadge>
+}
+
+function EmployeeTenureBoard({
+  rows,
+  summaryRows,
+  loading,
+  errorMessage,
+  currentPage,
+  pageSize,
+  totalRows,
+  canManage,
+  saving,
+  contractSchemaReady,
+  onPageChange,
+  onPageSizeChange,
+  onOpenDetail,
+  onExtend,
+}: {
+  rows: EmployeeDirectoryRow[]
+  summaryRows: EmployeeDirectoryRow[]
+  loading: boolean
+  errorMessage: string
+  currentPage: number
+  pageSize: number
+  totalRows: number
+  canManage: boolean
+  saving: boolean
+  contractSchemaReady: boolean
+  onPageChange: (page: number) => void
+  onPageSizeChange: (pageSize: number) => void
+  onOpenDetail: (row: EmployeeDirectoryRow) => void
+  onExtend: (row: EmployeeDirectoryRow) => void
+}) {
+  const tenureTableDrag = useHorizontalDragScroll<HTMLDivElement>()
+  const trackedRows = summaryRows.filter((row) => !isPermanentEmployee(row))
+  const attentionRows = trackedRows.filter((row) => {
+    const status = getEmployeeContractMeta(row).status
+    return status === "watch" || status === "urgent" || status === "expired"
+  })
+  const missingRows = trackedRows.filter((row) => getEmployeeContractMeta(row).status === "missing")
+  const oldestRow = summaryRows
+    .slice()
+    .sort((a, b) => getEmployeeTenureDays(b.joinDate) - getEmployeeTenureDays(a.joinDate) || a.fullName.localeCompare(b.fullName, "id-ID"))[0]
+
+  return (
+    <section className="employeeTenurePanel">
+      <OperationalKpiGrid className="employeeTenureKpiGrid">
+        <OperationalKpiCard label="Karyawan" value={loading ? <FoundationSkeleton className="kpiValue" /> : formatNumber(summaryRows.length)} detail="Sesuai filter aktif" icon={UsersRound} tone="blue" />
+        <OperationalKpiCard label="Kontrak Aktif" value={loading ? <FoundationSkeleton className="kpiValue" /> : formatNumber(trackedRows.length)} detail="Kontrak, probation, magang, harian" icon={ClipboardList} tone="violet" />
+        <OperationalKpiCard label="Pantau" value={loading ? <FoundationSkeleton className="kpiValue" /> : formatNumber(attentionRows.length)} detail="Sisa <= 60 hari atau expired" icon={AlertTriangle} tone={attentionRows.length > 0 ? "amber" : "green"} />
+        <OperationalKpiCard label="Paling Lama" value={loading ? <FoundationSkeleton className="kpiValue" /> : oldestRow ? getEmployeeTenureLabel(oldestRow.joinDate) : "-"} detail={oldestRow ? `${oldestRow.employeeCode} / ${oldestRow.fullName}` : "Belum ada data"} icon={Clock3} tone="green" />
+      </OperationalKpiGrid>
+
+      {!contractSchemaReady && (
+        <div className="inlineAlert">
+          Migration kontrak belum aktif di database. Tanggal awal/akhir kontrak dan perpanjangan akan aktif setelah migration diterapkan.
+        </div>
+      )}
+
+      <OperationalTableCard>
+        <div className="tableHeader">
+          <div>
+            <h2>Masa Kerja & Kontrak</h2>
+            <p>Ranking lama kerja dari tanggal masuk, dengan sisa kontrak untuk status kerja non-tetap.</p>
+          </div>
+          <div className="employeeTenureTableMeta">
+            <span>{formatNumber(missingRows.length)} belum lengkap</span>
+            <span>{formatNumber(attentionRows.length)} perlu pantau</span>
+          </div>
+        </div>
+        <div
+          ref={tenureTableDrag.ref}
+          className={clsx("tableScroller uiDataTableScroller uiDataTableHasColumns employeeTableScroller employeeTenureTableScroller", tenureTableDrag.dragging && "dragging")}
+          {...tenureTableDrag.handlers}
+        >
+          <table>
+            <colgroup>
+              <col className="tableNumberColumn" />
+              <col style={{ width: "21%" }} />
+              <col style={{ width: "15%" }} />
+              <col style={{ width: "15%" }} />
+              <col style={{ width: "15%" }} />
+              <col style={{ width: "13%" }} />
+              <col style={{ width: "10%" }} />
+              <col className="tableActionColumn" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th className="tableNumberHeader">No</th>
+                <th>Karyawan</th>
+                <th>Jabatan</th>
+                <th>Tanggal Masuk</th>
+                <th>Periode Kontrak</th>
+                <th>Sisa Kontrak</th>
+                <th>Status</th>
+                <th className="tableActionHeader">Aksi</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading && <FoundationTableSkeletonRows colSpan={8} columns={8} rows={6} />}
+              {!loading && errorMessage && summaryRows.length === 0 && (
+                <tr>
+                  <td className="tableStateCell" colSpan={8}>
+                    <TableState title="Gagal memuat data" description={errorMessage} icon={AlertTriangle} tone="danger" />
+                  </td>
+                </tr>
+              )}
+              {!loading && !errorMessage && summaryRows.length === 0 && (
+                <tr>
+                  <td className="tableStateCell" colSpan={8}>
+                    <TableState title="Data masa kerja kosong" description="Ubah filter atau tambah karyawan baru." icon={Search} />
+                  </td>
+                </tr>
+              )}
+              {!loading && rows.map((row, index) => {
+                const contractMeta = getEmployeeContractMeta(row)
+                const rowNumber = (currentPage - 1) * Math.min(pageSize, 50) + index + 1
+
+                return (
+                  <ClickableTableRow key={row.id} label={`Lihat detail ${row.fullName}`} onOpen={() => onOpenDetail(row)}>
+                    <td className="tableNumberCell"><TableNumberCell value={rowNumber} /></td>
+                    <td><EmployeeIdentityCell fullName={row.fullName} code={row.employeeCode} photoUrl={row.photoUrl} onOpen={() => onOpenDetail(row)} /></td>
+                    <td><TableText primary={row.positionName} secondary={row.divisionName} /></td>
+                    <td><TableText primary={formatEmployeeDate(row.joinDate)} secondary={getEmployeeTenureLabel(row.joinDate)} /></td>
+                    <td><TableText primary={getEmployeeContractPeriodLabel(row)} secondary={row.employmentTypeName} /></td>
+                    <td><TableText primary={contractMeta.remainingLabel} secondary={contractMeta.remainingDays === null ? "Tidak dihitung" : `Akhir ${formatEmployeeDate(row.contractEndDate)}`} /></td>
+                    <td><EmployeeContractStatusBadge row={row} /></td>
+                    <td className="tableActionCell">
+                      <div className="rowActions">
+                        <RowActionMenu label={`Aksi masa kerja ${row.fullName}`}>
+                          <RowActionMenuItem onClick={() => onOpenDetail(row)}>
+                            <Eye size={14} />
+                            Detail
+                          </RowActionMenuItem>
+                          {!isPermanentEmployee(row) && (
+                            <RowActionMenuItem disabled={!canManage || saving || !contractSchemaReady || Boolean(row.deletedAt)} onClick={() => onExtend(row)}>
+                              <CalendarCheck2 size={14} />
+                              Perpanjang Kontrak
+                            </RowActionMenuItem>
+                          )}
+                        </RowActionMenu>
+                      </div>
+                    </td>
+                  </ClickableTableRow>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+        <DataTablePagination
+          page={currentPage}
+          pageSize={pageSize}
+          totalRows={totalRows}
+          onPageChange={onPageChange}
+          onPageSizeChange={onPageSizeChange}
+        />
+      </OperationalTableCard>
+    </section>
+  )
+}
+
 function getEmployeePhotoPublicUrl(path: string) {
   if (!path) return ""
   const { data } = supabase.storage.from(employeePhotoBucket).getPublicUrl(path)
@@ -5151,7 +5392,10 @@ function createEmptyEmployeeForm(rows: EmployeeDirectoryRow[] = []): EmployeeFor
     kioskAccessEnabled: true,
     kioskSchemaReady: true,
     payrollOpeningSchemaReady: true,
+    contractSchemaReady: true,
     joinDate: new Date().toISOString().slice(0, 10),
+    contractStartDate: "",
+    contractEndDate: "",
     payrollCycleDays: "0",
     payrollCycleOpeningDate: "",
     status: "active",
@@ -5527,6 +5771,16 @@ function isMissingPayrollOpeningSchema(error: unknown) {
 
   return message.includes("payroll_cycle_opening_date")
     || message.includes("schema cache")
+}
+
+function isMissingEmployeeContractSchema(error: unknown) {
+  const errorObject = error && typeof error === "object" ? error as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown } : null
+  const message = `${String(errorObject?.code || "")} ${String(errorObject?.message || "")} ${String(errorObject?.details || "")} ${String(errorObject?.hint || "")}`.toLowerCase()
+
+  return message.includes("contract_start_date")
+    || message.includes("contract_end_date")
+    || message.includes("employee_contract_extensions")
+    || message.includes("extend_employee_contract")
 }
 
 function isMissingShiftScheduleSchema(error: unknown) {
@@ -6355,6 +6609,8 @@ function mapEmployeeRow(
     kioskAccessEnabled: row.kiosk_access_enabled !== false,
     lastCardIssuedAt: row.last_card_issued_at ? String(row.last_card_issued_at) : "",
     joinDate: row.join_date ? String(row.join_date) : "",
+    contractStartDate: row.contract_start_date ? String(row.contract_start_date) : "",
+    contractEndDate: row.contract_end_date ? String(row.contract_end_date) : "",
     payrollCycleDays: Number(row.payroll_cycle_days || 0),
     payrollCycleOpeningDate: row.payroll_cycle_opening_date ? String(row.payroll_cycle_opening_date) : "",
     status: mapEmployeeStatus(row.status),
@@ -6380,7 +6636,8 @@ async function loadEmployeeData(): Promise<EmployeeDirectoryData> {
   const legacyKioskEmployeeSelect = `${legacyEmployeeSelect}, qr_token, rfid_uid, attendance_policy_id, kiosk_access_enabled, last_card_issued_at`
   const kioskEmployeeSelect = `${baseEmployeeSelect}, qr_token, rfid_uid, attendance_policy_id, kiosk_access_enabled, last_card_issued_at`
   const employmentKioskEmployeeSelect = `${employmentEmployeeSelect}, qr_token, rfid_uid, attendance_policy_id, kiosk_access_enabled, last_card_issued_at`
-  const employeeQuery = supabase.from("employees").select(employmentKioskEmployeeSelect).order("employee_code", { ascending: true })
+  const contractEmploymentKioskEmployeeSelect = `${employmentEmployeeSelect}, contract_start_date, contract_end_date, qr_token, rfid_uid, attendance_policy_id, kiosk_access_enabled, last_card_issued_at`
+  const employeeQuery = supabase.from("employees").select(contractEmploymentKioskEmployeeSelect).order("employee_code", { ascending: true })
   const [initialEmployeesResult, divisions, positions, locations, shifts, employmentTypesResult, faceProfiles, policies, biofingerLinksResult, biofingerDevicesResult] = await Promise.all([
     employeeQuery,
     supabase.from("divisions").select("id, code, name, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
@@ -6396,20 +6653,26 @@ async function loadEmployeeData(): Promise<EmployeeDirectoryData> {
   let kioskSchemaReady = true
   let payrollOpeningSchemaReady = true
   let employmentSchemaReady = true
+  let contractSchemaReady = true
   let employeesResult = initialEmployeesResult as {
     data: Array<Record<string, unknown>> | null
     error: unknown | null
   }
 
   if (initialEmployeesResult.error) {
-    if (isMissingEmploymentTypeSchema(initialEmployeesResult.error)) {
+    if (isMissingEmployeeContractSchema(initialEmployeesResult.error)) {
+      contractSchemaReady = false
+      employeesResult = await supabase.from("employees").select(employmentKioskEmployeeSelect).order("employee_code", { ascending: true })
+    }
+
+    if (employeesResult.error && isMissingEmploymentTypeSchema(employeesResult.error)) {
       employmentSchemaReady = false
       employeesResult = await supabase.from("employees").select(kioskEmployeeSelect).order("employee_code", { ascending: true })
       if (employeesResult.error && isMissingKioskEmployeeSchema(employeesResult.error)) {
         kioskSchemaReady = false
         employeesResult = await supabase.from("employees").select(baseEmployeeSelect).order("employee_code", { ascending: true })
       }
-    } else if (isMissingPayrollOpeningSchema(initialEmployeesResult.error)) {
+    } else if (employeesResult.error && isMissingPayrollOpeningSchema(employeesResult.error)) {
       payrollOpeningSchemaReady = false
       employeesResult = await supabase.from("employees").select(legacyKioskEmployeeSelect).order("employee_code", { ascending: true })
 
@@ -6417,7 +6680,7 @@ async function loadEmployeeData(): Promise<EmployeeDirectoryData> {
         kioskSchemaReady = false
         employeesResult = await supabase.from("employees").select(legacyEmployeeSelect).order("employee_code", { ascending: true })
       }
-    } else if (isMissingKioskEmployeeSchema(initialEmployeesResult.error)) {
+    } else if (employeesResult.error && isMissingKioskEmployeeSchema(employeesResult.error)) {
       kioskSchemaReady = false
       employeesResult = await supabase.from("employees").select(baseEmployeeSelect).order("employee_code", { ascending: true })
 
@@ -6523,6 +6786,7 @@ async function loadEmployeeData(): Promise<EmployeeDirectoryData> {
     policies: policyOptions,
     kioskSchemaReady,
     payrollOpeningSchemaReady,
+    contractSchemaReady,
   }
 }
 
@@ -6904,6 +7168,11 @@ function createEmployeePayload(values: EmployeeFormValues, photoPath = values.ph
     payload.payroll_cycle_opening_date = usesAttendanceCycle ? values.payrollCycleOpeningDate || null : null
   }
 
+  if (values.contractSchemaReady) {
+    payload.contract_start_date = values.contractStartDate || null
+    payload.contract_end_date = values.contractEndDate || null
+  }
+
   if (values.employmentSchemaReady) {
     payload.employment_type_id = values.employmentTypeId || null
     payload.payroll_eligible = values.payrollEligible
@@ -6930,6 +7199,8 @@ function validateEmployeeForm(values: EmployeeFormValues) {
   const emailValid = !values.email.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email.trim())
   const photoFileValid = !values.photoFile || employeePhotoMimeTypes.includes(values.photoFile.type)
   const photoSizeValid = !values.photoFile || values.photoFile.size <= maxEmployeePhotoSize
+  const contractStartDate = parseEmployeeDateKey(values.contractStartDate)
+  const contractEndDate = parseEmployeeDateKey(values.contractEndDate)
 
   if (!values.fullName.trim()) errors.push("Nama karyawan wajib diisi.")
   if (!values.employeeCode.trim()) errors.push("Kode karyawan wajib tersedia otomatis.")
@@ -6954,6 +7225,10 @@ function validateEmployeeForm(values: EmployeeFormValues) {
   if (!emailValid) errors.push("Email karyawan belum valid.")
   if (!photoFileValid) errors.push("Foto wajib JPG, PNG, atau WEBP.")
   if (!photoSizeValid) errors.push("Ukuran foto maksimal 2MB.")
+  if (values.contractSchemaReady && (values.contractStartDate || values.contractEndDate)) {
+    if (!contractStartDate || !contractEndDate) errors.push("Tanggal awal dan akhir kontrak wajib lengkap.")
+    else if (contractStartDate.getTime() > contractEndDate.getTime()) errors.push("Tanggal awal kontrak tidak boleh melewati tanggal akhir kontrak.")
+  }
   if (values.kioskSchemaReady && values.kioskAccessEnabled && !values.qrToken.trim() && !values.rfidUid.trim()) {
     errors.push("Akses kiosk aktif wajib punya token barcode/QR atau UID RFID.")
   }
@@ -7068,8 +7343,26 @@ async function restoreEmployee(row: EmployeeDirectoryRow) {
   if (error) throw error
 }
 
+async function extendEmployeeContract(row: EmployeeDirectoryRow, values: { newStartDate: string; newEndDate: string; notes: string }) {
+  if (isPermanentEmployee(row)) throw new Error("Karyawan tetap tidak memakai periode kontrak.")
+
+  const startDate = parseEmployeeDateKey(values.newStartDate)
+  const endDate = parseEmployeeDateKey(values.newEndDate)
+  if (!startDate || !endDate) throw new Error("Tanggal awal dan akhir kontrak wajib diisi.")
+  if (startDate.getTime() > endDate.getTime()) throw new Error("Tanggal awal kontrak tidak boleh melewati tanggal akhir kontrak.")
+
+  const { error } = await supabase.rpc("extend_employee_contract", {
+    target_employee_id: row.id,
+    new_contract_start_date: values.newStartDate,
+    new_contract_end_date: values.newEndDate,
+    extension_notes: values.notes.trim() || null,
+  })
+
+  if (error) throw error
+}
+
 function exportEmployeeCsv(rows: EmployeeDirectoryRow[]) {
-  const header = ["No", "Kode", "Nama", "Foto Path", "NIK", "Phone", "Email", "Divisi", "Jabatan", "Lokasi", "Shift", "Status Kerja", "Ikut Payroll", "Policy Pembayaran", "Uang Saku", "Wajib Absensi", "Biofinger User ID", "Biofinger Device", "Biofinger Status", "Tipe Gaji", "Gaji Harian", "Gaji Bulanan", "Metode Payroll", "Hitung Proporsional", "Tanggal Masuk", "Saldo Awal Cycle", "Tanggal Awal Cycle", "Status", "Catatan"]
+  const header = ["No", "Kode", "Nama", "Foto Path", "NIK", "Phone", "Email", "Divisi", "Jabatan", "Lokasi", "Shift", "Status Kerja", "Ikut Payroll", "Policy Pembayaran", "Uang Saku", "Wajib Absensi", "Biofinger User ID", "Biofinger Device", "Biofinger Status", "Tipe Gaji", "Gaji Harian", "Gaji Bulanan", "Metode Payroll", "Hitung Proporsional", "Tanggal Masuk", "Lama Kerja", "Tgl Awal Kontrak", "Tgl Akhir Kontrak", "Sisa Kontrak", "Status Kontrak", "Saldo Awal Cycle", "Tanggal Awal Cycle", "Status", "Catatan"]
   const body = rows.map((row, index) => [
     index + 1,
     row.employeeCode,
@@ -7096,6 +7389,11 @@ function exportEmployeeCsv(rows: EmployeeDirectoryRow[]) {
     employeePayrollMethodLabel[row.payrollMethod],
     row.prorateEnabled ? "Ya" : "Tidak",
     row.joinDate,
+    getEmployeeTenureLabel(row.joinDate),
+    isPermanentEmployee(row) ? "" : row.contractStartDate,
+    isPermanentEmployee(row) ? "" : row.contractEndDate,
+    getEmployeeContractMeta(row).remainingLabel,
+    getEmployeeContractMeta(row).label,
     row.payrollMethod === "attendance_cycle" ? row.payrollCycleDays : "",
     row.payrollMethod === "attendance_cycle" ? row.payrollCycleOpeningDate : "",
     employeeStatusLabel[row.status],
@@ -9702,12 +10000,14 @@ function EmployeesPage({
   const [restoreRow, setRestoreRow] = useState<EmployeeDirectoryRow | null>(null)
   const [nametagRow, setNametagRow] = useState<EmployeeDirectoryRow | null>(null)
   const [faceEnrollmentRow, setFaceEnrollmentRow] = useState<EmployeeDirectoryRow | null>(null)
+  const [contractExtensionRow, setContractExtensionRow] = useState<EmployeeDirectoryRow | null>(null)
   const [faceEnrollmentSubmitting, setFaceEnrollmentSubmitting] = useState(false)
   const [dialogInitialValues, setDialogInitialValues] = useState<EmployeeFormValues>(() => createEmptyEmployeeForm())
   const [searchTerm, setSearchTerm] = useState("")
   const [activeTab, setActiveTab] = useState<EmployeeDirectoryTab>("all")
   const [divisionFilter, setDivisionFilter] = useState("all")
   const [statusFilter, setStatusFilter] = useState("all")
+  const [contractFilter, setContractFilter] = useState<EmployeeContractFilter>("all")
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(25)
   const [saving, setSaving] = useState(false)
@@ -9725,7 +10025,7 @@ function EmployeesPage({
     revalidateOnCache: true,
   })
   const canManage = hasPermission(profile, "employees.manage")
-  const { rows, divisions, positions, locations, shifts, employmentTypes, policies, kioskSchemaReady, payrollOpeningSchemaReady } = employeeData
+  const { rows, divisions, positions, locations, shifts, employmentTypes, policies, kioskSchemaReady, payrollOpeningSchemaReady, contractSchemaReady } = employeeData
 
   const fetchRows = async (options: { silent?: boolean } = {}) => {
     setErrorMessage("")
@@ -9747,33 +10047,45 @@ function EmployeesPage({
   const archivedRows = rows.filter((row) => row.deletedAt)
   const visibleRows = activeTab === "archived"
     ? archivedRows
-    : activeTab === "budgeting"
+    : activeTab === "budgeting" || activeTab === "tenure"
       ? liveRows
       : liveRows.filter((row) => activeTab === "all" || row.status === activeTab)
   const filteredRows = visibleRows.filter((row) => {
     const normalizedTerm = searchTerm.trim().toLowerCase()
     const matchesSearch = normalizedTerm
-      ? [row.employeeCode, row.fullName, row.nik, row.phone, row.email, row.divisionName, row.positionName, row.workLocationName, row.shiftName, row.employmentTypeName, row.notes, row.deletedAt].join(" ").toLowerCase().includes(normalizedTerm)
+      ? [row.employeeCode, row.fullName, row.nik, row.phone, row.email, row.divisionName, row.positionName, row.workLocationName, row.shiftName, row.employmentTypeName, row.contractStartDate, row.contractEndDate, getEmployeeContractMeta(row).label, row.notes, row.deletedAt].join(" ").toLowerCase().includes(normalizedTerm)
       : true
     const matchesDivision = divisionFilter === "all" || row.divisionId === divisionFilter
     const matchesStatus = statusFilter === "all" || row.status === statusFilter
+    const matchesContract = activeTab !== "tenure" || contractFilter === "all" || getEmployeeContractMeta(row).status === contractFilter
 
-    return matchesSearch && matchesDivision && matchesStatus
+    return matchesSearch && matchesDivision && matchesStatus && matchesContract
   })
-  const pageCount = Math.max(1, Math.ceil(filteredRows.length / Math.min(pageSize, 50)))
+  const sortedFilteredRows = activeTab === "tenure"
+    ? filteredRows.slice().sort((a, b) => getEmployeeTenureDays(b.joinDate) - getEmployeeTenureDays(a.joinDate) || a.fullName.localeCompare(b.fullName, "id-ID"))
+    : filteredRows
+  const pageCount = Math.max(1, Math.ceil(sortedFilteredRows.length / Math.min(pageSize, 50)))
   const currentPage = Math.min(page, pageCount)
-  const paginatedRows = filteredRows.slice((currentPage - 1) * Math.min(pageSize, 50), currentPage * Math.min(pageSize, 50))
+  const paginatedRows = sortedFilteredRows.slice((currentPage - 1) * Math.min(pageSize, 50), currentPage * Math.min(pageSize, 50))
   const budgetReportRows = liveRows.filter((row) => row.status === "active")
   const budgetReportTotal = budgetReportRows.reduce((sum, row) => sum + getEmployeeSalaryAmount(row), 0)
   const budgetReportDivisionCount = new Set(budgetReportRows.map((row) => row.divisionId || row.divisionName || "unassigned")).size
   const activeRows = budgetReportRows.length
   const reviewRows = liveRows.filter((row) => row.status === "review").length
+  const contractTrackedRows = liveRows.filter((row) => !isPermanentEmployee(row))
+  const contractAttentionRows = contractTrackedRows.filter((row) => {
+    const status = getEmployeeContractMeta(row).status
+    return status === "watch" || status === "urgent" || status === "expired"
+  })
+  const contractExpiredRows = contractTrackedRows.filter((row) => getEmployeeContractMeta(row).status === "expired")
+  const contractMissingRows = contractTrackedRows.filter((row) => getEmployeeContractMeta(row).status === "missing")
   const averageSalary = activeRows
     ? Math.round(budgetReportTotal / activeRows)
     : 0
   const employeeTabCount = (value: number) => loading ? <FoundationSkeleton className="tabCount" /> : value
   const employeeDirectoryTabs: Array<{ id: EmployeeDirectoryTab; label: string; icon: LucideIcon; count: ReactNode }> = [
     { id: "all", label: "Semua", icon: UsersRound, count: employeeTabCount(liveRows.length) },
+    { id: "tenure", label: "Masa Kerja", icon: Clock3, count: employeeTabCount(liveRows.length) },
     { id: "budgeting", label: "Budgeting", icon: BadgeDollarSign, count: employeeTabCount(activeRows) },
     { id: "active", label: "Aktif", icon: UserRoundCheck, count: employeeTabCount(activeRows) },
     { id: "review", label: "Review", icon: AlertTriangle, count: employeeTabCount(reviewRows) },
@@ -9789,8 +10101,16 @@ function EmployeesPage({
         `${formatNumber(budgetReportDivisionCount)} divisi`,
         `Rata-rata ${formatCurrency(averageSalary)}`,
       ]
+      : activeTab === "tenure"
+        ? [
+          `${sortedFilteredRows.length} dari ${visibleRows.length} karyawan`,
+          `${formatNumber(contractTrackedRows.length)} kontrak aktif`,
+          `${formatNumber(contractAttentionRows.length)} pantau`,
+          `${formatNumber(contractExpiredRows.length)} expired`,
+          `${formatNumber(contractMissingRows.length)} belum lengkap`,
+        ]
       : [
-        `${filteredRows.length} dari ${visibleRows.length} karyawan`,
+        `${sortedFilteredRows.length} dari ${visibleRows.length} karyawan`,
         `${activeRows} aktif`,
         `${reviewRows} review`,
         `${archivedRows.length} arsip`,
@@ -9811,10 +10131,19 @@ function EmployeesPage({
     { value: "review", label: "Review", searchLabel: "review" },
     { value: "inactive", label: "Nonaktif", searchLabel: "nonaktif inactive" },
   ]
+  const contractFilterOptions = [
+    { value: "all", label: "Semua Kontrak", searchLabel: "semua kontrak" },
+    { value: "safe", label: "Aman", searchLabel: "aman safe" },
+    { value: "watch", label: "Pantau", searchLabel: "pantau watch" },
+    { value: "urgent", label: "Segera", searchLabel: "segera urgent" },
+    { value: "expired", label: "Expired", searchLabel: "expired lewat" },
+    { value: "missing", label: "Belum Lengkap", searchLabel: "belum lengkap missing" },
+    { value: "non_contract", label: "Non Kontrak", searchLabel: "non kontrak tetap" },
+  ]
 
   useEffect(() => {
     setPage(1)
-  }, [searchTerm, activeTab, divisionFilter, statusFilter, pageSize])
+  }, [searchTerm, activeTab, divisionFilter, statusFilter, contractFilter, pageSize])
 
   const showToast = (message: Omit<ToastMessage, "id">) => {
     setToast({ ...message, id: Date.now() })
@@ -9830,9 +10159,11 @@ function EmployeesPage({
       fallbackValues.employeePayPolicy = defaultEmploymentType.defaultPayPolicy
       fallbackValues.allowanceAmount = String(defaultEmploymentType.allowanceAmount || 0)
       fallbackValues.attendanceRequired = defaultEmploymentType.requiresAttendance
+      if (defaultEmploymentType.code !== "EMPSTAT-TETAP") fallbackValues.contractStartDate = fallbackValues.joinDate
     }
     fallbackValues.kioskSchemaReady = kioskSchemaReady
     fallbackValues.payrollOpeningSchemaReady = payrollOpeningSchemaReady
+    fallbackValues.contractSchemaReady = contractSchemaReady
     fallbackValues.employmentSchemaReady = employmentTypes.length > 0
     setDialogInitialValues(fallbackValues)
     setDialogOpen(true)
@@ -9843,6 +10174,7 @@ function EmployeesPage({
             qrToken: current.employeeCode === fallbackValues.employeeCode ? generateEmployeeQrToken(employeeCode) : current.qrToken,
             kioskSchemaReady,
             payrollOpeningSchemaReady,
+            contractSchemaReady,
       }))
     }).catch(() => {})
   }
@@ -9881,7 +10213,10 @@ function EmployeesPage({
       kioskAccessEnabled: row.kioskAccessEnabled,
       kioskSchemaReady,
       payrollOpeningSchemaReady,
+      contractSchemaReady,
       joinDate: row.joinDate,
+      contractStartDate: isPermanentEmployee(row) ? "" : row.contractStartDate,
+      contractEndDate: isPermanentEmployee(row) ? "" : row.contractEndDate,
       payrollCycleDays: String(row.payrollCycleDays),
       payrollCycleOpeningDate: row.payrollCycleOpeningDate,
       status: row.status,
@@ -9997,6 +10332,39 @@ function EmployeesPage({
     }
   }
 
+  const handleContractExtensionSubmit = async (values: { newStartDate: string; newEndDate: string; notes: string }) => {
+    if (!contractExtensionRow) return
+    setSaving(true)
+    setErrorMessage("")
+
+    try {
+      await extendEmployeeContract(contractExtensionRow, values)
+      await writeAuditLog("Extend employee contract", "employees", contractExtensionRow.id, {
+        employee_code: contractExtensionRow.employeeCode,
+        full_name: contractExtensionRow.fullName,
+        previous_start_date: contractExtensionRow.contractStartDate || null,
+        previous_end_date: contractExtensionRow.contractEndDate || null,
+        new_start_date: values.newStartDate,
+        new_end_date: values.newEndDate,
+      }).catch(() => {})
+      setContractExtensionRow(null)
+      const data = await fetchRows()
+      const nextRow = data?.rows.find((row) => row.id === contractExtensionRow.id) || null
+      if (nextRow && detailRow?.id === contractExtensionRow.id) setDetailRow(nextRow)
+      showToast({
+        tone: "success",
+        title: "Kontrak diperpanjang",
+        description: `${contractExtensionRow.fullName} sekarang aktif sampai ${formatEmployeeDate(values.newEndDate)}.`,
+      })
+    } catch (error) {
+      const message = getFriendlySupabaseError(error, "Gagal memperpanjang kontrak.")
+      setErrorMessage(message)
+      showToast({ tone: "error", title: "Gagal perpanjang kontrak", description: message })
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const handleFaceProfileAction = async (row: EmployeeDirectoryRow, action: "approve" | "reject" | "reset" | "disable") => {
     setSaving(true)
     setErrorMessage("")
@@ -10063,12 +10431,16 @@ function EmployeesPage({
     setSearchTerm("")
     setDivisionFilter("all")
     setStatusFilter("all")
+    setContractFilter("all")
   }
   const employeeTableDrag = useHorizontalDragScroll<HTMLDivElement>()
-  const employeeExportRows = activeTab === "budgeting" ? budgetReportRows : filteredRows
+  const employeeExportRows = activeTab === "budgeting" ? budgetReportRows : sortedFilteredRows
   const isBudgetingTab = activeTab === "budgeting"
+  const isTenureTab = activeTab === "tenure"
   const employeePageSubtitle = isBudgetingTab
     ? "Ringkasan budget gaji karyawan aktif per divisi, termasuk komposisi payroll dan detail tim."
+    : isTenureTab
+      ? "Monitoring lama kerja dan sisa kontrak karyawan non-tetap, dengan karyawan tetap sebagai Non Kontrak."
     : "Direktori karyawan yang terhubung ke divisi, jabatan, shift, lokasi kerja, dan cycle payroll 26 hari."
 
   return (
@@ -10083,7 +10455,7 @@ function EmployeesPage({
           <>
             <button className="secondaryButton" type="button" onClick={() => exportEmployeeCsv(employeeExportRows)} disabled={employeeExportRows.length === 0}>
               <FileBarChart size={17} />
-              {isBudgetingTab ? "Export Budget" : "Export Karyawan"}
+              {isBudgetingTab ? "Export Budget" : isTenureTab ? "Export Masa Kerja" : "Export Karyawan"}
             </button>
             <button className="primaryButton" type="button" onClick={openCreateDialog} disabled={!canManage}>
               <UserPlus size={17} />
@@ -10103,6 +10475,7 @@ function EmployeesPage({
           onChange={(id) => {
             setActiveTab(id)
             setStatusFilter("all")
+            setContractFilter("all")
           }}
         />
 
@@ -10123,12 +10496,35 @@ function EmployeesPage({
               <label>Status</label>
               <FoundationSelect label="Filter status karyawan" value={statusFilter} options={statusFilterOptions} onChange={(value) => setStatusFilter(value as EmployeeStatus | "all")} />
             </div>
+            {activeTab === "tenure" && (
+              <div className="filterField">
+                <label>Kontrak</label>
+                <FoundationSelect label="Filter status kontrak" value={contractFilter} options={contractFilterOptions} onChange={(value) => setContractFilter(value as EmployeeContractFilter)} />
+              </div>
+            )}
             <button className="secondaryButton" type="button" onClick={resetFilters}>Reset Filter</button>
           </OperationalFilterPanel>
         )}
 
         {activeTab === "budgeting" ? (
           <EmployeeBudgetBoard rows={liveRows} loading={loading} />
+        ) : activeTab === "tenure" ? (
+          <EmployeeTenureBoard
+            rows={paginatedRows}
+            summaryRows={sortedFilteredRows}
+            loading={loading}
+            errorMessage={errorMessage}
+            currentPage={currentPage}
+            pageSize={pageSize}
+            totalRows={sortedFilteredRows.length}
+            canManage={canManage}
+            saving={saving}
+            contractSchemaReady={contractSchemaReady}
+            onPageChange={setPage}
+            onPageSizeChange={(value) => setPageSize(Math.min(value, 50))}
+            onOpenDetail={(row) => setDetailRow(row)}
+            onExtend={(row) => setContractExtensionRow(row)}
+          />
         ) : (
           <OperationalTableCard>
           <div className="tableHeader">
@@ -10235,6 +10631,12 @@ function EmployeesPage({
                                 <CalendarCheck2 size={14} />
                                 Jadwal Shift
                               </RowActionMenuItem>
+                              {!isPermanentEmployee(row) && (
+                                <RowActionMenuItem disabled={!canManage || saving || !contractSchemaReady} onClick={() => setContractExtensionRow(row)}>
+                                  <Clock3 size={14} />
+                                  Perpanjang Kontrak
+                                </RowActionMenuItem>
+                              )}
                               <RowActionMenuItem disabled={!canManage || saving || row.status === "active"} onClick={() => openStatusDialog(row, "active")}>
                                 <FileCheck2 size={14} />
                                 Aktifkan
@@ -10296,10 +10698,19 @@ function EmployeesPage({
         onRestore={(row) => setRestoreRow(row)}
         onNametag={(row) => setNametagRow(row)}
         onShiftSchedule={onOpenShiftSchedule}
+        onExtendContract={(row) => setContractExtensionRow(row)}
         onFaceEnroll={(row) => setFaceEnrollmentRow(row)}
         onFaceAction={handleFaceProfileAction}
         canManage={canManage}
         saving={saving}
+      />
+      <EmployeeContractExtensionDialog
+        row={contractExtensionRow}
+        saving={saving}
+        onClose={() => {
+          if (!saving) setContractExtensionRow(null)
+        }}
+        onSubmit={handleContractExtensionSubmit}
       />
       <EmployeeNametagDialog row={nametagRow} onClose={() => setNametagRow(null)} />
       <FaceEnrollmentDialog
@@ -13497,6 +13908,8 @@ function EmployeeDialog({
   const activeShifts = shifts.filter((shift) => shift.isActive || shift.id === values.shiftId)
   const activeEmploymentTypes = employmentTypes.filter((item) => item.isActive || item.id === values.employmentTypeId)
   const activePolicies = policies.filter((policy) => policy.isActive || policy.id === values.attendancePolicyId)
+  const selectedEmploymentType = activeEmploymentTypes.find((item) => item.id === values.employmentTypeId)
+  const showsContractFields = Boolean(values.contractSchemaReady && values.employmentSchemaReady && values.employmentTypeId && selectedEmploymentType?.code !== "EMPSTAT-TETAP")
   const selectedPolicy = activePolicies.find((policy) => policy.id === values.attendancePolicyId)
   const photoPreview = values.removePhoto ? "" : localPhotoPreview || values.photoUrl
   const usesAttendanceCycle = values.payrollMethod === "attendance_cycle"
@@ -13720,6 +14133,7 @@ function EmployeeDialog({
               onChange={(event) => {
                 const employmentTypeId = event.target.value
                 const employmentType = activeEmploymentTypes.find((item) => item.id === employmentTypeId)
+                const nextIsPermanent = !employmentTypeId || employmentType?.code === "EMPSTAT-TETAP"
                 setValues((current) => ({
                   ...current,
                   employmentTypeId,
@@ -13727,6 +14141,8 @@ function EmployeeDialog({
                   employeePayPolicy: employmentType?.defaultPayPolicy ?? current.employeePayPolicy,
                   allowanceAmount: String(employmentType?.allowanceAmount ?? Number(current.allowanceAmount || 0)),
                   attendanceRequired: employmentType?.requiresAttendance ?? current.attendanceRequired,
+                  contractStartDate: nextIsPermanent ? "" : current.contractStartDate || current.joinDate,
+                  contractEndDate: nextIsPermanent ? "" : current.contractEndDate,
                 }))
               }}
               disabled={!values.employmentSchemaReady}
@@ -13838,10 +14254,52 @@ function EmployeeDialog({
             <DateFormField
               label="Tanggal Masuk"
               value={values.joinDate}
-              onChange={(joinDate) => setValues((current) => ({ ...current, joinDate }))}
+              onChange={(joinDate) => setValues((current) => {
+                const currentEmploymentType = activeEmploymentTypes.find((item) => item.id === current.employmentTypeId)
+                const shouldFillContractStart = current.contractSchemaReady && Boolean(current.employmentTypeId) && currentEmploymentType?.code !== "EMPSTAT-TETAP"
+
+                return {
+                  ...current,
+                  joinDate,
+                  contractStartDate: shouldFillContractStart && !current.contractStartDate ? joinDate : current.contractStartDate,
+                }
+              })}
               helperText="Tanggal mulai kerja karyawan di DMS."
               required
             />
+            {showsContractFields && (
+              <div className="employeeContractPanel employeeFormFull">
+                <div className="employeeContractHeader">
+                  <span>
+                    <ClipboardList size={18} />
+                  </span>
+                  <div>
+                    <strong>Periode Kontrak</strong>
+                    <small>Dipakai untuk monitoring sisa kontrak dan tombol perpanjang.</small>
+                  </div>
+                  <em>{values.contractEndDate ? getEmployeeContractMeta({
+                    employmentTypeCode: selectedEmploymentType?.code || "",
+                    employmentTypeName: selectedEmploymentType?.name || "",
+                    contractStartDate: values.contractStartDate,
+                    contractEndDate: values.contractEndDate,
+                  }).remainingLabel : "Belum ada tanggal akhir"}</em>
+                </div>
+                <div className="employeeContractGrid">
+                  <DateFormField
+                    label="Tgl Awal Kontrak"
+                    value={values.contractStartDate}
+                    onChange={(contractStartDate) => setValues((current) => ({ ...current, contractStartDate }))}
+                    helperText="Awal periode kontrak aktif."
+                  />
+                  <DateFormField
+                    label="Tgl Akhir Kontrak"
+                    value={values.contractEndDate}
+                    onChange={(contractEndDate) => setValues((current) => ({ ...current, contractEndDate }))}
+                    helperText="Akhir periode untuk hitung sisa hari."
+                  />
+                </div>
+              </div>
+            )}
             {usesAttendanceCycle && (
               <div className="employeeCycleOpeningPanel employeeFormFull">
                 <div className="employeeCycleOpeningHeader">
@@ -13924,6 +14382,7 @@ function EmployeeDetailDialog({
   onRestore,
   onNametag,
   onShiftSchedule,
+  onExtendContract,
   onFaceEnroll,
   onFaceAction,
 }: {
@@ -13935,6 +14394,7 @@ function EmployeeDetailDialog({
   onRestore: (row: EmployeeDirectoryRow) => void
   onNametag: (row: EmployeeDirectoryRow) => void
   onShiftSchedule?: (employeeId: string) => void
+  onExtendContract: (row: EmployeeDirectoryRow) => void
   onFaceEnroll: (row: EmployeeDirectoryRow) => void
   onFaceAction: (row: EmployeeDirectoryRow, action: "approve" | "reject" | "reset" | "disable") => Promise<void>
 }) {
@@ -13970,6 +14430,16 @@ function EmployeeDetailDialog({
           { label: "Tanggal awal cycle", value: formatEmployeeDate(row.payrollCycleOpeningDate) },
         ]
       : []),
+  ]
+  const contractRows = [
+    { label: "Tanggal masuk", value: formatEmployeeDate(row.joinDate) },
+    { label: "Lama kerja", value: getEmployeeTenureLabel(row.joinDate) },
+    { label: "Status kontrak", value: <EmployeeContractStatusBadge row={row} /> },
+    { label: "Periode kontrak", value: getEmployeeContractPeriodLabel(row) },
+    { label: "Tgl awal kontrak", value: isPermanentEmployee(row) ? "Non Kontrak" : formatEmployeeDate(row.contractStartDate) },
+    { label: "Tgl akhir kontrak", value: isPermanentEmployee(row) ? "Non Kontrak" : formatEmployeeDate(row.contractEndDate) },
+    { label: "Sisa kontrak", value: getEmployeeContractMeta(row).remainingLabel },
+    { label: "Tipe status", value: row.employmentTypeName },
   ]
   const kioskRows = [
     { label: "Akses kiosk", value: row.kioskAccessEnabled ? "Aktif" : "Nonaktif" },
@@ -14058,6 +14528,18 @@ function EmployeeDetailDialog({
               <h3>Payroll</h3>
               <div className="employeeDetailList compact">
                 {payrollRows.map((field) => (
+                  <div className="employeeDetailLine" key={field.label}>
+                    <span>{field.label}</span>
+                    <strong>{field.value}</strong>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="employeeDetailSection wide">
+              <h3>Masa Kerja & Kontrak</h3>
+              <div className="employeeDetailList compact">
+                {contractRows.map((field) => (
                   <div className="employeeDetailLine" key={field.label}>
                     <span>{field.label}</span>
                     <strong>{field.value}</strong>
@@ -14163,6 +14645,12 @@ function EmployeeDetailDialog({
             <CalendarCheck2 size={16} />
             Jadwal Shift
           </button>
+          {!isPermanentEmployee(row) && (
+            <button className="secondaryButton" type="button" disabled={!canManage || saving || Boolean(row.deletedAt)} onClick={() => onExtendContract(row)}>
+              <Clock3 size={16} />
+              Perpanjang Kontrak
+            </button>
+          )}
           {row.deletedAt ? (
             <button className="primaryButton" type="button" disabled={!canManage || saving} onClick={() => onRestore(row)}>
               <RotateCcw size={16} />
@@ -14175,6 +14663,142 @@ function EmployeeDetailDialog({
             </button>
           )}
         </div>
+      </section>
+    </div>,
+    document.body,
+  )
+}
+
+function createEmployeeContractExtensionValues(row: EmployeeDirectoryRow | null) {
+  const fallbackStartDate = row?.contractEndDate
+    ? shiftDateKey(row.contractEndDate, 1)
+    : row?.contractStartDate || row?.joinDate || getLocalDateKey()
+
+  return {
+    newStartDate: fallbackStartDate,
+    newEndDate: addYearsToEmployeeDateKey(fallbackStartDate, 1),
+    notes: "",
+  }
+}
+
+function EmployeeContractExtensionDialog({
+  row,
+  saving,
+  onClose,
+  onSubmit,
+}: {
+  row: EmployeeDirectoryRow | null
+  saving: boolean
+  onClose: () => void
+  onSubmit: (values: { newStartDate: string; newEndDate: string; notes: string }) => Promise<void>
+}) {
+  const [values, setValues] = useState(() => createEmployeeContractExtensionValues(row))
+  const [formErrors, setFormErrors] = useState<string[]>([])
+
+  useEffect(() => {
+    setValues(createEmployeeContractExtensionValues(row))
+    setFormErrors([])
+  }, [row])
+
+  if (!row) return null
+
+  const contractMeta = getEmployeeContractMeta(row)
+
+  return createPortal(
+    <div className="dialogBackdrop employeeDialogBackdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="dialogPanel employeeContractDialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="employee-contract-dialog-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="dialogCompactHeader">
+          <div>
+            <h2 id="employee-contract-dialog-title">Perpanjang Kontrak</h2>
+            <p>{row.employeeCode} / {row.fullName}</p>
+          </div>
+          <button className="iconButton dialogClose" type="button" aria-label="Tutup dialog" disabled={saving} onClick={onClose}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <form
+          className="dialogForm employeeContractDialogForm"
+          onSubmit={(event) => {
+            event.preventDefault()
+            const nextErrors: string[] = []
+            const startDate = parseEmployeeDateKey(values.newStartDate)
+            const endDate = parseEmployeeDateKey(values.newEndDate)
+
+            if (!startDate || !endDate) nextErrors.push("Tanggal awal dan akhir kontrak wajib diisi.")
+            else if (startDate.getTime() > endDate.getTime()) nextErrors.push("Tanggal awal kontrak tidak boleh melewati tanggal akhir kontrak.")
+
+            if (nextErrors.length > 0) {
+              setFormErrors(nextErrors)
+              return
+            }
+
+            setFormErrors([])
+            void onSubmit(values)
+          }}
+        >
+          {formErrors.length > 0 && (
+            <div className="formValidationPanel">
+              <AlertTriangle size={18} />
+              <div>
+                <strong>Periksa tanggal kontrak</strong>
+                {formErrors.map((error) => (
+                  <span key={error}>{error}</span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="employeeContractSummary">
+            <span><Clock3 size={18} /></span>
+            <div>
+              <strong>{contractMeta.label}</strong>
+              <small>{getEmployeeContractPeriodLabel(row)} / sisa {contractMeta.remainingLabel}</small>
+            </div>
+          </div>
+
+          <div className="employeeContractDialogGrid">
+            <DateFormField
+              label="Tgl Awal Kontrak Baru"
+              value={values.newStartDate}
+              onChange={(newStartDate) => setValues((current) => ({
+                ...current,
+                newStartDate,
+                newEndDate: current.newEndDate || addYearsToEmployeeDateKey(newStartDate, 1),
+              }))}
+              required
+            />
+            <DateFormField
+              label="Tgl Akhir Kontrak Baru"
+              value={values.newEndDate}
+              onChange={(newEndDate) => setValues((current) => ({ ...current, newEndDate }))}
+              required
+            />
+          </div>
+
+          <FormField label="Catatan HR / Finance">
+            <textarea
+              value={values.notes}
+              onChange={(event) => setValues((current) => ({ ...current, notes: event.target.value }))}
+              placeholder="Contoh: diperpanjang 1 tahun sesuai evaluasi HR."
+              rows={4}
+            />
+          </FormField>
+
+          <div className="dialogActions employeeContractDialogActions">
+            <button className="secondaryButton" type="button" onClick={onClose} disabled={saving}>Batal</button>
+            <button className="primaryButton" type="submit" disabled={saving}>
+              <FileCheck2 size={17} />
+              {saving ? "Menyimpan..." : "Simpan Perpanjangan"}
+            </button>
+          </div>
+        </form>
       </section>
     </div>,
     document.body,
