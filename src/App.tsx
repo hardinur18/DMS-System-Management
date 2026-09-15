@@ -1423,6 +1423,7 @@ interface GuideArticle {
 const accessProfileCacheKey = "dms.management.accessProfile.v4"
 const accessProfileCacheMaxAgeMs = 1000 * 60 * 60 * 12
 const ENABLE_KIOSK_ATTENDANCE_FLOW = false
+const ENABLE_EMPLOYEE_ID_CARD_FLOW = true
 const ENABLE_FIELD_ATTENDANCE_FLOW = false
 
 const navItems: NavItem[] = [
@@ -10621,10 +10622,10 @@ function EmployeesPage({
                                 <Pencil size={14} />
                                 Edit
                               </RowActionMenuItem>
-                              {ENABLE_KIOSK_ATTENDANCE_FLOW && (
+                              {ENABLE_EMPLOYEE_ID_CARD_FLOW && (
                                 <RowActionMenuItem disabled={saving} onClick={() => setNametagRow(row)}>
                                   <CreditCard size={14} />
-                                  Cetak Nametag
+                                  Cetak ID Card
                                 </RowActionMenuItem>
                               )}
                               <RowActionMenuItem disabled={!onOpenShiftSchedule || saving} onClick={() => onOpenShiftSchedule?.(row.id)}>
@@ -14635,10 +14636,10 @@ function EmployeeDetailDialog({
 
         <div className="masterDetailActions">
           <button className="secondaryButton" type="button" onClick={onClose}>Tutup</button>
-          {ENABLE_KIOSK_ATTENDANCE_FLOW && (
+          {ENABLE_EMPLOYEE_ID_CARD_FLOW && (
             <button className="secondaryButton" type="button" onClick={() => onNametag(row)}>
               <Printer size={16} />
-              Nametag
+              ID Card
             </button>
           )}
           <button className="secondaryButton" type="button" disabled={!onShiftSchedule || Boolean(row.deletedAt)} onClick={() => onShiftSchedule?.(row.id)}>
@@ -14847,9 +14848,9 @@ function EmployeeNametagDialog({ row, onClose }: { row: EmployeeDirectoryRow | n
               <CreditCard size={24} />
             </span>
             <div>
-              <span>Kiosk Access</span>
-              <h2 id="employee-nametag-title">Nametag Karyawan</h2>
-              <p>Barcode ini dipakai untuk scan absensi di pintu kiosk.</p>
+              <span>ID Card</span>
+              <h2 id="employee-nametag-title">ID Card Karyawan</h2>
+              <p>Kartu identitas karyawan dengan barcode internal DMS.</p>
             </div>
           </div>
           <button className="iconButton dialogClose" type="button" aria-label="Tutup nametag" onClick={onClose}>
@@ -14894,7 +14895,7 @@ function EmployeeNametagDialog({ row, onClose }: { row: EmployeeDirectoryRow | n
           </button>
           <button className="primaryButton" type="button" onClick={() => window.print()}>
             <Printer size={16} />
-            Cetak Nametag
+            Cetak ID Card
           </button>
         </div>
       </section>
