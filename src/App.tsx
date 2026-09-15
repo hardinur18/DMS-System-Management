@@ -5532,6 +5532,46 @@ function Code128Barcode({ value, className = "" }: { value: string; className?: 
   )
 }
 
+function escapeSvgText(value: string) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+}
+
+function truncateIdCardText(value: string, maxLength: number) {
+  const cleanValue = String(value || "").trim().replace(/\s+/g, " ")
+  if (cleanValue.length <= maxLength) return cleanValue
+  return `${cleanValue.slice(0, Math.max(0, maxLength - 1)).trim()}...`
+}
+
+function getIdCardNameLines(value: string) {
+  const cleanValue = String(value || "").trim().replace(/\s+/g, " ")
+  if (!cleanValue) return ["-"]
+  if (cleanValue.length <= 22) return [cleanValue]
+
+  const words = cleanValue.split(" ")
+  const lines: string[] = []
+
+  words.forEach((word) => {
+    if (lines.length === 0) {
+      lines.push(word)
+      return
+    }
+
+    const currentLine = lines[lines.length - 1] || ""
+    const nextLine = currentLine ? `${currentLine} ${word}` : word
+    if (nextLine.length <= 22) {
+      lines[lines.length - 1] = nextLine
+      return
+    }
+    if (lines.length < 2) lines.push(word)
+    else lines[1] = `${lines[1]} ${word}`
+  })
+
+  return (lines.length ? lines : [cleanValue]).slice(0, 2).map((line) => truncateIdCardText(line, 24))
+}
+
 function downloadTextFile(filename: string, content: string, mimeType: string) {
   const blob = new Blob([content], { type: mimeType })
   const url = URL.createObjectURL(blob)
@@ -11913,7 +11953,7 @@ function KioskModePage({ activeView }: { activeView: ViewId }) {
           </div>
 
           <label className="kioskScanField">
-            <span>{credentialType === "barcode" ? "Scan Barcode / Nametag" : "Tap Kartu RFID"}</span>
+            <span>{credentialType === "barcode" ? "Scan Barcode / ID Card" : "Tap Kartu RFID"}</span>
             <input
               ref={scanInputRef}
               value={credentialValue}
@@ -11983,7 +12023,7 @@ function KioskModePage({ activeView }: { activeView: ViewId }) {
               <span><ScanLine size={34} /></span>
               <div className="kioskEmptyCopy">
                 <strong>Siap menerima scan</strong>
-                <p>Field scan sudah fokus otomatis. Tempel kartu RFID atau scan barcode nametag, lalu sistem memproses absensi tanpa klik tombol.</p>
+                <p>Field scan sudah fokus otomatis. Tempel kartu RFID atau scan barcode ID Card, lalu sistem memproses absensi tanpa klik tombol.</p>
               </div>
               <div className="kioskEmptySteps">
                 <small><b>1</b> Pilih pintu</small>
@@ -14810,27 +14850,48 @@ function EmployeeNametagDialog({ row, onClose }: { row: EmployeeDirectoryRow | n
   if (!row) return null
 
   const barcodeValue = row.qrToken || generateEmployeeQrToken(row.employeeCode)
-  const safeFileName = `${row.employeeCode || "employee"}-nametag`.toLowerCase().replace(/[^a-z0-9_-]/g, "-")
+  const safeFileName = `${row.employeeCode || "employee"}-id-card`.toLowerCase().replace(/[^a-z0-9_-]/g, "-")
   const barcode = getCode128Segments(barcodeValue)
   const barSvg = barcode.bars.map((bar) => `<rect x="${bar.x}" y="0" width="${bar.width}" height="52" fill="#071332"/>`).join("")
+  const nameLines = getIdCardNameLines(row.fullName || row.employeeCode)
+  const svgNameLines = nameLines
+    .map((line, index) => `<text x="270" y="${nameLines.length === 1 ? 374 : 356 + index * 34}" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="${nameLines.length === 1 ? 31 : 28}" font-weight="800" fill="#071332">${escapeSvgText(line)}</text>`)
+    .join("")
+  const positionLabel = truncateIdCardText(row.positionName || "-", 27)
+  const divisionLabel = truncateIdCardText(row.divisionName || "-", 27)
+  const locationLabel = truncateIdCardText(row.workLocationName || "-", 26)
+  const shiftLabel = truncateIdCardText(row.shiftName || "-", 24)
+  const svgInitials = escapeSvgText(getProfileInitials(row.fullName || row.employeeCode))
+  const svgEmployeeCode = escapeSvgText(truncateIdCardText(row.employeeCode, 18))
+  const svgBarcodeValue = escapeSvgText(truncateIdCardText(barcodeValue, 42))
   const nametagSvg = `
-<svg xmlns="http://www.w3.org/2000/svg" width="640" height="980" viewBox="0 0 640 980">
-  <rect width="640" height="980" rx="44" fill="#ffffff"/>
-  <rect x="36" y="36" width="568" height="908" rx="36" fill="#f8fbff" stroke="#d7e7f0" stroke-width="2"/>
-  <text x="320" y="98" text-anchor="middle" font-family="Arial" font-size="22" font-weight="700" fill="#0085a0">DMS KARYAWAN</text>
-  <text x="320" y="152" text-anchor="middle" font-family="Arial" font-size="44" font-weight="800" fill="#071332">${row.fullName}</text>
-  <text x="320" y="194" text-anchor="middle" font-family="Arial" font-size="24" fill="#697891">${row.employeeCode} - ${row.divisionName}</text>
-  <circle cx="320" cy="330" r="118" fill="#eafaff" stroke="#bcecf5" stroke-width="3"/>
-  <text x="320" y="352" text-anchor="middle" font-family="Arial" font-size="62" font-weight="800" fill="#071332">${getProfileInitials(row.fullName || row.employeeCode)}</text>
-  <text x="320" y="508" text-anchor="middle" font-family="Arial" font-size="28" font-weight="700" fill="#071332">${row.positionName}</text>
-  <text x="320" y="546" text-anchor="middle" font-family="Arial" font-size="24" fill="#697891">${row.workLocationName} - ${row.shiftName}</text>
-  <svg x="90" y="625" width="460" height="120" viewBox="0 0 ${barcode.width} 52" preserveAspectRatio="none">
+<svg xmlns="http://www.w3.org/2000/svg" width="540" height="856" viewBox="0 0 540 856">
+  <rect width="540" height="856" rx="22" fill="#ffffff"/>
+  <rect x="24" y="24" width="492" height="808" rx="16" fill="#ffffff" stroke="#d8e2ec" stroke-width="2"/>
+  <path d="M40 24h460a16 16 0 0 1 16 16v94H24V40a16 16 0 0 1 16-16Z" fill="#071332"/>
+  <text x="54" y="72" font-family="Arial, Helvetica, sans-serif" font-size="31" font-weight="900" fill="#ffffff">DMS</text>
+  <text x="54" y="101" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#bdefff">EMPLOYEE ID</text>
+  <text x="486" y="80" text-anchor="end" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="800" fill="#ffffff">${svgEmployeeCode}</text>
+  <text x="486" y="103" text-anchor="end" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="700" fill="#9fb2c9">OFFICIAL CARD</text>
+  <circle cx="270" cy="240" r="82" fill="#f8fbff" stroke="#22aeca" stroke-width="4"/>
+  <circle cx="270" cy="240" r="70" fill="#eafaff"/>
+  <text x="270" y="262" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="52" font-weight="900" fill="#071332">${svgInitials}</text>
+  ${svgNameLines}
+  <text x="270" y="424" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="21" font-weight="800" fill="#0085a0">${escapeSvgText(positionLabel)}</text>
+  <line x1="70" y1="460" x2="470" y2="460" stroke="#d8e2ec" stroke-width="2"/>
+  <text x="78" y="502" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="800" fill="#697891">DIVISI</text>
+  <text x="78" y="530" font-family="Arial, Helvetica, sans-serif" font-size="21" font-weight="800" fill="#071332">${escapeSvgText(divisionLabel)}</text>
+  <text x="306" y="502" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="800" fill="#697891">LOKASI</text>
+  <text x="306" y="530" font-family="Arial, Helvetica, sans-serif" font-size="21" font-weight="800" fill="#071332">${escapeSvgText(locationLabel)}</text>
+  <text x="78" y="574" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="800" fill="#697891">SHIFT</text>
+  <text x="78" y="602" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="800" fill="#071332">${escapeSvgText(shiftLabel)}</text>
+  <rect x="62" y="638" width="416" height="82" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+  <svg x="78" y="654" width="384" height="46" viewBox="0 0 ${barcode.width} 52" preserveAspectRatio="none">
     <rect width="${barcode.width}" height="52" fill="#ffffff"/>
     ${barSvg}
   </svg>
-  <text x="320" y="790" text-anchor="middle" font-family="Arial" font-size="22" font-weight="700" letter-spacing="2" fill="#071332">${barcodeValue}</text>
-  <text x="320" y="835" text-anchor="middle" font-family="Arial" font-size="20" fill="#697891">RFID: ${row.rfidUid || "Belum terdaftar"}</text>
-  <text x="320" y="884" text-anchor="middle" font-family="Arial" font-size="18" fill="#0085a0">${row.attendancePolicyName || "Multi Method"}</text>
+  <text x="270" y="754" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="800" fill="#071332">${svgBarcodeValue}</text>
+  <text x="270" y="794" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="700" fill="#697891">PROPERTY OF DMS</text>
 </svg>`.trim()
 
   return createPortal(
@@ -14853,7 +14914,7 @@ function EmployeeNametagDialog({ row, onClose }: { row: EmployeeDirectoryRow | n
               <p>Kartu identitas karyawan dengan barcode internal DMS.</p>
             </div>
           </div>
-          <button className="iconButton dialogClose" type="button" aria-label="Tutup nametag" onClick={onClose}>
+          <button className="iconButton dialogClose" type="button" aria-label="Tutup ID Card" onClick={onClose}>
             <X size={18} />
           </button>
         </div>
@@ -14864,25 +14925,38 @@ function EmployeeNametagDialog({ row, onClose }: { row: EmployeeDirectoryRow | n
               <img src={dmsLogo} alt="" />
               <div>
                 <span>DMS</span>
-                <strong>Employee Access</strong>
+                <strong>Employee ID</strong>
               </div>
+              <em>{row.employeeCode}</em>
             </div>
             <div className="employeeNametagAvatar">
               {row.photoUrl ? <img src={row.photoUrl} alt="" /> : <span>{getProfileInitials(row.fullName || row.employeeCode)}</span>}
             </div>
             <div className="employeeNametagIdentity">
               <span>{row.employeeCode}</span>
-              <h3>{row.fullName}</h3>
-              <p>{row.positionName} - {row.divisionName}</p>
-              <small>{row.workLocationName} - {row.shiftName}</small>
+              <h3>{row.fullName || row.employeeCode}</h3>
+              <p>{row.positionName || "-"}</p>
+            </div>
+            <div className="employeeNametagInfoGrid">
+              <span>
+                <small>Divisi</small>
+                <strong>{row.divisionName || "-"}</strong>
+              </span>
+              <span>
+                <small>Lokasi</small>
+                <strong>{row.workLocationName || "-"}</strong>
+              </span>
+              <span>
+                <small>Shift</small>
+                <strong>{row.shiftName || "-"}</strong>
+              </span>
             </div>
             <div className="employeeNametagBarcode">
               <Code128Barcode value={barcodeValue} className="employeeBarcodeSvg" />
               <strong>{barcodeValue}</strong>
             </div>
             <div className="employeeNametagMeta">
-              <span>RFID: <strong>{row.rfidUid || "Belum terdaftar"}</strong></span>
-              <span>Policy: <strong>{row.attendancePolicyName || "Multi Method"}</strong></span>
+              <span>PROPERTY OF DMS</span>
             </div>
           </article>
         </div>
