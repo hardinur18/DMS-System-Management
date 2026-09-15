@@ -14860,7 +14860,7 @@ function EmployeeNametagDialog({ row, onClose }: { row: EmployeeDirectoryRow | n
   const positionLabel = truncateIdCardText(row.positionName || "-", 27)
   const divisionLabel = truncateIdCardText(row.divisionName || "-", 27)
   const locationLabel = truncateIdCardText(row.workLocationName || "-", 26)
-  const shiftLabel = truncateIdCardText(row.shiftName || "-", 24)
+  const employmentTypeLabel = truncateIdCardText(row.employmentTypeName || employeeStatusLabel[row.status] || "-", 24)
   const svgInitials = escapeSvgText(getProfileInitials(row.fullName || row.employeeCode))
   const svgEmployeeCode = escapeSvgText(truncateIdCardText(row.employeeCode, 18))
   const svgBarcodeValue = escapeSvgText(truncateIdCardText(barcodeValue, 42))
@@ -14883,8 +14883,8 @@ function EmployeeNametagDialog({ row, onClose }: { row: EmployeeDirectoryRow | n
   <text x="78" y="530" font-family="Arial, Helvetica, sans-serif" font-size="21" font-weight="800" fill="#071332">${escapeSvgText(divisionLabel)}</text>
   <text x="306" y="502" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="800" fill="#697891">LOKASI</text>
   <text x="306" y="530" font-family="Arial, Helvetica, sans-serif" font-size="21" font-weight="800" fill="#071332">${escapeSvgText(locationLabel)}</text>
-  <text x="78" y="574" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="800" fill="#697891">SHIFT</text>
-  <text x="78" y="602" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="800" fill="#071332">${escapeSvgText(shiftLabel)}</text>
+  <text x="78" y="574" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="800" fill="#697891">STATUS</text>
+  <text x="78" y="602" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="800" fill="#071332">${escapeSvgText(employmentTypeLabel)}</text>
   <rect x="62" y="638" width="416" height="82" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
   <svg x="78" y="654" width="384" height="46" viewBox="0 0 ${barcode.width} 52" preserveAspectRatio="none">
     <rect width="${barcode.width}" height="52" fill="#ffffff"/>
@@ -14947,8 +14947,8 @@ function EmployeeNametagDialog({ row, onClose }: { row: EmployeeDirectoryRow | n
                 <strong>{row.workLocationName || "-"}</strong>
               </span>
               <span>
-                <small>Shift</small>
-                <strong>{row.shiftName || "-"}</strong>
+                <small>Status</small>
+                <strong>{row.employmentTypeName || employeeStatusLabel[row.status] || "-"}</strong>
               </span>
             </div>
             <div className="employeeNametagBarcode">
