@@ -712,6 +712,7 @@ interface EmployeePortalData {
     name: string
     photoPath: string
     photoUrl: string
+    updatedAt: string
     divisionName: string
     positionName: string
     workLocationName: string
@@ -828,6 +829,7 @@ interface EmployeeDirectoryRow {
   biofingerLinks: EmployeeBiofingerLink[]
   notes: string
   deletedAt: string
+  updatedAt: string
 }
 
 interface EmployeeFormValues {
@@ -5329,10 +5331,14 @@ function EmployeeTenureBoard({
   )
 }
 
-function getEmployeePhotoPublicUrl(path: string) {
+function getEmployeePhotoPublicUrl(path: string, version = "") {
   if (!path) return ""
   const { data } = supabase.storage.from(employeePhotoBucket).getPublicUrl(path)
-  return data.publicUrl || ""
+  if (!data.publicUrl) return ""
+
+  if (!version) return data.publicUrl
+  const separator = data.publicUrl.includes("?") ? "&" : "?"
+  return `${data.publicUrl}${separator}v=${encodeURIComponent(version)}`
 }
 
 function getAttendanceFacePublicUrl(path: string) {
@@ -6632,13 +6638,14 @@ function mapEmployeeRow(
   const employmentType = employmentTypeMap.get(employmentTypeId)
   const faceProfile = faceProfileMap.get(String(row.id))
   const referenceImagePath = String(faceProfile?.reference_image_path || "")
+  const updatedAt = String(row.updated_at || row.created_at || "")
 
   return {
     id: String(row.id),
     employeeCode: String(row.employee_code || ""),
     fullName: String(row.full_name || ""),
     photoPath: String(row.photo_path || ""),
-    photoUrl: getEmployeePhotoPublicUrl(String(row.photo_path || "")),
+    photoUrl: getEmployeePhotoPublicUrl(String(row.photo_path || ""), updatedAt),
     nik: String(row.nik || ""),
     phone: String(row.phone || ""),
     email: String(row.email || ""),
@@ -6686,11 +6693,12 @@ function mapEmployeeRow(
     biofingerLinks: biofingerLinkMap.get(String(row.id)) || [],
     notes: String(row.notes || ""),
     deletedAt: row.deleted_at ? String(row.deleted_at) : "",
+    updatedAt,
   }
 }
 
 async function loadEmployeeData(): Promise<EmployeeDirectoryData> {
-  const legacyEmployeeSelect = "id, employee_code, full_name, photo_path, nik, phone, email, division_id, position_id, work_location_id, shift_id, salary_type, daily_salary, monthly_salary, payroll_method, prorate_enabled, join_date, payroll_cycle_days, status, notes, deleted_at, created_at"
+  const legacyEmployeeSelect = "id, employee_code, full_name, photo_path, nik, phone, email, division_id, position_id, work_location_id, shift_id, salary_type, daily_salary, monthly_salary, payroll_method, prorate_enabled, join_date, payroll_cycle_days, status, notes, deleted_at, created_at, updated_at"
   const baseEmployeeSelect = `${legacyEmployeeSelect}, payroll_cycle_opening_date`
   const employmentEmployeeSelect = `${baseEmployeeSelect}, employment_type_id, payroll_eligible, employee_pay_policy, allowance_amount, attendance_required`
   const legacyKioskEmployeeSelect = `${legacyEmployeeSelect}, qr_token, rfid_uid, attendance_policy_id, kiosk_access_enabled, last_card_issued_at`
@@ -7002,7 +7010,7 @@ async function loadShiftScheduleData(targetDate = getLocalDateKey()): Promise<Sh
   const [employeeResult, divisionResult, locationResult, shiftResult, scheduleResult] = await Promise.all([
     supabase
       .from("employees")
-      .select("id, employee_code, full_name, photo_path, division_id, work_location_id, shift_id, status, deleted_at")
+      .select("id, employee_code, full_name, photo_path, division_id, work_location_id, shift_id, status, deleted_at, updated_at")
       .is("deleted_at", null)
       .order("employee_code", { ascending: true }),
     supabase.from("divisions").select("id, code, name, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
@@ -7059,7 +7067,7 @@ async function loadShiftScheduleData(targetDate = getLocalDateKey()): Promise<Sh
         employeeId,
         employeeCode: String(employee.employee_code || ""),
         fullName: String(employee.full_name || ""),
-        photoUrl: getEmployeePhotoPublicUrl(String(employee.photo_path || "")),
+        photoUrl: getEmployeePhotoPublicUrl(String(employee.photo_path || ""), String(employee.updated_at || "")),
         divisionId: String(employee.division_id || ""),
         divisionName: divisionMap.get(String(employee.division_id || ""))?.name || "Belum pilih divisi",
         defaultShiftId,
@@ -8662,7 +8670,7 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
   const [employeeResult, divisionResult, positionResult, locationResult, shiftResult, attendanceRows, dailySummaryRows, reviewAttendanceResult, payrollRows, overtimeResult, payrollComponentResult, appUserResult, faceProfileResult, leaveResult, payrollPaymentResult, overtimePaymentResult, weeklyBonusResult, weeklyBonusPaymentResult, weeklyBonusPolicyResult] = await Promise.all([
     supabase
       .from("employees")
-      .select("id, employee_code, full_name, photo_path, division_id, position_id, work_location_id, shift_id, salary_type, daily_salary, monthly_salary, payroll_cycle_days, payroll_eligible, employee_pay_policy, allowance_amount, employment_type_id, status, deleted_at")
+      .select("id, employee_code, full_name, photo_path, division_id, position_id, work_location_id, shift_id, salary_type, daily_salary, monthly_salary, payroll_cycle_days, payroll_eligible, employee_pay_policy, allowance_amount, employment_type_id, status, deleted_at, updated_at")
       .is("deleted_at", null)
       .order("employee_code", { ascending: true }),
     supabase.from("divisions").select("id, name"),
@@ -8911,7 +8919,7 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
       employeeCode: String(employee.employee_code || ""),
       fullName: String(employee.full_name || ""),
       employeePhotoPath: String(employee.photo_path || ""),
-      employeePhotoUrl: getEmployeePhotoPublicUrl(String(employee.photo_path || "")),
+      employeePhotoUrl: getEmployeePhotoPublicUrl(String(employee.photo_path || ""), String(employee.updated_at || "")),
       divisionName: divisionMap.get(String(employee.division_id || "")) || "Belum pilih divisi",
       positionName: positionMap.get(String(employee.position_id || "")) || "Belum pilih jabatan",
       workLocationName: String(location?.name || "Belum pilih lokasi"),
@@ -9040,7 +9048,7 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
       employeeId,
       employeeCode: String(employee.employee_code || ""),
       fullName: String(employee.full_name || ""),
-      employeePhotoUrl: getEmployeePhotoPublicUrl(String(employee.photo_path || "")),
+      employeePhotoUrl: getEmployeePhotoPublicUrl(String(employee.photo_path || ""), String(employee.updated_at || "")),
       divisionName: divisionMap.get(String(employee.division_id || "")) || "Belum pilih divisi",
       workLocationName: String(location?.name || "Belum pilih lokasi"),
       workLocationCode: String(location?.code || ""),
@@ -9071,7 +9079,7 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
         employeeCode: String(employee?.employee_code || ""),
         fullName: String(employee?.full_name || "Karyawan tidak ditemukan"),
         employeePhotoPath: String(employee?.photo_path || ""),
-        employeePhotoUrl: getEmployeePhotoPublicUrl(String(employee?.photo_path || "")),
+        employeePhotoUrl: getEmployeePhotoPublicUrl(String(employee?.photo_path || ""), String(employee?.updated_at || "")),
         divisionName: divisionMap.get(String(employee?.division_id || "")) || "Belum pilih divisi",
         startDate: String(leave.start_date || ""),
         endDate: String(leave.end_date || ""),
@@ -9122,7 +9130,7 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
         employeeCode: String(employee?.employee_code || ""),
         fullName: String(employee?.full_name || "Karyawan tidak ditemukan"),
         employeePhotoPath: String(employee?.photo_path || ""),
-        employeePhotoUrl: getEmployeePhotoPublicUrl(String(employee?.photo_path || "")),
+        employeePhotoUrl: getEmployeePhotoPublicUrl(String(employee?.photo_path || ""), String(employee?.updated_at || "")),
         divisionName: divisionMap.get(String(employee?.division_id || "")) || "Belum pilih divisi",
         workLocationName: String(location?.name || "Belum pilih lokasi"),
         attendanceDate: String(log.attendance_date || ""),
@@ -9176,7 +9184,7 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
       employeeCode: String(employee?.employee_code || ""),
       fullName: String(employee?.full_name || "Karyawan tidak ditemukan"),
       employeePhotoPath: String(employee?.photo_path || ""),
-      employeePhotoUrl: getEmployeePhotoPublicUrl(String(employee?.photo_path || "")),
+      employeePhotoUrl: getEmployeePhotoPublicUrl(String(employee?.photo_path || ""), String(employee?.updated_at || "")),
       divisionName: divisionMap.get(String(employee?.division_id || "")) || "Belum pilih divisi",
       overtimeDate: String(overtime.overtime_date || ""),
       shiftStartTime: String(overtime.shift_start_time || "").slice(0, 5),
@@ -9559,7 +9567,8 @@ async function loadEmployeePortalData(): Promise<EmployeePortalData> {
       code: String(employee.code || ""),
       name: String(employee.name || ""),
       photoPath: String(employee.photoPath || ""),
-      photoUrl: getEmployeePhotoPublicUrl(String(employee.photoPath || "")),
+      photoUrl: getEmployeePhotoPublicUrl(String(employee.photoPath || ""), String(employee.updatedAt || "")),
+      updatedAt: String(employee.updatedAt || ""),
       divisionName: String(employee.divisionName || "Belum pilih divisi"),
       positionName: String(employee.positionName || "Belum pilih jabatan"),
       workLocationName: String(employee.workLocationName || "Belum pilih lokasi"),

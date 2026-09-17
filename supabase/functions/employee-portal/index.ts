@@ -100,7 +100,7 @@ Deno.serve(async (request) => {
     const [employeeResult, faceResult, payrollResult, logsResult] = await Promise.all([
       adminClient
         .from("employees")
-        .select("id, employee_code, full_name, photo_path, division_id, position_id, work_location_id, shift_id, salary_type, daily_salary, monthly_salary, payroll_method, join_date, status")
+        .select("id, employee_code, full_name, photo_path, division_id, position_id, work_location_id, shift_id, salary_type, daily_salary, monthly_salary, payroll_method, join_date, status, updated_at")
         .eq("id", employeeId)
         .is("deleted_at", null)
         .maybeSingle(),
@@ -166,6 +166,7 @@ Deno.serve(async (request) => {
         code: employee.employee_code,
         name: employee.full_name,
         photoPath: employee.photo_path || "",
+        updatedAt: employee.updated_at || "",
         divisionName: divisionResult.data?.name || "Belum pilih divisi",
         positionName: positionResult.data?.name || "Belum pilih jabatan",
         workLocationName: location.name || "Belum pilih lokasi",
