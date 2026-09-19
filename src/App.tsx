@@ -332,6 +332,7 @@ interface FieldReadinessRow {
 }
 
 type OvertimeStatus = "draft" | "pending" | "approved" | "rejected"
+type OvertimeReviewDecision = "approve" | "reject" | "restore"
 type OvertimeRequestSource = "auto" | "planned" | "manual"
 type OvertimeCalculationBasis = "extra_after_shift" | "full_duration"
 type OvertimeSegment = "total" | "pre_shift" | "post_shift" | "full_duration"
@@ -9793,7 +9794,7 @@ async function correctMissingCheckout(employeeId: string, attendanceDate: string
   return data
 }
 
-async function reviewOvertimeRequest(id: string, decision: "approve" | "reject", approvedMinutes: number, paymentPolicy: OvertimePaymentPolicy, notes: string) {
+async function reviewOvertimeRequest(id: string, decision: OvertimeReviewDecision, approvedMinutes: number, paymentPolicy: OvertimePaymentPolicy, notes: string) {
   const { data, error } = await supabase.functions.invoke("overtime-review", {
     body: { action: decision, payload: { id, approvedMinutes, paymentPolicy, notes } },
   })
@@ -18652,20 +18653,28 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
     setOvertimeTarget(row)
   }
 
-  const handleOvertimeReviewSubmit = async (decision: "approve" | "reject", approvedMinutes: number, paymentPolicy: OvertimePaymentPolicy, notes: string) => {
+  const handleOvertimeReviewSubmit = async (decision: OvertimeReviewDecision, approvedMinutes: number, paymentPolicy: OvertimePaymentPolicy, notes: string) => {
     if (!overtimeTarget) return
 
     const scopedNotes = decision === "approve" && overtimeReviewScope !== "total"
       ? [notes.trim(), `Scope approval: ${getOvertimeReviewScopeLabel(overtimeReviewScope)}.`].filter(Boolean).join(" ")
       : notes
+    const actionTitle = decision === "approve"
+      ? "Lembur disetujui"
+      : decision === "restore"
+        ? "Reject lembur dipulihkan"
+        : "Lembur ditolak"
+    const actionDescription = decision === "restore"
+      ? `${overtimeTarget.fullName} dikembalikan ke antrian review lembur.`
+      : `${overtimeTarget.fullName} - ${getOvertimeReviewScopeLabel(overtimeReviewScope)} - ${formatMinutesDuration(approvedMinutes)} - ${overtimePaymentPolicyLabel[paymentPolicy]}.`
 
     setOvertimeSubmitting(true)
     try {
       await reviewOvertimeRequest(overtimeTarget.id, decision, approvedMinutes, paymentPolicy, scopedNotes)
       showToast({
         tone: "success",
-        title: decision === "approve" ? "Lembur disetujui" : "Lembur ditolak",
-        description: `${overtimeTarget.fullName} - ${getOvertimeReviewScopeLabel(overtimeReviewScope)} - ${formatMinutesDuration(approvedMinutes)} - ${overtimePaymentPolicyLabel[paymentPolicy]}.`,
+        title: actionTitle,
+        description: actionDescription,
       })
       setOvertimeTarget(null)
       setOvertimeReviewScope("total")
@@ -25195,8 +25204,10 @@ function OvertimeReviewTable({
               const isSelected = selectedIds.includes(row.id)
               const timingBucket = getOvertimeTimingBucket(row)
               const timingLabel = getOvertimeTimingFilterLabel(timingBucket)
-              const actionLabel = payrollFinal || row.status === "approved" || row.status === "rejected"
+              const actionLabel = payrollFinal || row.status === "approved"
                 ? "Lihat Detail"
+                : row.status === "rejected"
+                  ? "Pulihkan Reject"
                 : canApproveOvertime
                   ? "Review & Approve"
                   : "Lihat Request"
@@ -25306,7 +25317,7 @@ function OvertimeReviewExpandPanel({ row, reviewScope = "total", onReview }: { r
       ? Math.round((scopedMinutes / 60) * row.rateAmount)
       : 0
   const decisionLabel = isFinal
-    ? "Lihat Detail"
+    ? row.status === "rejected" && !payrollFinal ? "Pulihkan Reject" : "Lihat Detail"
     : canApproveOvertime
       ? "Review & Approve"
       : row.requestSource === "planned"
@@ -25317,7 +25328,7 @@ function OvertimeReviewExpandPanel({ row, reviewScope = "total", onReview }: { r
     : row.status === "approved"
       ? `${formatMinutesDuration(row.approvedMinutes)} approved. Pembayaran: ${paymentPolicyLabel}.`
     : row.status === "rejected"
-      ? "Ditolak HR, tidak masuk pembayaran."
+      ? "Ditolak HR. Bisa dipulihkan ke antrian review jika reject salah."
       : canApproveOvertime
         ? "Sudah ada checkout dan menit payable, siap direview HR."
         : "Menunggu checkout/settlement sebelum bisa masuk pembayaran."
@@ -25451,7 +25462,7 @@ function OvertimeReviewDialog({
   reviewScope?: OvertimeReviewScope
   saving: boolean
   onClose: () => void
-  onSubmit: (decision: "approve" | "reject", approvedMinutes: number, paymentPolicy: OvertimePaymentPolicy, notes: string) => void
+  onSubmit: (decision: OvertimeReviewDecision, approvedMinutes: number, paymentPolicy: OvertimePaymentPolicy, notes: string) => void
 }) {
   const [approvedMinutes, setApprovedMinutes] = useState("0")
   const [paymentPolicy, setPaymentPolicy] = useState<OvertimePaymentPolicy>("separate")
@@ -25478,6 +25489,7 @@ function OvertimeReviewDialog({
   const previewAmount = Math.round((minutes / 60) * row.rateAmount)
   const canApprovePayroll = !isFinal && !payrollFinal && !salaryCycleIsFinal && maxApproveMinutes > 0 && Boolean(row.actualCheckOutAt) && row.status !== "draft"
   const canRejectOvertime = !isFinal && !payrollFinal
+  const canRestoreRejected = row.status === "rejected" && !payrollFinal
   const plannedLabel = getOvertimePlanRange(row)
   const sourceLabel = getOvertimeSourceLabel(row.requestSource)
   const displayMinutes = maxApproveMinutes || row.plannedMinutes
@@ -25485,8 +25497,14 @@ function OvertimeReviewDialog({
   const rejectActionLabel = isPlannedDraft ? "Batalkan Request" : canApprovePayroll ? "Reject" : "Tolak Request"
   const scopeLabel = getOvertimeReviewScopeLabel(reviewScope)
   const scopeNote = getOvertimeReviewScopeNote(reviewScope)
-  const submitOvertimeDecision = (decision: "approve" | "reject") => {
+  const submitOvertimeDecision = (decision: OvertimeReviewDecision) => {
     const trimmedNotes = notes.trim()
+    if (decision === "restore") {
+      if (!canRestoreRejected) return
+      setNoteError("")
+      onSubmit(decision, 0, paymentPolicy, trimmedNotes)
+      return
+    }
     if (isFinal) return
     if (payrollFinal) {
       setNoteError(`${getOvertimePayrollFinalLabel(row)}. Perubahan lembur harus lewat koreksi pembayaran terpisah.`)
@@ -25525,7 +25543,7 @@ function OvertimeReviewDialog({
           <div>
             <span>Overtime Review</span>
             <h2 id="overtime-review-title">{row.requestSource === "planned" && row.status === "draft" ? "Request lembur" : "Review lembur"} {row.fullName}</h2>
-            <p>{payrollFinal ? `${getOvertimePayrollFinalLabel(row)}. Data lembur tidak bisa diubah dari approval.` : isFinal ? "Status lembur sudah final. Gunakan koreksi pembayaran terpisah jika perlu perubahan." : canApprovePayroll ? `Approve ${scopeLabel.toLowerCase()}. Lembur approved akan ${approvalDestination}.` : "Request sudah tercatat, tetapi pembayaran menunggu realisasi checkout dan kalkulasi payable."}</p>
+            <p>{payrollFinal ? `${getOvertimePayrollFinalLabel(row)}. Data lembur tidak bisa diubah dari approval.` : canRestoreRejected ? "Reject bisa dipulihkan ke antrian review selama belum terkunci gaji final." : isFinal ? "Status lembur sudah final. Gunakan koreksi pembayaran terpisah jika perlu perubahan." : canApprovePayroll ? `Approve ${scopeLabel.toLowerCase()}. Lembur approved akan ${approvalDestination}.` : "Request sudah tercatat, tetapi pembayaran menunggu realisasi checkout dan kalkulasi payable."}</p>
           </div>
           <FoundationDialogCloseButton label="Tutup review lembur" onClose={onClose} disabled={saving} />
         </div>
@@ -25604,6 +25622,11 @@ function OvertimeReviewDialog({
               <Lock size={17} />
               <span>{getOvertimePayrollFinalLabel(row)}. Approval lembur dikunci agar gaji final tidak berubah tanpa proses koreksi terpisah.</span>
             </div>
+          ) : canRestoreRejected ? (
+            <div className="overtimeRequestNotice">
+              <RotateCcw size={17} />
+              <span>Lembur berstatus Rejected. Pulihkan jika reject salah, lalu review ulang untuk approve atau reject kembali.</span>
+            </div>
           ) : isFinal ? (
             <div className="overtimeRequestNotice">
               <ShieldCheck size={17} />
@@ -25626,10 +25649,10 @@ function OvertimeReviewDialog({
             </div>
           )}
           <TextFormField
-            label={canApprovePayroll ? "Catatan Finance / HR" : isPlannedDraft ? "Catatan Pembatalan" : "Catatan Penolakan / Koreksi"}
+            label={canApprovePayroll ? "Catatan Finance / HR" : canRestoreRejected ? "Catatan Pemulihan" : isPlannedDraft ? "Catatan Pembatalan" : "Catatan Penolakan / Koreksi"}
             value={notes}
             onChange={(event) => setNotes(event.target.value)}
-            placeholder="Contoh: lembur produksi disetujui karena closing order."
+            placeholder={canRestoreRejected ? "Contoh: reject sebelumnya salah pilih, pulihkan untuk review ulang." : "Contoh: lembur produksi disetujui karena closing order."}
           />
           {noteError && <p className="foundationFieldError">{noteError}</p>}
         </div>
@@ -25646,6 +25669,11 @@ function OvertimeReviewDialog({
             <button className="primaryButton" type="button" onClick={onClose} disabled={saving}>
               <Lock size={16} />
               Gaji Final
+            </button>
+          ) : canRestoreRejected ? (
+            <button className="primaryButton" type="button" onClick={() => submitOvertimeDecision("restore")} disabled={saving}>
+              <RotateCcw size={16} />
+              {saving ? "Memproses..." : "Pulihkan Reject"}
             </button>
           ) : isFinal ? (
             <button className="primaryButton" type="button" onClick={onClose} disabled={saving}>

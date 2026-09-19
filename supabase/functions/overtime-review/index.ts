@@ -1,6 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0"
 
-type OvertimeReviewAction = "approve" | "reject"
+type OvertimeReviewAction = "approve" | "reject" | "restore"
 
 interface OvertimeReviewPayload {
   id?: string
@@ -54,7 +54,7 @@ Deno.serve(async (request) => {
     const action = body.action
     const payload = body.payload || {}
 
-    assertPayload(action === "approve" || action === "reject", "Action lembur tidak valid.")
+    assertPayload(action === "approve" || action === "reject" || action === "restore", "Action lembur tidak valid.")
     assertPayload(payload.id, "ID lembur wajib ada.")
 
     const token = authorization.replace(/^Bearer\s+/i, "")
@@ -83,7 +83,7 @@ Deno.serve(async (request) => {
 
     const { data: overtime, error: overtimeError } = await adminClient
       .from("overtime_requests")
-      .select("id, employee_id, payroll_cycle_id, overtime_date, overtime_segment, overtime_minutes, approved_minutes, rate_amount, total_amount, status, request_source, overtime_basis, overtime_payment_policy, actual_check_out_at, notes")
+      .select("id, employee_id, payroll_cycle_id, overtime_date, overtime_segment, overtime_minutes, approved_minutes, rate_amount, total_amount, status, request_source, overtime_basis, overtime_payment_policy, overtime_payment_status, overtime_payment_id, actual_check_out_at, notes")
       .eq("id", payload.id)
       .maybeSingle()
 
@@ -104,6 +104,7 @@ Deno.serve(async (request) => {
     }
 
     const approved = action === "approve"
+    const restoring = action === "restore"
     const requestedMinutes = Number(overtime.overtime_minutes || 0)
     const reviewNote = payload.notes?.trim()
     const isPlannedDraft = overtime.status === "draft" && overtime.request_source === "planned"
@@ -128,7 +129,7 @@ Deno.serve(async (request) => {
       payrollCycle = cycleByDate
     }
 
-    if (overtime.status === "approved" || overtime.status === "rejected") {
+    if (overtime.status === "approved" || (overtime.status === "rejected" && !restoring)) {
       return jsonResponse({ error: "Approval lembur sudah final dan tidak bisa diproses ulang." }, 409)
     }
 
@@ -142,6 +143,70 @@ Deno.serve(async (request) => {
       return jsonResponse({
         error: finalMessage,
       }, 409)
+    }
+
+    if (restoring) {
+      if (overtime.status !== "rejected") {
+        return jsonResponse({ error: "Hanya lembur Rejected yang bisa dipulihkan." }, 409)
+      }
+
+      if (overtime.overtime_payment_id || overtime.overtime_payment_status === "paid") {
+        return jsonResponse({ error: "Lembur yang sudah punya riwayat bayar tidak bisa dipulihkan dari approval." }, 409)
+      }
+
+      const restoredStatus = overtime.request_source === "planned" && (!overtime.actual_check_out_at || requestedMinutes <= 0)
+        ? "draft"
+        : "pending"
+      const restoreNotes = [
+        overtime.notes,
+        reviewNote ? `HR pulihkan reject lembur: ${reviewNote}` : "HR pulihkan reject lembur tanpa catatan tambahan.",
+      ].filter(Boolean).join("\n")
+
+      const { data: restoredOvertime, error: restoreError } = await adminClient
+        .from("overtime_requests")
+        .update({
+          status: restoredStatus,
+          approved_minutes: 0,
+          total_amount: 0,
+          reviewed_by: actor.id,
+          reviewed_at: new Date().toISOString(),
+          notes: restoreNotes,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", overtime.id)
+        .select("id, employee_id, overtime_date, overtime_minutes, approved_minutes, rate_amount, total_amount, status, notes")
+        .single()
+
+      if (restoreError) throw restoreError
+
+      const { error: refreshError } = await adminClient.rpc("refresh_employee_payroll_cycles", { target_employee_id: overtime.employee_id })
+      if (refreshError) throw refreshError
+
+      await adminClient.from("audit_logs").insert({
+        actor_user_id: actor.id,
+        actor_name: actor.full_name,
+        action: "Restore rejected overtime",
+        target_table: "overtime_requests",
+        target_id: overtime.id,
+        status: "success",
+        metadata: {
+          overtime_date: overtime.overtime_date,
+          overtime_segment: overtime.overtime_segment || "total",
+          previous_status: overtime.status,
+          next_status: restoredStatus,
+          overtime_minutes: requestedMinutes,
+          approved_minutes: 0,
+          total_amount: 0,
+          request_source: overtime.request_source,
+          overtime_basis: overtime.overtime_basis,
+          overtime_payment_policy: overtime.overtime_payment_policy,
+          payroll_cycle_number: payrollCycle?.cycle_number || null,
+          payroll_status: payrollCycle?.status || null,
+          source: "edge-function",
+        },
+      })
+
+      return jsonResponse({ ok: true, overtime: restoredOvertime })
     }
 
     if (!approved && !reviewNote) {
