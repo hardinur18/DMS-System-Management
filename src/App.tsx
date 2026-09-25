@@ -816,6 +816,7 @@ interface EmployeeDirectoryRow {
   contractStartDate: string
   contractEndDate: string
   payrollCycleDays: number
+  customCycleDays: number
   payrollCycleOpeningDate: string
   status: EmployeeStatus
   faceProfileId: string
@@ -864,11 +865,13 @@ interface EmployeeFormValues {
   kioskAccessEnabled: boolean
   kioskSchemaReady: boolean
   payrollOpeningSchemaReady: boolean
+  customCycleSchemaReady: boolean
   contractSchemaReady: boolean
   joinDate: string
   contractStartDate: string
   contractEndDate: string
   payrollCycleDays: string
+  customCycleDays: string
   payrollCycleOpeningDate: string
   status: EmployeeStatus
   notes: string
@@ -902,11 +905,12 @@ interface EmployeeDirectoryData {
   policies: AttendancePolicyOption[]
   kioskSchemaReady: boolean
   payrollOpeningSchemaReady: boolean
+  customCycleSchemaReady: boolean
   contractSchemaReady: boolean
 }
 
 function createEmptyEmployeeDirectoryData(): EmployeeDirectoryData {
-  return { rows: [], divisions: [], positions: [], locations: [], shifts: [], employmentTypes: [], policies: [], kioskSchemaReady: true, payrollOpeningSchemaReady: true, contractSchemaReady: true }
+  return { rows: [], divisions: [], positions: [], locations: [], shifts: [], employmentTypes: [], policies: [], kioskSchemaReady: true, payrollOpeningSchemaReady: true, customCycleSchemaReady: true, contractSchemaReady: true }
 }
 
 type ShiftScheduleStatus = "active" | "cancelled"
@@ -3638,11 +3642,12 @@ function EmailVerifiedBadge({ verifiedAt }: { verifiedAt: string }) {
   )
 }
 
-function ProgressRing({ value }: { value: number }) {
-  const safeValue = Math.max(0, Math.min(26, value))
+function ProgressRing({ value, max = 26 }: { value: number; max?: number }) {
+  const safeMax = Math.max(1, max)
+  const safeValue = Math.max(0, Math.min(safeMax, value))
   const radius = 16
   const circumference = 2 * Math.PI * radius
-  const dashOffset = circumference - (safeValue / 26) * circumference
+  const dashOffset = circumference - (safeValue / safeMax) * circumference
   return (
     <span className="cycleRing">
       <svg viewBox="0 0 40 40" aria-hidden="true">
@@ -4614,6 +4619,8 @@ function getBiofingerMachineNameMeta(row: Pick<BiofingerUserLinkRow, "externalNa
 
 const maxEmployeeDailySalary = 5000000
 const maxEmployeeMonthlySalary = 100000000
+const minEmployeeCustomCycleDays = 1
+const maxEmployeeCustomCycleDays = 31
 const maxEmployeePhotoSize = 2 * 1024 * 1024
 const employeePhotoBucket = "employee-photos"
 const attendanceFaceBucket = "attendance-faces"
@@ -5400,11 +5407,13 @@ function createEmptyEmployeeForm(rows: EmployeeDirectoryRow[] = []): EmployeeFor
     kioskAccessEnabled: true,
     kioskSchemaReady: true,
     payrollOpeningSchemaReady: true,
+    customCycleSchemaReady: true,
     contractSchemaReady: true,
     joinDate: new Date().toISOString().slice(0, 10),
     contractStartDate: "",
     contractEndDate: "",
     payrollCycleDays: "0",
+    customCycleDays: "6",
     payrollCycleOpeningDate: "",
     status: "active",
     notes: "",
@@ -5635,6 +5644,10 @@ function normalizeEmployeeCycle(value: string) {
   return normalizeIntegerInput(value, 26)
 }
 
+function normalizeEmployeeCustomCycle(value: string) {
+  return normalizeIntegerInput(value, maxEmployeeCustomCycleDays)
+}
+
 function mapEmployeeStatus(status: unknown): EmployeeStatus {
   if (status === "review" || status === "inactive") return status
   return "active"
@@ -5837,6 +5850,14 @@ function isMissingPayrollOpeningSchema(error: unknown) {
   const message = `${String(errorObject?.code || "")} ${String(errorObject?.message || "")} ${String(errorObject?.details || "")} ${String(errorObject?.hint || "")}`.toLowerCase()
 
   return message.includes("payroll_cycle_opening_date")
+    || message.includes("schema cache")
+}
+
+function isMissingCustomCycleSchema(error: unknown) {
+  const errorObject = error && typeof error === "object" ? error as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown } : null
+  const message = `${String(errorObject?.code || "")} ${String(errorObject?.message || "")} ${String(errorObject?.details || "")} ${String(errorObject?.hint || "")}`.toLowerCase()
+
+  return message.includes("custom_cycle_days")
     || message.includes("schema cache")
 }
 
@@ -6680,6 +6701,7 @@ function mapEmployeeRow(
     contractStartDate: row.contract_start_date ? String(row.contract_start_date) : "",
     contractEndDate: row.contract_end_date ? String(row.contract_end_date) : "",
     payrollCycleDays: Number(row.payroll_cycle_days || 0),
+    customCycleDays: Number(row.custom_cycle_days || 0),
     payrollCycleOpeningDate: row.payroll_cycle_opening_date ? String(row.payroll_cycle_opening_date) : "",
     status: mapEmployeeStatus(row.status),
     faceProfileId: String(faceProfile?.id || ""),
@@ -6701,12 +6723,15 @@ function mapEmployeeRow(
 async function loadEmployeeData(): Promise<EmployeeDirectoryData> {
   const legacyEmployeeSelect = "id, employee_code, full_name, photo_path, nik, phone, email, division_id, position_id, work_location_id, shift_id, salary_type, daily_salary, monthly_salary, payroll_method, prorate_enabled, join_date, payroll_cycle_days, status, notes, deleted_at, created_at, updated_at"
   const baseEmployeeSelect = `${legacyEmployeeSelect}, payroll_cycle_opening_date`
+  const customCycleEmployeeSelect = `${baseEmployeeSelect}, custom_cycle_days`
   const employmentEmployeeSelect = `${baseEmployeeSelect}, employment_type_id, payroll_eligible, employee_pay_policy, allowance_amount, attendance_required`
+  const customCycleEmploymentEmployeeSelect = `${customCycleEmployeeSelect}, employment_type_id, payroll_eligible, employee_pay_policy, allowance_amount, attendance_required`
   const legacyKioskEmployeeSelect = `${legacyEmployeeSelect}, qr_token, rfid_uid, attendance_policy_id, kiosk_access_enabled, last_card_issued_at`
   const kioskEmployeeSelect = `${baseEmployeeSelect}, qr_token, rfid_uid, attendance_policy_id, kiosk_access_enabled, last_card_issued_at`
   const employmentKioskEmployeeSelect = `${employmentEmployeeSelect}, qr_token, rfid_uid, attendance_policy_id, kiosk_access_enabled, last_card_issued_at`
   const contractEmploymentKioskEmployeeSelect = `${employmentEmployeeSelect}, contract_start_date, contract_end_date, qr_token, rfid_uid, attendance_policy_id, kiosk_access_enabled, last_card_issued_at`
-  const employeeQuery = supabase.from("employees").select(contractEmploymentKioskEmployeeSelect).order("employee_code", { ascending: true })
+  const customContractEmploymentKioskEmployeeSelect = `${customCycleEmploymentEmployeeSelect}, contract_start_date, contract_end_date, qr_token, rfid_uid, attendance_policy_id, kiosk_access_enabled, last_card_issued_at`
+  const employeeQuery = supabase.from("employees").select(customContractEmploymentKioskEmployeeSelect).order("employee_code", { ascending: true })
   const [initialEmployeesResult, divisions, positions, locations, shifts, employmentTypesResult, faceProfiles, policies, biofingerLinksResult, biofingerDevicesResult] = await Promise.all([
     employeeQuery,
     supabase.from("divisions").select("id, code, name, is_active, sort_order").order("sort_order", { ascending: true }).order("code", { ascending: true }),
@@ -6721,6 +6746,7 @@ async function loadEmployeeData(): Promise<EmployeeDirectoryData> {
   ])
   let kioskSchemaReady = true
   let payrollOpeningSchemaReady = true
+  let customCycleSchemaReady = true
   let employmentSchemaReady = true
   let contractSchemaReady = true
   let employeesResult = initialEmployeesResult as {
@@ -6729,7 +6755,12 @@ async function loadEmployeeData(): Promise<EmployeeDirectoryData> {
   }
 
   if (initialEmployeesResult.error) {
-    if (isMissingEmployeeContractSchema(initialEmployeesResult.error)) {
+    if (isMissingCustomCycleSchema(initialEmployeesResult.error)) {
+      customCycleSchemaReady = false
+      employeesResult = await supabase.from("employees").select(contractEmploymentKioskEmployeeSelect).order("employee_code", { ascending: true })
+    }
+
+    if (employeesResult.error && isMissingEmployeeContractSchema(employeesResult.error)) {
       contractSchemaReady = false
       employeesResult = await supabase.from("employees").select(employmentKioskEmployeeSelect).order("employee_code", { ascending: true })
     }
@@ -6855,6 +6886,7 @@ async function loadEmployeeData(): Promise<EmployeeDirectoryData> {
     policies: policyOptions,
     kioskSchemaReady,
     payrollOpeningSchemaReady,
+    customCycleSchemaReady,
     contractSchemaReady,
   }
 }
@@ -7211,6 +7243,7 @@ async function cancelEmployeeShiftSchedule(row: ShiftScheduleRow) {
 
 function createEmployeePayload(values: EmployeeFormValues, photoPath = values.photoPath) {
   const usesAttendanceCycle = values.payrollMethod === "attendance_cycle"
+  const usesCustomCycle = values.payrollMethod === "custom"
   const payload: Record<string, unknown> = {
     employee_code: values.employeeCode.trim().toUpperCase(),
     full_name: values.fullName.trim(),
@@ -7231,6 +7264,10 @@ function createEmployeePayload(values: EmployeeFormValues, photoPath = values.ph
     payroll_cycle_days: usesAttendanceCycle ? Number(values.payrollCycleDays || 0) : 0,
     status: values.status,
     notes: values.notes.trim() || null,
+  }
+
+  if (values.customCycleSchemaReady) {
+    payload.custom_cycle_days = usesCustomCycle ? Number(values.customCycleDays || 0) : null
   }
 
   if (values.payrollOpeningSchemaReady) {
@@ -7265,6 +7302,7 @@ function validateEmployeeForm(values: EmployeeFormValues) {
   const dailySalary = Number(values.dailySalary)
   const monthlySalary = Number(values.monthlySalary)
   const payrollCycleDays = Number(values.payrollCycleDays)
+  const customCycleDays = Number(values.customCycleDays)
   const emailValid = !values.email.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email.trim())
   const photoFileValid = !values.photoFile || employeePhotoMimeTypes.includes(values.photoFile.type)
   const photoSizeValid = !values.photoFile || values.photoFile.size <= maxEmployeePhotoSize
@@ -7290,6 +7328,12 @@ function validateEmployeeForm(values: EmployeeFormValues) {
   if (values.payrollMethod === "attendance_cycle") {
     if (!Number.isFinite(payrollCycleDays) || payrollCycleDays < 0 || payrollCycleDays > 26) errors.push("Saldo awal cycle harus 0 sampai 26 hari.")
     if (values.payrollOpeningSchemaReady && payrollCycleDays > 0 && !values.payrollCycleOpeningDate) errors.push("Tanggal awal cycle wajib diisi saat saldo awal lebih dari 0.")
+  }
+  if (values.payrollMethod === "custom") {
+    if (!values.customCycleSchemaReady) errors.push("Migration custom cycle belum aktif di database.")
+    if (!Number.isFinite(customCycleDays) || customCycleDays < minEmployeeCustomCycleDays || customCycleDays > maxEmployeeCustomCycleDays) {
+      errors.push(`Jumlah hari custom cycle harus ${minEmployeeCustomCycleDays} sampai ${maxEmployeeCustomCycleDays} hari.`)
+    }
   }
   if (!emailValid) errors.push("Email karyawan belum valid.")
   if (!photoFileValid) errors.push("Foto wajib JPG, PNG, atau WEBP.")
@@ -7431,7 +7475,7 @@ async function extendEmployeeContract(row: EmployeeDirectoryRow, values: { newSt
 }
 
 function exportEmployeeCsv(rows: EmployeeDirectoryRow[]) {
-  const header = ["No", "Kode", "Nama", "Foto Path", "NIK", "Phone", "Email", "Divisi", "Jabatan", "Lokasi", "Shift", "Status Kerja", "Ikut Payroll", "Policy Pembayaran", "Uang Saku", "Wajib Absensi", "Biofinger User ID", "Biofinger Device", "Biofinger Status", "Tipe Gaji", "Gaji Harian", "Gaji Bulanan", "Metode Payroll", "Hitung Proporsional", "Tanggal Masuk", "Lama Kerja", "Tgl Awal Kontrak", "Tgl Akhir Kontrak", "Sisa Kontrak", "Status Kontrak", "Saldo Awal Cycle", "Tanggal Awal Cycle", "Status", "Catatan"]
+  const header = ["No", "Kode", "Nama", "Foto Path", "NIK", "Phone", "Email", "Divisi", "Jabatan", "Lokasi", "Shift", "Status Kerja", "Ikut Payroll", "Policy Pembayaran", "Uang Saku", "Wajib Absensi", "Biofinger User ID", "Biofinger Device", "Biofinger Status", "Tipe Gaji", "Gaji Harian", "Gaji Bulanan", "Metode Payroll", "Jumlah Hari Custom", "Hitung Proporsional", "Tanggal Masuk", "Lama Kerja", "Tgl Awal Kontrak", "Tgl Akhir Kontrak", "Sisa Kontrak", "Status Kontrak", "Saldo Awal Cycle", "Tanggal Awal Cycle", "Status", "Catatan"]
   const body = rows.map((row, index) => [
     index + 1,
     row.employeeCode,
@@ -7456,6 +7500,7 @@ function exportEmployeeCsv(rows: EmployeeDirectoryRow[]) {
     row.dailySalary,
     row.monthlySalary,
     employeePayrollMethodLabel[row.payrollMethod],
+    row.payrollMethod === "custom" ? row.customCycleDays : "",
     row.prorateEnabled ? "Ya" : "Tidak",
     row.joinDate,
     getEmployeeTenureLabel(row.joinDate),
@@ -10095,7 +10140,7 @@ function EmployeesPage({
     revalidateOnCache: true,
   })
   const canManage = hasPermission(profile, "employees.manage")
-  const { rows, divisions, positions, locations, shifts, employmentTypes, policies, kioskSchemaReady, payrollOpeningSchemaReady, contractSchemaReady } = employeeData
+  const { rows, divisions, positions, locations, shifts, employmentTypes, policies, kioskSchemaReady, payrollOpeningSchemaReady, customCycleSchemaReady, contractSchemaReady } = employeeData
 
   const fetchRows = async (options: { silent?: boolean } = {}) => {
     setErrorMessage("")
@@ -10233,6 +10278,7 @@ function EmployeesPage({
     }
     fallbackValues.kioskSchemaReady = kioskSchemaReady
     fallbackValues.payrollOpeningSchemaReady = payrollOpeningSchemaReady
+    fallbackValues.customCycleSchemaReady = customCycleSchemaReady
     fallbackValues.contractSchemaReady = contractSchemaReady
     fallbackValues.employmentSchemaReady = employmentTypes.length > 0
     setDialogInitialValues(fallbackValues)
@@ -10244,6 +10290,7 @@ function EmployeesPage({
             qrToken: current.employeeCode === fallbackValues.employeeCode ? generateEmployeeQrToken(employeeCode) : current.qrToken,
             kioskSchemaReady,
             payrollOpeningSchemaReady,
+            customCycleSchemaReady,
             contractSchemaReady,
       }))
     }).catch(() => {})
@@ -10283,11 +10330,13 @@ function EmployeesPage({
       kioskAccessEnabled: row.kioskAccessEnabled,
       kioskSchemaReady,
       payrollOpeningSchemaReady,
+      customCycleSchemaReady,
       contractSchemaReady,
       joinDate: row.joinDate,
       contractStartDate: isPermanentEmployee(row) ? "" : row.contractStartDate,
       contractEndDate: isPermanentEmployee(row) ? "" : row.contractEndDate,
       payrollCycleDays: String(row.payrollCycleDays),
+      customCycleDays: String(row.customCycleDays || 6),
       payrollCycleOpeningDate: row.payrollCycleOpeningDate,
       status: row.status,
       notes: row.notes,
@@ -10671,6 +10720,8 @@ function EmployeesPage({
                           <ProgressRing value={row.payrollCycleDays} />
                           <span>{row.payrollCycleDays}/26 awal</span>
                         </span>
+                      ) : row.payrollMethod === "custom" ? (
+                        <TableText primary={employeePayrollMethodLabel[row.payrollMethod]} secondary={`${row.customCycleDays || 0} hari/cycle`} />
                       ) : (
                         <TableText primary={employeePayrollMethodLabel[row.payrollMethod]} secondary="Tanpa saldo cycle" />
                       )}
@@ -14312,6 +14363,7 @@ function EmployeeDialog({
                   ...current,
                   payrollMethod,
                   payrollCycleDays: payrollMethod === "attendance_cycle" ? current.payrollCycleDays : "0",
+                  customCycleDays: payrollMethod === "custom" ? current.customCycleDays || "6" : current.customCycleDays,
                   payrollCycleOpeningDate: payrollMethod === "attendance_cycle" ? current.payrollCycleOpeningDate : "",
                 }))
               }}
@@ -14399,6 +14451,37 @@ function EmployeeDialog({
                     onChange={(payrollCycleOpeningDate) => setValues((current) => ({ ...current, payrollCycleOpeningDate }))}
                     disabled={!values.payrollOpeningSchemaReady}
                     helperText="Tanggal hari pertama dari cycle berjalan."
+                  />
+                </div>
+              </div>
+            )}
+            {values.payrollMethod === "custom" && (
+              <div className="employeeCycleOpeningPanel employeeFormFull">
+                <div className="employeeCycleOpeningHeader">
+                  <span>
+                    <CalendarCheck2 size={18} />
+                  </span>
+                  <div>
+                    <strong>Custom Cycle Payroll</strong>
+                    <small>Jumlah hari kerja valid untuk satu periode gaji custom.</small>
+                  </div>
+                  <em>
+                    {values.customCycleSchemaReady
+                      ? `Siap saat mencapai ${Number(values.customCycleDays || 0) || 0} hari`
+                      : "Migration custom cycle belum aktif"}
+                  </em>
+                </div>
+                <div className="employeeCycleOpeningGrid">
+                  <TextFormField
+                    label="Jumlah Hari Custom"
+                    type="text"
+                    inputMode="numeric"
+                    value={values.customCycleDays}
+                    onChange={(event) => setValues((current) => ({ ...current, customCycleDays: normalizeEmployeeCustomCycle(event.target.value) }))}
+                    placeholder="1 - 31"
+                    helperText="Contoh: buruh bangunan mingguan 6 hari, isi 6."
+                    disabled={!values.customCycleSchemaReady}
+                    required
                   />
                 </div>
               </div>
@@ -14498,6 +14581,11 @@ function EmployeeDetailDialog({
       ? [
           { label: "Saldo awal cycle", value: `${row.payrollCycleDays}/26 hari` },
           { label: "Tanggal awal cycle", value: formatEmployeeDate(row.payrollCycleOpeningDate) },
+        ]
+      : []),
+    ...(row.payrollMethod === "custom"
+      ? [
+          { label: "Jumlah hari custom", value: `${row.customCycleDays || 0} hari/cycle` },
         ]
       : []),
   ]
@@ -18149,7 +18237,7 @@ function EmployeeTable({
                   <td><AttendanceValidationCell row={employee} /></td>
                   <td>
                     <div className="cycleCell">
-                      <ProgressRing value={employee.cycleDays} />
+                      <ProgressRing value={employee.cycleDays} max={employee.targetDays} />
                       <span>{employee.cycleDays}/{employee.targetDays}</span>
                     </div>
                   </td>
@@ -20302,7 +20390,7 @@ function LiveAttendanceTable({
                     <td><AttendanceTimelineCell row={row} /></td>
                     <td><AttendanceSettlementCell row={row} compact /></td>
                     <td><AttendanceValidationCell row={row} /></td>
-                    <td><span className="cycleCell"><ProgressRing value={row.cycleDays} /><span>{row.cycleDays}/{row.targetDays}</span></span></td>
+                    <td><span className="cycleCell"><ProgressRing value={row.cycleDays} max={row.targetDays} /><span>{row.cycleDays}/{row.targetDays}</span></span></td>
                     <td><StatusBadge status={row.attendanceStatus} /></td>
                     <td className="tableActionCell">
                       <div className="rowActions" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
@@ -22605,7 +22693,7 @@ function PayrollPreviewTable({
                       <td><TableText primary={row.basePayrollAmount ? formatCurrency(row.basePayrollAmount) : "-"} /></td>
                       <td><TableText primary={row.overtimeAmount ? formatCurrency(row.overtimeAmount) : "-"} secondary={row.overtimeAmount ? "Ikut gaji 26 hari" : row.overtimeApprovedMinutes ? "Lembur terpisah" : ""} /></td>
                       <td><TableText primary={row.payrollAmount ? formatCurrency(row.payrollAmount) : "-"} secondary={row.payrollStatus === "paid" ? "Masuk riwayat bayar" : row.payrollStatus === "locked" ? "Menunggu bayar" : ""} /></td>
-                      <td><span className="cycleCell"><ProgressRing value={row.cycleDays} /><span>{row.cycleDays}/{row.targetDays}</span></span></td>
+                      <td><span className="cycleCell"><ProgressRing value={row.cycleDays} max={row.targetDays} /><span>{row.cycleDays}/{row.targetDays}</span></span></td>
                       <td>
                         <div className="payrollStatusStack">
                           <PayrollStatusBadge status={row.payrollStatus} />
