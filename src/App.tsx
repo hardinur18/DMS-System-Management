@@ -567,6 +567,26 @@ interface PayrollProcessSubmitPayload {
 interface PayrollProcessResult {
   ok?: boolean
   payroll?: Record<string, unknown>
+  payment?: Record<string, unknown>
+}
+
+interface OvertimePaymentProcessResult {
+  ok?: boolean
+  payment?: Record<string, unknown>
+  requests?: Record<string, unknown>[]
+  restoredRequestIds?: string[]
+}
+
+interface WeeklyBonusPaymentProcessResult {
+  ok?: boolean
+  payment?: Record<string, unknown>
+  bonusCycles?: Record<string, unknown>[]
+  restoredBonusCycleIds?: string[]
+}
+
+interface WeeklyBonusPolicyProcessResult {
+  ok?: boolean
+  policy?: Record<string, unknown>
 }
 
 interface OvertimePaymentSubmitPayload extends PayrollProcessSubmitPayload {
@@ -10005,6 +10025,113 @@ function applyPayrollCycleResultToOperationsData(current: OperationsFoundationDa
   }
 }
 
+function replaceOrAppendById<T extends { id: string }>(rows: T[], nextRow?: T) {
+  if (!nextRow?.id) return rows
+  const index = rows.findIndex((row) => row.id === nextRow.id)
+  if (index < 0) return [nextRow, ...rows]
+
+  return rows.map((row) => (row.id === nextRow.id ? nextRow : row))
+}
+
+function normalizeRecordArray(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value)
+    ? value.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object" && !Array.isArray(row))
+    : []
+}
+
+function applyPayrollPaymentResultToOperationsData(current: OperationsFoundationData, result?: PayrollProcessResult): OperationsFoundationData {
+  const payment = result?.payment ? mapPayrollPaymentRecord(result.payment) : null
+
+  return {
+    ...applyPayrollCycleResultToOperationsData(current, result?.payroll),
+    payrollPayments: replaceOrAppendById(current.payrollPayments, payment || undefined),
+  }
+}
+
+function applyOvertimePaymentResultToOperationsData(current: OperationsFoundationData, result?: OvertimePaymentProcessResult): OperationsFoundationData {
+  const payment = result?.payment ? mapOvertimePaymentRecord(result.payment) : null
+  const requestRecords = normalizeRecordArray(result?.requests)
+  const requestById = new Map(requestRecords.map((row) => [String(row.id || ""), row]))
+
+  const patchOvertime = (row: OvertimeReviewRow): OvertimeReviewRow => {
+    const requestRecord = requestById.get(row.id)
+    if (requestRecord) {
+      return {
+        ...row,
+        overtimePaymentStatus: mapOvertimePaymentStatus(requestRecord.overtime_payment_status),
+        overtimePaymentPolicy: mapOvertimePaymentPolicy(requestRecord.overtime_payment_policy),
+        overtimePaymentId: String(requestRecord.overtime_payment_id || ""),
+        overtimePaidAt: String(requestRecord.overtime_paid_at || ""),
+        overtimePaymentNote: String(requestRecord.overtime_payment_note || ""),
+      }
+    }
+
+    return row
+  }
+
+  return {
+    ...current,
+    overtime: current.overtime.map(patchOvertime),
+    overtimePayments: replaceOrAppendById(current.overtimePayments, payment || undefined),
+  }
+}
+
+function applyOvertimePaymentVoidResultToOperationsData(current: OperationsFoundationData, result?: OvertimePaymentProcessResult): OperationsFoundationData {
+  const payment = result?.payment ? mapOvertimePaymentRecord(result.payment) : null
+  const requestRecords = normalizeRecordArray(result?.requests)
+  const requestById = new Map(requestRecords.map((row) => [String(row.id || ""), row]))
+  const restoredIds = new Set((result?.restoredRequestIds || []).map(String))
+  const paymentId = String(result?.payment?.id || payment?.id || "")
+
+  const patchOvertime = (row: OvertimeReviewRow): OvertimeReviewRow => {
+    const requestRecord = requestById.get(row.id)
+    if (requestRecord) {
+      return {
+        ...row,
+        overtimePaymentStatus: mapOvertimePaymentStatus(requestRecord.overtime_payment_status),
+        overtimePaymentPolicy: mapOvertimePaymentPolicy(requestRecord.overtime_payment_policy),
+        overtimePaymentId: String(requestRecord.overtime_payment_id || ""),
+        overtimePaidAt: String(requestRecord.overtime_paid_at || ""),
+        overtimePaymentNote: String(requestRecord.overtime_payment_note || ""),
+      }
+    }
+
+    if (!restoredIds.has(row.id) && (!paymentId || row.overtimePaymentId !== paymentId)) return row
+    return { ...row, overtimePaymentStatus: "unpaid", overtimePaymentId: "", overtimePaidAt: "", overtimePaymentNote: "" }
+  }
+
+  return {
+    ...current,
+    overtime: current.overtime.map(patchOvertime),
+    overtimePayments: replaceOrAppendById(current.overtimePayments, payment || undefined),
+  }
+}
+
+function applyWeeklyBonusPaymentResultToOperationsData(current: OperationsFoundationData, result?: WeeklyBonusPaymentProcessResult): OperationsFoundationData {
+  const payment = result?.payment ? mapWeeklyBonusPaymentRecord(result.payment) : null
+  const bonusCycles = normalizeRecordArray(result?.bonusCycles).map(mapWeeklyShiftBonusRecord).filter((row) => row.id)
+
+  return {
+    ...current,
+    weeklyBonuses: current.weeklyBonuses.map((row) => bonusCycles.find((bonus) => bonus.id === row.id) || row),
+    weeklyBonusPayments: replaceOrAppendById(current.weeklyBonusPayments, payment || undefined),
+  }
+}
+
+function applyWeeklyBonusPaymentVoidResultToOperationsData(current: OperationsFoundationData, result?: WeeklyBonusPaymentProcessResult): OperationsFoundationData {
+  return applyWeeklyBonusPaymentResultToOperationsData(current, result)
+}
+
+function applyWeeklyBonusPolicyResultToOperationsData(current: OperationsFoundationData, result?: WeeklyBonusPolicyProcessResult): OperationsFoundationData {
+  const policy = result?.policy ? mapWeeklyBonusPolicyRecord(result.policy) : null
+  if (!policy) return current
+
+  return {
+    ...current,
+    weeklyBonusPolicies: replaceOrAppendById(current.weeklyBonusPolicies, policy),
+  }
+}
+
 async function processOvertimePayment(action: "mark_overtime_paid" | "void_overtime_payment", payload: OvertimePaymentSubmitPayload) {
   const { data, error } = await supabase.functions.invoke("payroll-processing", {
     body: { action, payload },
@@ -10034,7 +10161,7 @@ async function processOvertimePayment(action: "mark_overtime_paid" | "void_overt
   }
   if (data?.error) throw new Error(String(data.error))
 
-  return data
+  return data as OvertimePaymentProcessResult
 }
 
 async function processWeeklyBonusPayment(action: "mark_weekly_bonus_paid" | "void_weekly_bonus_payment", payload: WeeklyBonusPaymentSubmitPayload) {
@@ -10066,7 +10193,7 @@ async function processWeeklyBonusPayment(action: "mark_weekly_bonus_paid" | "voi
   }
   if (data?.error) throw new Error(String(data.error))
 
-  return data
+  return data as WeeklyBonusPaymentProcessResult
 }
 
 async function saveWeeklyBonusPolicy(payload: WeeklyBonusPolicySubmitPayload) {
@@ -10113,7 +10240,7 @@ async function saveWeeklyBonusPolicy(payload: WeeklyBonusPolicySubmitPayload) {
   }
   if (data?.error) throw new Error(String(data.error))
 
-  return data
+  return data as WeeklyBonusPolicyProcessResult
 }
 
 const userStatusLabel: Record<UserStatus, string> = {
@@ -18961,7 +19088,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
     setPayrollSubmitting(true)
     try {
       const result = await processPayrollCycle(payrollTarget.payrollCycleId, payrollAction, payload)
-      commitAttendanceData((current) => applyPayrollCycleResultToOperationsData(current, result.payroll))
+      commitAttendanceData((current) => applyPayrollPaymentResultToOperationsData(current, result))
       const payrollActionTitle: Record<PayrollProcessAction, string> = {
         lock: "Nominal gaji difinalkan",
         mark_paid: "Pembayaran dicatat",
@@ -18984,7 +19111,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
       setPayrollTarget(null)
       setStatusFilter("all")
       setPayrollFocusTab(payrollActionFocusTab[payrollAction])
-      await refreshData()
+      void refreshData()
     } catch (error) {
       showToast({
         tone: "error",
@@ -19001,10 +19128,11 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
 
     setOvertimePaymentSubmitting(true)
     try {
-      await processOvertimePayment("mark_overtime_paid", {
+      const result = await processOvertimePayment("mark_overtime_paid", {
         ...payload,
         overtimeRequestIds: [overtimePaymentTarget.id],
       })
+      commitAttendanceData((current) => applyOvertimePaymentResultToOperationsData(current, result))
       showToast({
         tone: "success",
         title: "Pembayaran lembur dicatat",
@@ -19012,7 +19140,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
       })
       setOvertimePaymentTarget(null)
       setStatusFilter("all")
-      await refreshData()
+      void refreshData()
     } catch (error) {
       showToast({
         tone: "error",
@@ -19029,10 +19157,11 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
 
     setOvertimePaymentSubmitting(true)
     try {
-      await processOvertimePayment("void_overtime_payment", {
+      const result = await processOvertimePayment("void_overtime_payment", {
         overtimePaymentId: overtimePaymentVoidTarget.id,
         notes: "Pembayaran lembur dibatalkan dari halaman Payroll.",
       })
+      commitAttendanceData((current) => applyOvertimePaymentVoidResultToOperationsData(current, result))
       showToast({
         tone: "success",
         title: "Pembayaran lembur dibatalkan",
@@ -19040,7 +19169,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
       })
       setOvertimePaymentVoidTarget(null)
       setStatusFilter("all")
-      await refreshData()
+      void refreshData()
     } catch (error) {
       showToast({
         tone: "error",
@@ -19057,10 +19186,11 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
 
     setWeeklyBonusPaymentSubmitting(true)
     try {
-      await processWeeklyBonusPayment("mark_weekly_bonus_paid", {
+      const result = await processWeeklyBonusPayment("mark_weekly_bonus_paid", {
         ...payload,
         weeklyBonusCycleIds: [weeklyBonusPaymentTarget.id],
       })
+      commitAttendanceData((current) => applyWeeklyBonusPaymentResultToOperationsData(current, result))
       showToast({
         tone: "success",
         title: "Pembayaran bonus dicatat",
@@ -19068,7 +19198,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
       })
       setWeeklyBonusPaymentTarget(null)
       setStatusFilter("all")
-      await refreshData()
+      void refreshData()
     } catch (error) {
       showToast({
         tone: "error",
@@ -19085,10 +19215,11 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
 
     setWeeklyBonusPaymentSubmitting(true)
     try {
-      await processWeeklyBonusPayment("void_weekly_bonus_payment", {
+      const result = await processWeeklyBonusPayment("void_weekly_bonus_payment", {
         weeklyBonusPaymentId: weeklyBonusPaymentVoidTarget.id,
         notes: "Pembayaran bonus shift dibatalkan dari halaman Payroll.",
       })
+      commitAttendanceData((current) => applyWeeklyBonusPaymentVoidResultToOperationsData(current, result))
       showToast({
         tone: "success",
         title: "Pembayaran bonus dibatalkan",
@@ -19096,7 +19227,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
       })
       setWeeklyBonusPaymentVoidTarget(null)
       setStatusFilter("all")
-      await refreshData()
+      void refreshData()
     } catch (error) {
       showToast({
         tone: "error",
@@ -19111,14 +19242,15 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
   const handleWeeklyBonusPolicySubmit = async (payload: WeeklyBonusPolicySubmitPayload) => {
     setWeeklyBonusPolicySubmitting(true)
     try {
-      await saveWeeklyBonusPolicy(payload)
+      const result = await saveWeeklyBonusPolicy(payload)
+      commitAttendanceData((current) => applyWeeklyBonusPolicyResultToOperationsData(current, result))
       showToast({
         tone: "success",
         title: "Pengaturan bonus disimpan",
         description: `${payload.name} - ${payload.shiftIds.length} shift aktif, ${formatCurrency(payload.fullAmount)} per ${payload.targetDays} hari.`,
       })
       setWeeklyBonusPolicyOpen(false)
-      await refreshData()
+      void refreshData()
     } catch (error) {
       showToast({
         tone: "error",

@@ -150,6 +150,92 @@ async function rebuildPayrollCycleItems(adminClient: any, cycleId: string) {
   throw error
 }
 
+const payrollCycleColumns = "id, employee_id, cycle_number, period_started_at, period_closed_at, work_days_count, target_work_days, gross_amount, overtime_amount, net_amount, salary_type, status, ready_at, locked_at, paid_at, processed_at, processed_by, notes"
+const payrollPaymentColumns = "id, payment_no, payroll_cycle_id, employee_id, employee_code, employee_name, cycle_number, period_started_at, period_closed_at, gross_amount, overtime_amount, net_amount, paid_amount, payment_method, payment_reference, paid_at, paid_by_name, status, notes"
+const overtimeRequestColumns = "id, employee_id, attendance_log_id, payroll_cycle_id, payroll_component_id, overtime_date, shift_start_time, shift_end_time, actual_check_out_at, overtime_minutes, approved_minutes, rate_amount, total_amount, day_type, overtime_basis, status, request_source, planned_start_at, planned_end_at, planned_minutes, request_reason, requested_at, matched_attendance, notes, created_at, overtime_payment_status, overtime_payment_policy, overtime_payment_id, overtime_paid_at, overtime_payment_note, overtime_segment, actual_check_in_at, pre_shift_minutes, post_shift_minutes"
+const overtimePaymentColumns = "id, payment_no, employee_id, employee_code, employee_name, period_started_at, period_closed_at, request_count, overtime_minutes, overtime_amount, paid_amount, payment_method, payment_reference, paid_at, paid_by_name, status, notes"
+const weeklyBonusCycleColumns = "id, policy_id, policy_code, policy_name, employee_id, employee_code, employee_name, division_name, period_started_at, period_closed_at, payment_due_date, eligible_days, target_days, full_amount, bonus_amount, status, payment_id, paid_at, paid_by_name, payment_note, calculated_at"
+const weeklyBonusPaymentColumns = "id, payment_no, employee_id, employee_code, employee_name, period_started_at, period_closed_at, cycle_count, eligible_days, target_days, bonus_amount, paid_amount, payment_method, payment_reference, paid_at, paid_by_name, status, notes"
+const weeklyBonusPolicyColumns = "id, code, name, description, target_days, full_amount, week_start_dow, payment_day_dow, status, is_active, updated_at"
+
+function getPaymentId(result: unknown) {
+  const row = Array.isArray(result) ? result[0] : result
+  if (!row || typeof row !== "object") return ""
+  const record = row as Record<string, unknown>
+  return String(record.payment_id || record.id || "")
+}
+
+async function fetchSingleRecord(adminClient: any, tableName: string, columns: string, id: string) {
+  if (!id) return null
+
+  const { data, error } = await adminClient
+    .from(tableName)
+    .select(columns)
+    .eq("id", id)
+    .maybeSingle()
+
+  if (error) {
+    if (isMissingLedgerError(error)) throw new Error(ledgerMigrationMessage())
+    throw error
+  }
+
+  return data
+}
+
+async function fetchRecordsByIds(adminClient: any, tableName: string, columns: string, ids: string[]) {
+  const cleanIds = Array.from(new Set(ids.map((id) => String(id || "").trim()).filter(Boolean)))
+  if (cleanIds.length === 0) return []
+
+  const { data, error } = await adminClient
+    .from(tableName)
+    .select(columns)
+    .in("id", cleanIds)
+
+  if (error) {
+    if (isMissingLedgerError(error)) throw new Error(ledgerMigrationMessage())
+    throw error
+  }
+
+  return data || []
+}
+
+async function fetchRecordIdsByPayment(adminClient: any, tableName: string, paymentColumn: string, paymentId: string) {
+  if (!paymentId) return []
+
+  const { data, error } = await adminClient
+    .from(tableName)
+    .select("id")
+    .eq(paymentColumn, paymentId)
+
+  if (error) {
+    if (isMissingLedgerError(error)) throw new Error(ledgerMigrationMessage())
+    throw error
+  }
+
+  return ((data || []) as Array<Record<string, unknown>>).map((row) => String(row.id || "")).filter(Boolean)
+}
+
+async function fetchWeeklyBonusPolicy(adminClient: any, policyId: string) {
+  const policy = await fetchSingleRecord(adminClient, "weekly_bonus_policies", weeklyBonusPolicyColumns, policyId)
+  if (!policy) return null
+
+  const { data: shiftRows, error: shiftError } = await adminClient
+    .from("weekly_bonus_policy_shifts")
+    .select("shift_id, is_active")
+    .eq("policy_id", policyId)
+    .eq("is_active", true)
+
+  if (shiftError) {
+    if (isMissingLedgerError(shiftError)) throw new Error(ledgerMigrationMessage())
+    throw shiftError
+  }
+
+  return {
+    ...policy,
+    shift_ids: ((shiftRows || []) as Array<Record<string, unknown>>).map((row) => String(row.shift_id || "")).filter(Boolean),
+  }
+}
+
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders })
   if (request.method !== "POST") return jsonResponse({ error: "Method not allowed" }, 405)
@@ -253,12 +339,12 @@ Deno.serve(async (request) => {
           .from("weekly_bonus_policies")
           .update({ ...policyPayload, updated_at: new Date().toISOString() })
           .eq("id", payload.weeklyBonusPolicyId)
-          .select("id, code, name, target_days, full_amount")
+          .select(weeklyBonusPolicyColumns)
           .single()
         : adminClient
           .from("weekly_bonus_policies")
           .upsert(policyPayload, { onConflict: "code" })
-          .select("id, code, name, target_days, full_amount")
+          .select(weeklyBonusPolicyColumns)
           .single()
 
       const { data: policy, error: policyError } = await policyQuery
@@ -314,7 +400,9 @@ Deno.serve(async (request) => {
         },
       })
 
-      return jsonResponse({ ok: true, policy })
+      const refreshedPolicy = await fetchWeeklyBonusPolicy(adminClient, String(policy.id || ""))
+
+      return jsonResponse({ ok: true, policy: refreshedPolicy || policy })
     }
 
     if (action === "mark_overtime_paid") {
@@ -343,11 +431,16 @@ Deno.serve(async (request) => {
         throw paymentError
       }
 
-      return jsonResponse({ ok: true, ...paymentResult })
+      const paymentId = getPaymentId(paymentResult)
+      const payment = await fetchSingleRecord(adminClient, "overtime_payments", overtimePaymentColumns, paymentId)
+      const requests = await fetchRecordsByIds(adminClient, "overtime_requests", overtimeRequestColumns, requestIds)
+
+      return jsonResponse({ ok: true, ...paymentResult, payment, requests })
     }
 
     if (action === "void_overtime_payment") {
       assertPayload(payload.overtimePaymentId, "ID pembayaran lembur wajib ada.")
+      const affectedRequestIds = await fetchRecordIdsByPayment(adminClient, "overtime_requests", "overtime_payment_id", String(payload.overtimePaymentId || ""))
 
       const { data: paymentResult, error: paymentError } = await adminClient.rpc("void_overtime_payment", {
         target_payment_id: payload.overtimePaymentId,
@@ -361,7 +454,10 @@ Deno.serve(async (request) => {
         throw paymentError
       }
 
-      return jsonResponse({ ok: true, ...paymentResult })
+      const payment = await fetchSingleRecord(adminClient, "overtime_payments", overtimePaymentColumns, String(payload.overtimePaymentId || ""))
+      const requests = await fetchRecordsByIds(adminClient, "overtime_requests", overtimeRequestColumns, affectedRequestIds)
+
+      return jsonResponse({ ok: true, ...paymentResult, payment, requests, restoredRequestIds: affectedRequestIds })
     }
 
     if (action === "mark_weekly_bonus_paid") {
@@ -390,11 +486,16 @@ Deno.serve(async (request) => {
         throw paymentError
       }
 
-      return jsonResponse({ ok: true, ...paymentResult })
+      const paymentId = getPaymentId(paymentResult)
+      const payment = await fetchSingleRecord(adminClient, "weekly_shift_bonus_payments", weeklyBonusPaymentColumns, paymentId)
+      const bonusCycles = await fetchRecordsByIds(adminClient, "weekly_shift_bonus_cycles", weeklyBonusCycleColumns, cycleIds)
+
+      return jsonResponse({ ok: true, ...paymentResult, payment, bonusCycles })
     }
 
     if (action === "void_weekly_bonus_payment") {
       assertPayload(payload.weeklyBonusPaymentId, "ID pembayaran bonus wajib ada.")
+      const affectedBonusCycleIds = await fetchRecordIdsByPayment(adminClient, "weekly_shift_bonus_cycles", "payment_id", String(payload.weeklyBonusPaymentId || ""))
 
       const { data: paymentResult, error: paymentError } = await adminClient.rpc("void_weekly_bonus_payment", {
         target_payment_id: payload.weeklyBonusPaymentId,
@@ -408,7 +509,10 @@ Deno.serve(async (request) => {
         throw paymentError
       }
 
-      return jsonResponse({ ok: true, ...paymentResult })
+      const payment = await fetchSingleRecord(adminClient, "weekly_shift_bonus_payments", weeklyBonusPaymentColumns, String(payload.weeklyBonusPaymentId || ""))
+      const bonusCycles = await fetchRecordsByIds(adminClient, "weekly_shift_bonus_cycles", weeklyBonusCycleColumns, affectedBonusCycleIds)
+
+      return jsonResponse({ ok: true, ...paymentResult, payment, bonusCycles, restoredBonusCycleIds: affectedBonusCycleIds })
     }
 
     assertPayload(payload.cycleId, "ID gaji wajib ada.")
@@ -460,7 +564,13 @@ Deno.serve(async (request) => {
         throw paymentError
       }
 
-      return jsonResponse({ ok: true, ...paymentResult })
+      const paymentId = getPaymentId(paymentResult)
+      const [updatedCycle, payment] = await Promise.all([
+        fetchSingleRecord(adminClient, "payroll_cycles", payrollCycleColumns, String(cycle.id || "")),
+        fetchSingleRecord(adminClient, "payroll_payments", payrollPaymentColumns, paymentId),
+      ])
+
+      return jsonResponse({ ok: true, ...paymentResult, payroll: updatedCycle, payment })
     }
 
     let updatePayload: Record<string, unknown>
@@ -531,7 +641,7 @@ Deno.serve(async (request) => {
       .from("payroll_cycles")
       .update(updatePayload)
       .eq("id", cycle.id)
-      .select("id, employee_id, cycle_number, work_days_count, target_work_days, gross_amount, overtime_amount, net_amount, status, ready_at, locked_at, paid_at, processed_at, processed_by, notes")
+      .select(payrollCycleColumns)
       .single()
 
     if (updateError) throw updateError
