@@ -577,6 +577,11 @@ interface OvertimePaymentProcessResult {
   restoredRequestIds?: string[]
 }
 
+interface OvertimeReviewProcessResult {
+  ok?: boolean
+  overtime?: Record<string, unknown>
+}
+
 interface WeeklyBonusPaymentProcessResult {
   ok?: boolean
   payment?: Record<string, unknown>
@@ -4290,7 +4295,7 @@ async function invokeAppUsersFunction(action: string, payload: Record<string, un
   }
   if (data?.error) throw new Error(String(data.error))
 
-  return data
+  return data as OvertimeReviewProcessResult
 }
 
 async function invokeRolePermissionsFunction(action: string, payload: Record<string, unknown>) {
@@ -10104,6 +10109,34 @@ function applyOvertimePaymentVoidResultToOperationsData(current: OperationsFound
     ...current,
     overtime: current.overtime.map(patchOvertime),
     overtimePayments: replaceOrAppendById(current.overtimePayments, payment || undefined),
+  }
+}
+
+function applyOvertimeReviewResultToOperationsData(current: OperationsFoundationData, result?: OvertimeReviewProcessResult): OperationsFoundationData {
+  const overtime = result?.overtime
+  const overtimeId = String(overtime?.id || "")
+  if (!overtimeId) return current
+
+  return {
+    ...current,
+    overtime: current.overtime.map((row) => {
+      if (row.id !== overtimeId) return row
+
+      return {
+        ...row,
+        overtimeMinutes: Number(overtime?.overtime_minutes ?? row.overtimeMinutes),
+        approvedMinutes: Number(overtime?.approved_minutes ?? row.approvedMinutes),
+        rateAmount: Number(overtime?.rate_amount ?? row.rateAmount),
+        totalAmount: Number(overtime?.total_amount ?? row.totalAmount),
+        status: mapOvertimeStatus(overtime?.status),
+        overtimePaymentPolicy: mapOvertimePaymentPolicy(overtime?.overtime_payment_policy ?? row.overtimePaymentPolicy),
+        overtimePaymentStatus: mapOvertimePaymentStatus(overtime?.overtime_payment_status ?? row.overtimePaymentStatus),
+        overtimePaymentId: String(overtime?.overtime_payment_id || ""),
+        overtimePaidAt: String(overtime?.overtime_paid_at || ""),
+        overtimePaymentNote: String(overtime?.overtime_payment_note || ""),
+        notes: String(overtime?.notes || row.notes),
+      }
+    }),
   }
 }
 
@@ -18926,7 +18959,8 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
 
     setOvertimeSubmitting(true)
     try {
-      await reviewOvertimeRequest(overtimeTarget.id, decision, approvedMinutes, paymentPolicy, scopedNotes)
+      const result = await reviewOvertimeRequest(overtimeTarget.id, decision, approvedMinutes, paymentPolicy, scopedNotes)
+      commitAttendanceData((current) => applyOvertimeReviewResultToOperationsData(current, result))
       showToast({
         tone: "success",
         title: actionTitle,
@@ -18934,7 +18968,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
       })
       setOvertimeTarget(null)
       setOvertimeReviewScope("total")
-      await refreshData()
+      void reloadAttendanceData({ silent: true, load: loadAttendanceData })
     } catch (error) {
       showToast({
         tone: "error",
@@ -18970,6 +19004,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
     setOvertimeSubmitting(true)
     let successCount = 0
     let failedCount = 0
+    const fulfilledResults: OvertimeReviewProcessResult[] = []
 
     try {
       for (const batch of chunkBatch(targetRows, 8)) {
@@ -18985,8 +19020,15 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
 
         successCount += results.filter((result) => result.status === "fulfilled").length
         failedCount += results.filter((result) => result.status === "rejected").length
+        fulfilledResults.push(...results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []))
       }
 
+      if (fulfilledResults.length > 0) {
+        commitAttendanceData((current) => fulfilledResults.reduce(
+          (nextData, result) => applyOvertimeReviewResultToOperationsData(nextData, result),
+          current,
+        ))
+      }
       setBulkOvertimeRows([])
       setBulkOvertimeScope("total")
       showToast({
@@ -18994,7 +19036,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
         title: decision === "approve" ? "Lembur massal disetujui" : "Lembur massal ditolak",
         description: `${successCount} request berhasil diproses${failedCount > 0 ? `, ${failedCount} gagal` : ""}.`,
       })
-      await refreshData()
+      void reloadAttendanceData({ silent: true, load: loadAttendanceData })
     } catch (error) {
       showToast({
         tone: "error",

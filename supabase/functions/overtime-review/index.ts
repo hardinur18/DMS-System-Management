@@ -174,7 +174,7 @@ Deno.serve(async (request) => {
           updated_at: new Date().toISOString(),
         })
         .eq("id", overtime.id)
-        .select("id, employee_id, overtime_date, overtime_minutes, approved_minutes, rate_amount, total_amount, status, notes")
+        .select("id, employee_id, overtime_date, overtime_minutes, approved_minutes, rate_amount, total_amount, status, overtime_payment_policy, overtime_payment_status, overtime_payment_id, overtime_paid_at, overtime_payment_note, notes")
         .single()
 
       if (restoreError) throw restoreError
@@ -246,7 +246,7 @@ Deno.serve(async (request) => {
         updated_at: new Date().toISOString(),
       })
       .eq("id", overtime.id)
-      .select("id, employee_id, overtime_date, overtime_minutes, approved_minutes, rate_amount, total_amount, status, notes")
+      .select("id, employee_id, overtime_date, overtime_minutes, approved_minutes, rate_amount, total_amount, status, overtime_payment_policy, overtime_payment_status, overtime_payment_id, overtime_paid_at, overtime_payment_note, notes")
       .single()
 
     if (updateError) throw updateError
