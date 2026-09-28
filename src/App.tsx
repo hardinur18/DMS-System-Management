@@ -564,6 +564,11 @@ interface PayrollProcessSubmitPayload {
   paidAmount?: number
 }
 
+interface PayrollProcessResult {
+  ok?: boolean
+  payroll?: Record<string, unknown>
+}
+
 interface OvertimePaymentSubmitPayload extends PayrollProcessSubmitPayload {
   overtimeRequestIds?: string[]
   overtimePaymentId?: string
@@ -9961,7 +9966,43 @@ async function processPayrollCycle(cycleId: string, action: PayrollProcessAction
   }
   if (data?.error) throw new Error(String(data.error))
 
-  return data
+  return data as PayrollProcessResult
+}
+
+function applyPayrollCycleResultToOperationsData(current: OperationsFoundationData, payroll?: Record<string, unknown>): OperationsFoundationData {
+  const payrollCycleId = String(payroll?.id || "")
+  if (!payrollCycleId) return current
+
+  const grossAmount = Number(payroll?.gross_amount || 0)
+  const overtimeAmount = Number(payroll?.overtime_amount || 0)
+  const netAmount = Number(payroll?.net_amount || 0) || grossAmount + overtimeAmount
+  const nextStatus = mapPayrollCycleStatus(payroll?.status)
+
+  const patchRow = (row: AttendanceMonitorRow): AttendanceMonitorRow => {
+    if (row.payrollCycleId !== payrollCycleId) return row
+
+    return {
+      ...row,
+      payrollCycleNumber: Number(payroll?.cycle_number || row.payrollCycleNumber),
+      cycleDays: Number(payroll?.work_days_count ?? row.cycleDays),
+      targetDays: Number(payroll?.target_work_days ?? row.targetDays),
+      basePayrollAmount: grossAmount,
+      overtimeAmount,
+      payrollAmount: netAmount,
+      payrollStatus: nextStatus,
+      payrollReadyAt: String(payroll?.ready_at || row.payrollReadyAt),
+      payrollLockedAt: String(payroll?.locked_at || ""),
+      payrollPaidAt: String(payroll?.paid_at || ""),
+      periodStartedAt: String(payroll?.period_started_at || row.periodStartedAt),
+      periodClosedAt: String(payroll?.period_closed_at || row.periodClosedAt),
+    }
+  }
+
+  return {
+    ...current,
+    rows: current.rows.map(patchRow),
+    allRows: current.allRows.map(patchRow),
+  }
 }
 
 async function processOvertimePayment(action: "mark_overtime_paid" | "void_overtime_payment", payload: OvertimePaymentSubmitPayload) {
@@ -18485,6 +18526,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
     refreshing,
     error: attendanceLoadError,
     reload: reloadAttendanceData,
+    commit: commitAttendanceData,
   } = useFoundationCachedData<OperationsFoundationData>({
     cacheKey: operationsCacheKey,
     createInitialData: createEmptyOperationsFoundationData,
@@ -18918,7 +18960,8 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
 
     setPayrollSubmitting(true)
     try {
-      await processPayrollCycle(payrollTarget.payrollCycleId, payrollAction, payload)
+      const result = await processPayrollCycle(payrollTarget.payrollCycleId, payrollAction, payload)
+      commitAttendanceData((current) => applyPayrollCycleResultToOperationsData(current, result.payroll))
       const payrollActionTitle: Record<PayrollProcessAction, string> = {
         lock: "Nominal gaji difinalkan",
         mark_paid: "Pembayaran dicatat",
