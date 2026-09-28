@@ -24280,6 +24280,10 @@ function isOvertimePayrollFinal(row: Pick<OvertimeReviewRow, "payrollStatus">) {
   return row.payrollStatus === "locked" || row.payrollStatus === "paid"
 }
 
+function isOvertimeApprovalLocked(row: Pick<OvertimeReviewRow, "overtimePaymentPolicy" | "payrollStatus">) {
+  return row.overtimePaymentPolicy === "salary_cycle" && isOvertimePayrollFinal(row)
+}
+
 function chunkBatch<T>(items: T[], size: number) {
   const chunks: T[][] = []
   for (let index = 0; index < items.length; index += size) {
@@ -24289,15 +24293,15 @@ function chunkBatch<T>(items: T[], size: number) {
 }
 
 function canBulkApproveOvertimeRow(row: OvertimeReviewRow, scope: OvertimeReviewScope = "total") {
-  return row.status === "pending" && Boolean(row.actualCheckOutAt) && getOvertimeScopedMinutes(row, scope) > 0 && !isOvertimePayrollFinal(row)
+  return row.status === "pending" && Boolean(row.actualCheckOutAt) && getOvertimeScopedMinutes(row, scope) > 0 && !isOvertimeApprovalLocked(row)
 }
 
 function canBulkRejectOvertimeRow(row: OvertimeReviewRow) {
-  return (row.status === "pending" || row.status === "draft") && !isOvertimePayrollFinal(row)
+  return (row.status === "pending" || row.status === "draft") && !isOvertimeApprovalLocked(row)
 }
 
 function getBulkOvertimeSelectionBlockReason(row: OvertimeReviewRow) {
-  if (isOvertimePayrollFinal(row)) return getOvertimePayrollFinalLabel(row)
+  if (isOvertimeApprovalLocked(row)) return getOvertimePayrollFinalLabel(row)
   if (row.status === "approved") return "Sudah approved"
   if (row.status === "rejected") return "Sudah rejected"
   return ""
@@ -25551,7 +25555,7 @@ function OvertimeReviewTable({
                           </label>
                         ) : (
                           <span className="tableSelectBlocked" title={bulkSelectionBlockReason || "Tidak bisa diproses massal"} aria-label={bulkSelectionBlockReason || "Tidak bisa diproses massal"}>
-                            <Lock size={13} />
+                            -
                           </span>
                         )}
                       </td>

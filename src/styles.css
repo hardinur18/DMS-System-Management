@@ -9597,12 +9597,10 @@ button {
   height: 34px;
   place-items: center;
   border-radius: 12px;
+  font-size: 13px;
+  font-weight: 700;
   color: #94a3b8;
   cursor: help;
-}
-
-.tableSelectBlocked svg {
-  display: block;
 }
 
 .attendanceReviewExpandRow td {
