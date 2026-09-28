@@ -25465,8 +25465,8 @@ function OvertimeReviewTable({
           <thead>
             <tr>
               {bulkModeEnabled && (
-                <th className="tableSelectHeader">
-                  <label className="tableCheckControl" aria-label="Pilih semua lembur di halaman ini">
+                <th className="tableSelectHeader" data-row-action="true" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+                  <label className="tableCheckControl" data-row-action="true" aria-label="Pilih semua lembur di halaman ini" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
                     <input
                       ref={selectAllRef}
                       type="checkbox"
@@ -25530,12 +25530,13 @@ function OvertimeReviewTable({
                     }}
                   >
                     {bulkModeEnabled && (
-                      <td className="tableSelectCell" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
-                        <label className="tableCheckControl" aria-label={`Pilih lembur ${row.fullName}`}>
+                      <td className="tableSelectCell" data-row-action="true" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+                        <label className="tableCheckControl" data-row-action="true" aria-label={`Pilih lembur ${row.fullName}`} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
                           <input
                             type="checkbox"
                             checked={isSelected}
                             disabled={!canSelectRow}
+                            onClick={(event) => event.stopPropagation()}
                             onChange={() => toggleSelected(row.id)}
                           />
                           <span />
