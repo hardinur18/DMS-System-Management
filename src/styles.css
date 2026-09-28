@@ -9591,6 +9591,20 @@ button {
   cursor: default;
 }
 
+.tableSelectBlocked {
+  display: inline-grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 12px;
+  color: #94a3b8;
+  cursor: help;
+}
+
+.tableSelectBlocked svg {
+  display: block;
+}
+
 .attendanceReviewExpandRow td {
   padding: 0 !important;
   background: #fff;

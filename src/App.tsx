@@ -24296,6 +24296,13 @@ function canBulkRejectOvertimeRow(row: OvertimeReviewRow) {
   return (row.status === "pending" || row.status === "draft") && !isOvertimePayrollFinal(row)
 }
 
+function getBulkOvertimeSelectionBlockReason(row: OvertimeReviewRow) {
+  if (isOvertimePayrollFinal(row)) return getOvertimePayrollFinalLabel(row)
+  if (row.status === "approved") return "Sudah approved"
+  if (row.status === "rejected") return "Sudah rejected"
+  return ""
+}
+
 function BulkOvertimeReviewDialog({
   rows,
   decision,
@@ -25413,10 +25420,10 @@ function OvertimeReviewTable({
           </div>
           <div className="overtimeBulkActions">
             <button className="secondaryButton compactButton" type="button" onClick={selectPageRows} disabled={selectablePageRows.length === 0}>
-              Pilih halaman ini
+              Pilih eligible halaman ini
             </button>
             <button className="secondaryButton compactButton" type="button" onClick={selectFilteredRows} disabled={selectableRows.length === 0}>
-              Pilih semua hasil filter
+              Pilih semua eligible
             </button>
           </div>
         </div>
@@ -25425,7 +25432,7 @@ function OvertimeReviewTable({
         <div className="overtimeBulkToolbar">
           <div className="overtimeBulkCopy">
             <span>{selectedRows.length} request dipilih</span>
-            <small>{activeTimingLabel} / {selectedApproveRows.length} siap approve / {selectedRejectRows.length} bisa ditolak</small>
+            <small>{activeTimingLabel} / {selectedRows.length} dari {selectableRows.length} eligible / {selectedApproveRows.length} siap approve / {selectedRejectRows.length} bisa ditolak</small>
           </div>
           <div className="overtimeBulkActions">
             <button className="secondaryButton compactButton" type="button" onClick={() => submitBulkReview("approve")} disabled={selectedApproveRows.length === 0}>
@@ -25466,7 +25473,7 @@ function OvertimeReviewTable({
             <tr>
               {bulkModeEnabled && (
                 <th className="tableSelectHeader" data-row-action="true" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
-                  <label className="tableCheckControl" data-row-action="true" aria-label="Pilih semua lembur di halaman ini" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+                  <label className="tableCheckControl" data-row-action="true" aria-label="Pilih semua lembur eligible di halaman ini" title="Pilih semua lembur yang bisa diproses di halaman ini" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
                     <input
                       ref={selectAllRef}
                       type="checkbox"
@@ -25504,7 +25511,8 @@ function OvertimeReviewTable({
               const canApproveOvertime = row.status === "pending" && hasRealization && scopedApproveMinutes > 0 && !payrollFinal
               const isFinal = row.status === "approved" || row.status === "rejected"
               const isOpen = openOvertimeId === row.id
-              const canSelectRow = canBulkRejectOvertimeRow(row)
+              const bulkSelectionBlockReason = getBulkOvertimeSelectionBlockReason(row)
+              const canSelectRow = !bulkSelectionBlockReason && canBulkRejectOvertimeRow(row)
               const isSelected = selectedIds.includes(row.id)
               const timingBucket = getOvertimeTimingBucket(row)
               const timingLabel = getOvertimeTimingFilterLabel(timingBucket)
@@ -25531,16 +25539,21 @@ function OvertimeReviewTable({
                   >
                     {bulkModeEnabled && (
                       <td className="tableSelectCell" data-row-action="true" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
-                        <label className="tableCheckControl" data-row-action="true" aria-label={`Pilih lembur ${row.fullName}`} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            disabled={!canSelectRow}
-                            onClick={(event) => event.stopPropagation()}
-                            onChange={() => toggleSelected(row.id)}
-                          />
-                          <span />
-                        </label>
+                        {canSelectRow ? (
+                          <label className="tableCheckControl" data-row-action="true" aria-label={`Pilih lembur ${row.fullName}`} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onClick={(event) => event.stopPropagation()}
+                              onChange={() => toggleSelected(row.id)}
+                            />
+                            <span />
+                          </label>
+                        ) : (
+                          <span className="tableSelectBlocked" title={bulkSelectionBlockReason || "Tidak bisa diproses massal"} aria-label={bulkSelectionBlockReason || "Tidak bisa diproses massal"}>
+                            <Lock size={13} />
+                          </span>
+                        )}
                       </td>
                     )}
                     <td className="tableNumberCell"><TableNumberCell value={(currentPage - 1) * safePageSize + index + 1} /></td>
