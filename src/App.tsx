@@ -5825,7 +5825,6 @@ function isMissingWeeklyBonusSchema(error: unknown) {
     "mark_weekly_shift_bonus_paid",
     "void_weekly_bonus_payment",
     "schema cache",
-    "relation",
   ]
 
   return schemaHints.some((hint) => message.includes(hint))
