@@ -649,6 +649,7 @@ interface AttendanceLoadOptions {
   refreshBackend?: boolean
   refreshOvertime?: boolean
   refreshPayroll?: boolean
+  refreshWeeklyBonus?: boolean
   scope?: AttendanceLoadScope
   overtimeDateScoped?: boolean
   includePayrollPayments?: boolean
@@ -8736,7 +8737,7 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
     if (payrollRefresh.error) throw payrollRefresh.error
   }
 
-  if (options.refreshPayroll) {
+  if (options.refreshPayroll || options.refreshWeeklyBonus) {
     const weeklyBonusRefresh = await supabase.rpc("refresh_weekly_shift_bonus_cycles")
     if (weeklyBonusRefresh.error && !isMissingWeeklyBonusSchema(weeklyBonusRefresh.error)) throw weeklyBonusRefresh.error
   }
@@ -18672,6 +18673,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
       ...dataLoadRange,
       scope: loadScope,
       overtimeDateScoped: activeView !== "payroll",
+      refreshWeeklyBonus: activeView === "payroll",
       includePayrollPayments: activeView === "payroll",
       includeOvertimePayments: activeView === "payroll",
       includeWeeklyBonuses: activeView === "payroll",
