@@ -64,7 +64,7 @@ import dmsLogo from "../assets/brand/dms-logo.jpeg"
 import { CategoryTabs } from "./components/category-tabs"
 import { ConfirmDialog } from "./components/confirm-dialog"
 import { ClickableTableRow, DataTablePagination, RowActionButton, RowActionMenu, RowActionMenuItem, TableNumberCell, TableText } from "./components/data-table"
-import { DateModePicker, getDateModePickerLabel, type DateModePickerMode } from "./components/date-mode-picker"
+import { DateModePicker, getDateModePickerLabel, type DateModePickerMode, type DateModePickerRange } from "./components/date-mode-picker"
 import { FoundationDialog, FoundationDialogCloseButton } from "./components/foundation-dialog"
 import { FoundationRefreshButton } from "./components/foundation-refresh-button"
 import { FoundationSkeleton, FoundationTableSkeletonRows, useFoundationCachedData } from "./components/foundation-loading"
@@ -7848,7 +7848,15 @@ function getMonthDateRange(value: string) {
   return { start: getLocalDateKey(start), end: getLocalDateKey(end) }
 }
 
-function getAttendanceDateRange(selectedDate: string, mode: AttendanceDateMode) {
+function normalizeDateRange(range: DateModePickerRange): DateModePickerRange {
+  if (!range.start && !range.end) return range
+  const start = range.start || range.end
+  const end = range.end || range.start
+  return start <= end ? { start, end } : { start: end, end: start }
+}
+
+function getAttendanceDateRange(selectedDate: string, mode: AttendanceDateMode, customRange?: DateModePickerRange | null) {
+  if (mode === "custom" && (customRange?.start || customRange?.end)) return normalizeDateRange(customRange)
   if (mode === "last7" || mode === "week") return { start: shiftDateKey(selectedDate, -6), end: selectedDate }
   if (mode === "last30") return { start: shiftDateKey(selectedDate, -29), end: selectedDate }
   if (mode === "month") return getMonthDateRange(selectedDate)
@@ -7857,8 +7865,8 @@ function getAttendanceDateRange(selectedDate: string, mode: AttendanceDateMode) 
   return { start: selectedDate, end: selectedDate }
 }
 
-function getAttendanceModeLoadRange(selectedDate: string, mode: AttendanceDateMode) {
-  const range = getAttendanceDateRange(selectedDate, mode)
+function getAttendanceModeLoadRange(selectedDate: string, mode: AttendanceDateMode, customRange?: DateModePickerRange | null) {
+  const range = getAttendanceDateRange(selectedDate, mode, customRange)
   return normalizeAttendanceLoadRange(selectedDate, {
     startDate: range.start || shiftDateKey(range.end || selectedDate, -369),
     endDate: range.end || selectedDate,
@@ -8100,8 +8108,8 @@ function formatWorkDate(value?: string | null) {
   }).format(new Date(`${value}T00:00:00+07:00`))
 }
 
-function formatAttendanceRangeLabel(selectedDate: string, mode: AttendanceDateMode) {
-  const range = getAttendanceDateRange(selectedDate, mode)
+function formatAttendanceRangeLabel(selectedDate: string, mode: AttendanceDateMode, customRange?: DateModePickerRange | null) {
+  const range = getAttendanceDateRange(selectedDate, mode, customRange)
   if (!range.start) return `Sampai ${formatWorkDate(range.end)}`
   if (range.start !== range.end) return `${formatWorkDate(range.start)} - ${formatWorkDate(range.end)}`
   return formatWorkDate(range.end)
@@ -8111,12 +8119,13 @@ function getAttendanceRangeMetricLabel(mode: AttendanceDateMode) {
   if (mode === "last7" || mode === "week") return "7 Hari"
   if (mode === "last30" || mode === "month") return "30 Hari"
   if (mode === "year") return "Tahun"
+  if (mode === "custom") return "Custom"
   if (mode === "all") return "Semua waktu"
   return "Tanggal"
 }
 
-function getAttendanceRecapTitle(selectedDate: string, mode: AttendanceDateMode) {
-  return `Rekap ${formatAttendanceRangeLabel(selectedDate, mode)}`
+function getAttendanceRecapTitle(selectedDate: string, mode: AttendanceDateMode, customRange?: DateModePickerRange | null) {
+  return `Rekap ${formatAttendanceRangeLabel(selectedDate, mode, customRange)}`
 }
 
 function formatMinutesDuration(minutes: number) {
@@ -18658,11 +18667,15 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
   const [recapDisplayTab, setRecapDisplayTab] = useState<AttendanceRecapDisplayTab>("table")
   const [selectedDate, setSelectedDate] = useState(getLocalDateKey())
   const [attendanceDateMode, setAttendanceDateMode] = useState<AttendanceDateMode>("today")
+  const [attendanceCustomRange, setAttendanceCustomRange] = useState<DateModePickerRange>(() => {
+    const today = getLocalDateKey()
+    return { start: today, end: today }
+  })
   const dataLoadRange = useMemo(() => {
-    if (activeView === "attendance-live" || activeView === "attendance-requests" || activeView === "attendance-review") return getAttendanceModeLoadRange(selectedDate, attendanceDateMode)
+    if (activeView === "attendance-live" || activeView === "attendance-requests" || activeView === "attendance-review") return getAttendanceModeLoadRange(selectedDate, attendanceDateMode, attendanceCustomRange)
 
     return normalizeAttendanceLoadRange(selectedDate)
-  }, [activeView, attendanceDateMode, selectedDate])
+  }, [activeView, attendanceCustomRange, attendanceDateMode, selectedDate])
   const loadScope: AttendanceLoadScope = activeView === "attendance-requests" ? "attendance-recap" : "full"
   const operationsCacheKey = useMemo(
     () => getOperationsFoundationCacheKey(selectedDate, dataLoadRange, loadScope, activeView),
@@ -18795,7 +18808,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
 
   useEffect(() => {
     if (activeView !== "attendance-requests" || recapDisplayTab !== "calendar") return
-    if (attendanceDateMode === "month") return
+    if (attendanceDateMode === "month" || attendanceDateMode === "custom" || attendanceDateMode === "last7" || attendanceDateMode === "last30" || attendanceDateMode === "week" || attendanceDateMode === "year" || attendanceDateMode === "all") return
 
     setAttendanceDateMode("month")
   }, [activeView, attendanceDateMode, recapDisplayTab])
@@ -19396,7 +19409,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
 
   const todayDate = getLocalDateKey()
   const isTodayView = selectedDate === todayDate && attendanceDateMode === "today"
-  const attendanceDateRange = getAttendanceDateRange(selectedDate, attendanceDateMode)
+  const attendanceDateRange = getAttendanceDateRange(selectedDate, attendanceDateMode, attendanceCustomRange)
   const liveAttendanceSourceRows = activeView === "attendance-live" && !["today", "yesterday", "day"].includes(attendanceDateMode)
     ? data.allRows
     : data.rows
@@ -19954,9 +19967,11 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
             <DateModePicker
               value={selectedDate}
               mode={attendanceDateMode}
-              onChange={(nextDate, nextMode) => {
+              range={attendanceDateMode === "custom" ? attendanceCustomRange : undefined}
+              onChange={(nextDate, nextMode, nextRange) => {
                 setSelectedDate(nextDate)
                 setAttendanceDateMode(nextMode)
+                if (nextMode === "custom" && nextRange) setAttendanceCustomRange(nextRange)
               }}
             />
           </div>
@@ -20007,13 +20022,14 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
           setStatusFilter("all")
           if (isDateDrivenView) {
             setSelectedDate(todayDate)
+            setAttendanceCustomRange({ start: todayDate, end: todayDate })
             setAttendanceDateMode(activeView === "attendance-requests" && recapDisplayTab === "calendar" ? "month" : "today")
           }
         }}>Reset Filter</button>
       </OperationalFilterPanel>
 
       {(activeView === "attendance-live" || activeView === "attendance-requests") && (
-        <AttendanceLiveRecap rows={activeView === "attendance-requests" ? filteredRecapRows : cycleFirstRows} selectedDate={selectedDate} mode={attendanceDateMode} />
+        <AttendanceLiveRecap rows={activeView === "attendance-requests" ? filteredRecapRows : cycleFirstRows} selectedDate={selectedDate} mode={attendanceDateMode} customRange={attendanceCustomRange} />
       )}
 
       {activeView === "attendance-review" && (
@@ -20062,7 +20078,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
           {recapDisplayTab === "calendar" ? (
             <AttendanceCalendarMatrix rows={filteredRecapRows} loading={loading} errorMessage={errorMessage} dateRange={dataLoadRange} />
           ) : (
-            <AttendanceRecapTable rows={filteredRecapRows} loading={loading} errorMessage={errorMessage} selectedDate={selectedDate} mode={attendanceDateMode} onResetDay={setResetAttendanceRow} onCorrectCheckIn={setCheckinCorrectionRow} onCorrectCheckout={setCheckoutCorrectionRow} />
+            <AttendanceRecapTable rows={filteredRecapRows} loading={loading} errorMessage={errorMessage} selectedDate={selectedDate} mode={attendanceDateMode} customRange={attendanceCustomRange} onResetDay={setResetAttendanceRow} onCorrectCheckIn={setCheckinCorrectionRow} onCorrectCheckout={setCheckoutCorrectionRow} />
           )}
         </>
       ) : activeView === "payroll" ? (
@@ -20810,7 +20826,17 @@ function LiveAttendanceInlineDetail({
   )
 }
 
-function AttendanceLiveRecap({ rows, selectedDate, mode = "today" }: { rows: AttendanceMonitorRow[]; selectedDate: string; mode?: AttendanceDateMode }) {
+function AttendanceLiveRecap({
+  rows,
+  selectedDate,
+  mode = "today",
+  customRange,
+}: {
+  rows: AttendanceMonitorRow[]
+  selectedDate: string
+  mode?: AttendanceDateMode
+  customRange?: DateModePickerRange | null
+}) {
   const checkedIn = rows.filter((row) => row.checkInId).length
   const checkedOut = rows.filter((row) => row.checkOutId).length
   const review = rows.filter((row) => row.attendanceStatus === "pending").length
@@ -20824,8 +20850,9 @@ function AttendanceLiveRecap({ rows, selectedDate, mode = "today" }: { rows: Att
   const overtimePendingRows = rows.filter((row) => row.overtimeRequestStatus === "pending" || row.overtimeRequestStatus === "draft").length
   const totalShortageMinutes = rows.reduce((sum, row) => sum + row.shortageMinutes, 0)
   const rangeLabel = getAttendanceRangeMetricLabel(mode)
+  const formattedRange = formatAttendanceRangeLabel(selectedDate, mode, customRange)
   const items = [
-    { label: rangeLabel, value: formatAttendanceRangeLabel(selectedDate, mode), tone: "neutral" },
+    { label: rangeLabel, value: formattedRange, tone: "neutral" },
     { label: "Masuk", value: checkedIn, tone: "valid" },
     { label: "Pulang", value: checkedOut, tone: "valid" },
     { label: "Kurang jam", value: shortageRows ? `${shortageRows} / ${formatMinutesDuration(totalShortageMinutes)}` : "0", tone: shortageRows ? "pending" : "neutral" },
@@ -20839,7 +20866,7 @@ function AttendanceLiveRecap({ rows, selectedDate, mode = "today" }: { rows: Att
   ] as const
 
   return (
-    <div className="attendanceLiveRecap" aria-label={`Rekap absensi ${formatAttendanceRangeLabel(selectedDate, mode)}`}>
+    <div className="attendanceLiveRecap" aria-label={`Rekap absensi ${formattedRange}`}>
       {items.map((item) => (
         <span className={clsx("attendanceLiveRecapItem", `tone-${item.tone}`)} key={item.label}>
           <small>{item.label}</small>
@@ -20856,6 +20883,7 @@ function AttendanceRecapTable({
   errorMessage,
   selectedDate,
   mode,
+  customRange,
   onResetDay,
   onCorrectCheckIn,
   onCorrectCheckout,
@@ -20865,6 +20893,7 @@ function AttendanceRecapTable({
   errorMessage: string
   selectedDate: string
   mode: AttendanceDateMode
+  customRange?: DateModePickerRange | null
   onResetDay: (row: AttendanceMonitorRow) => void
   onCorrectCheckIn: (row: AttendanceMonitorRow) => void
   onCorrectCheckout: (row: AttendanceMonitorRow) => void
@@ -20877,12 +20906,12 @@ function AttendanceRecapTable({
   const pageCount = Math.max(1, Math.ceil(rows.length / safePageSize))
   const currentPage = Math.min(page, pageCount)
   const paginatedRows = rows.slice((currentPage - 1) * safePageSize, currentPage * safePageSize)
-  const title = getAttendanceRecapTitle(selectedDate, mode)
+  const title = getAttendanceRecapTitle(selectedDate, mode, customRange)
 
   useEffect(() => {
     setPage(1)
     setExpandedRowKey("")
-  }, [rows.length, pageSize, mode, selectedDate])
+  }, [customRange?.end, customRange?.start, rows.length, pageSize, mode, selectedDate])
 
   const toggleExpandedRow = (rowKey: string) => {
     setExpandedRowKey((current) => current === rowKey ? "" : rowKey)
@@ -22720,6 +22749,10 @@ function PayrollPreviewTable({
   const [historyPageSize, setHistoryPageSize] = useState(25)
   const [historyDate, setHistoryDate] = useState(getLocalDateKey())
   const [historyDateMode, setHistoryDateMode] = useState<AttendanceDateMode>("all")
+  const [historyCustomRange, setHistoryCustomRange] = useState<DateModePickerRange>(() => {
+    const today = getLocalDateKey()
+    return { start: today, end: today }
+  })
   const cycleScrollProps = useHorizontalDragScroll<HTMLDivElement>()
   const overtimeScrollProps = useHorizontalDragScroll<HTMLDivElement>()
   const bonusScrollProps = useHorizontalDragScroll<HTMLDivElement>()
@@ -22736,7 +22769,7 @@ function PayrollPreviewTable({
     return buildPayrollPaymentHistoryRows([...ledgerRows, ...fallbackRows])
   }, [paidCycleRows, payments])
   const unifiedPaymentRows = useMemo(() => buildPayrollUnifiedPaymentRows(paymentRows, overtimePayments, weeklyBonusPayments), [overtimePayments, paymentRows, weeklyBonusPayments])
-  const historyDateRange = useMemo(() => getAttendanceDateRange(historyDate, historyDateMode), [historyDate, historyDateMode])
+  const historyDateRange = useMemo(() => getAttendanceDateRange(historyDate, historyDateMode, historyCustomRange), [historyCustomRange, historyDate, historyDateMode])
   const filteredUnifiedPaymentRows = useMemo(() => {
     if (historyDateMode === "all") return unifiedPaymentRows
 
@@ -22781,7 +22814,7 @@ function PayrollPreviewTable({
     ? "Semua waktu"
     : historyDateRange.start && historyDateRange.start !== historyDateRange.end
       ? `${formatPayrollDate(historyDateRange.start)} - ${formatPayrollDate(historyDateRange.end)}`
-      : getDateModePickerLabel(historyDate, historyDateMode)
+      : getDateModePickerLabel(historyDate, historyDateMode, historyCustomRange)
   const activeWeeklyBonusPolicy = useMemo(
     () => weeklyBonusPolicies.find((policy) => policy.isActive && policy.status === "active") || weeklyBonusPolicies[0] || null,
     [weeklyBonusPolicies],
@@ -22819,7 +22852,7 @@ function PayrollPreviewTable({
     setOvertimePage(1)
     setBonusPage(1)
     setHistoryPage(1)
-  }, [cycleTab, filteredUnifiedPaymentRows.length, historyDateMode, historyDateRange.end, historyDateRange.start, overtimePayableRows.length, rows.length, weeklyBonusPayableRows.length, workspaceTab])
+  }, [cycleTab, filteredUnifiedPaymentRows.length, historyCustomRange.end, historyCustomRange.start, historyDateMode, historyDateRange.end, historyDateRange.start, overtimePayableRows.length, rows.length, weeklyBonusPayableRows.length, workspaceTab])
 
   return (
     <>
@@ -23016,15 +23049,18 @@ function PayrollPreviewTable({
                   <DateModePicker
                     value={historyDate}
                     mode={historyDateMode}
-                    onChange={(nextDate, nextMode) => {
+                    range={historyDateMode === "custom" ? historyCustomRange : undefined}
+                    onChange={(nextDate, nextMode, nextRange) => {
                       setHistoryDate(nextDate)
                       setHistoryDateMode(nextMode)
+                      if (nextMode === "custom" && nextRange) setHistoryCustomRange(nextRange)
                     }}
                   />
                 </div>
                 <button className="secondaryButton" type="button" onClick={() => {
                   setHistoryDate(getLocalDateKey())
                   setHistoryDateMode("all")
+                  setHistoryCustomRange({ start: getLocalDateKey(), end: getLocalDateKey() })
                 }}>
                   Reset Waktu
                 </button>

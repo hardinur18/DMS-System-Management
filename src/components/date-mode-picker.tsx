@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from "react"
 import { CalendarCheck2, ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react"
 import clsx from "clsx"
 
-export type DateModePickerMode = "today" | "yesterday" | "last7" | "last30" | "day" | "week" | "month" | "year" | "all"
-type DateModePickerRange = { start: string; end: string }
+export type DateModePickerMode = "today" | "yesterday" | "last7" | "last30" | "day" | "week" | "month" | "year" | "custom" | "all"
+export type DateModePickerRange = { start: string; end: string }
 
 function getLocalDateKey(date = new Date()) {
   const year = date.getFullYear()
@@ -74,7 +74,19 @@ function getMonthRange(value?: string | null): DateModePickerRange {
   return { start: getLocalDateKey(start), end: getLocalDateKey(end) }
 }
 
-export function getDateModePickerLabel(selectedDate: string, mode: DateModePickerMode) {
+function normalizeDateModePickerRange(range: DateModePickerRange): DateModePickerRange {
+  if (!range.start && !range.end) return range
+  const start = range.start || range.end
+  const end = range.end || range.start
+  return start <= end ? { start, end } : { start: end, end: start }
+}
+
+function getCustomRangeOrFallback(selectedDate: string, customRange?: DateModePickerRange | null) {
+  const fallbackDate = selectedDate || getLocalDateKey()
+  return normalizeDateModePickerRange(customRange?.start || customRange?.end ? customRange : { start: fallbackDate, end: fallbackDate })
+}
+
+export function getDateModePickerLabel(selectedDate: string, mode: DateModePickerMode, customRange?: DateModePickerRange | null) {
   if (mode === "today") return "Hari ini"
   if (mode === "yesterday") return "Kemarin"
   if (mode === "last7") return "7 hari sebelumnya"
@@ -83,32 +95,38 @@ export function getDateModePickerLabel(selectedDate: string, mode: DateModePicke
   if (mode === "week") return `Per minggu - ${formatDateLabel(selectedDate)}`
   if (mode === "month") return `Per bulan - ${formatMonthLabel(selectedDate)}`
   if (mode === "year") return `Tahun ${selectedDate.slice(0, 4)}`
+  if (mode === "custom") {
+    const range = getCustomRangeOrFallback(selectedDate, customRange)
+    return range.start === range.end ? `Custom - ${formatDateLabel(range.end)}` : `Custom - ${formatDateLabel(range.start)} - ${formatDateLabel(range.end)}`
+  }
   return "Semua waktu"
 }
 
 function isRangeMode(mode: DateModePickerMode) {
-  return mode === "last7" || mode === "last30" || mode === "week" || mode === "month" || mode === "year" || mode === "all"
+  return mode === "last7" || mode === "last30" || mode === "week" || mode === "month" || mode === "year" || mode === "custom" || mode === "all"
 }
 
-function getDateModePickerRange(selectedDate: string, mode: DateModePickerMode): DateModePickerRange {
+function getDateModePickerRange(selectedDate: string, mode: DateModePickerMode, customRange?: DateModePickerRange | null): DateModePickerRange {
   const end = selectedDate || getLocalDateKey()
   if (mode === "last7" || mode === "week") return { start: shiftDateKey(end, -6), end }
   if (mode === "last30") return { start: shiftDateKey(end, -29), end }
   if (mode === "month") return getMonthRange(end)
   if (mode === "year") return { start: `${end.slice(0, 4)}-01-01`, end }
+  if (mode === "custom") return getCustomRangeOrFallback(end, customRange)
   if (mode === "all") return { start: "", end }
   return { start: end, end }
 }
 
-function getDateModePickerRangeSummary(selectedDate: string, mode: DateModePickerMode) {
-  const range = getDateModePickerRange(selectedDate, mode)
+function getDateModePickerRangeSummary(selectedDate: string, mode: DateModePickerMode, customRange?: DateModePickerRange | null) {
+  const range = getDateModePickerRange(selectedDate, mode, customRange)
+  if (mode === "custom" && customRange?.start && !customRange.end) return `${formatDateLabel(customRange.start)} - pilih tanggal akhir`
   if (range.start && range.start !== range.end) return `${formatDateLabel(range.start)} - ${formatDateLabel(range.end)}`
   if (mode === "today") return "Real-time (GMT+07)"
-  return getDateModePickerLabel(selectedDate, mode)
+  return getDateModePickerLabel(selectedDate, mode, customRange)
 }
 
-function getPreferredCalendarMonth(selectedDate: string, mode: DateModePickerMode) {
-  const range = getDateModePickerRange(selectedDate, mode)
+function getPreferredCalendarMonth(selectedDate: string, mode: DateModePickerMode, customRange?: DateModePickerRange | null) {
+  const range = getDateModePickerRange(selectedDate, mode, customRange)
   return parseDateKey(range.start || range.end)
 }
 
@@ -137,24 +155,28 @@ function useCompactDateModePicker() {
 export function DateModePicker({
   value,
   mode,
+  range,
   onChange,
   className,
 }: {
   value: string
   mode: DateModePickerMode
-  onChange: (nextDate: string, nextMode: DateModePickerMode) => void
+  range?: DateModePickerRange | null
+  onChange: (nextDate: string, nextMode: DateModePickerMode, nextRange?: DateModePickerRange) => void
   className?: string
 }) {
   const [open, setOpen] = useState(false)
-  const [calendarMonth, setCalendarMonth] = useState(() => getPreferredCalendarMonth(value || getLocalDateKey(), mode))
+  const [calendarMonth, setCalendarMonth] = useState(() => getPreferredCalendarMonth(value || getLocalDateKey(), mode, range))
+  const [draftCustomRange, setDraftCustomRange] = useState<DateModePickerRange | null>(null)
   const pickerRef = useRef<HTMLDivElement | null>(null)
   const compact = useCompactDateModePicker()
   const todayDate = getLocalDateKey()
   const yesterdayDate = shiftDateKey(todayDate, -1)
-  const activeLabel = getDateModePickerLabel(value, mode)
+  const customRange = mode === "custom" ? draftCustomRange || range || null : null
+  const activeLabel = getDateModePickerLabel(value, mode, customRange)
   const rangeMode = isRangeMode(mode)
   const showRangeCalendar = rangeMode && !compact
-  const activeRange = getDateModePickerRange(value || todayDate, mode)
+  const activeRange = getDateModePickerRange(value || todayDate, mode, customRange)
   const visibleMonths = showRangeCalendar ? [calendarMonth, addMonths(calendarMonth, 1)] : [calendarMonth]
   const presets: Array<{ mode: DateModePickerMode; label: string; date?: string }> = [
     { mode: "today", label: "Hari ini", date: todayDate },
@@ -165,12 +187,22 @@ export function DateModePicker({
     { mode: "week", label: "Per Minggu" },
     { mode: "month", label: "Per Bulan" },
     { mode: "year", label: "Berdasarkan Tahun" },
+    { mode: "custom", label: "Custom" },
     { mode: "all", label: "Semua Waktu" },
   ]
 
   useEffect(() => {
-    setCalendarMonth(getPreferredCalendarMonth(value || todayDate, mode))
-  }, [mode, todayDate, value])
+    setCalendarMonth(getPreferredCalendarMonth(value || todayDate, mode, range))
+  }, [mode, range?.end, range?.start, todayDate, value])
+
+  useEffect(() => {
+    if (!open) return
+    if (mode !== "custom") {
+      setDraftCustomRange(null)
+      return
+    }
+    setDraftCustomRange(range?.start || range?.end ? range : { start: value || todayDate, end: value || todayDate })
+  }, [mode, open, range?.end, range?.start, todayDate, value])
 
   useEffect(() => {
     if (!open) return undefined
@@ -193,6 +225,15 @@ export function DateModePicker({
 
   const selectPreset = (preset: { mode: DateModePickerMode; label: string; date?: string }) => {
     const nextDate = preset.date || value || todayDate
+    if (preset.mode === "custom") {
+      const nextRange = getCustomRangeOrFallback(nextDate, range)
+      setDraftCustomRange(nextRange)
+      onChange(nextRange.end || nextRange.start || nextDate, "custom", nextRange)
+      setCalendarMonth(getPreferredCalendarMonth(nextDate, "custom", nextRange))
+      return
+    }
+
+    setDraftCustomRange(null)
     onChange(nextDate, preset.mode)
     setCalendarMonth(getPreferredCalendarMonth(nextDate, preset.mode))
   }
@@ -219,9 +260,10 @@ export function DateModePicker({
         </div>
         <div className="dateModePickerGrid attendanceDateGrid">
           {calendarDays.map((day) => {
+            const draftRangeStartOnly = mode === "custom" && Boolean(customRange?.start && !customRange.end)
             const rangeStart = Boolean(activeRange.start && day.key === activeRange.start)
-            const rangeEnd = Boolean(activeRange.end && day.key === activeRange.end)
-            const rangeMiddle = Boolean(activeRange.start && activeRange.end && day.key > activeRange.start && day.key < activeRange.end)
+            const rangeEnd = Boolean(!draftRangeStartOnly && activeRange.end && day.key === activeRange.end)
+            const rangeMiddle = Boolean(!draftRangeStartOnly && activeRange.start && activeRange.end && day.key > activeRange.start && day.key < activeRange.end)
             const active = day.key === value && (!rangeMode || !activeRange.start)
 
             return (
@@ -239,8 +281,20 @@ export function DateModePicker({
                 type="button"
                 aria-pressed={active || rangeStart || rangeEnd}
                 onClick={() => {
-                  onChange(day.key, rangeMode ? mode : "day")
-                  setCalendarMonth(getPreferredCalendarMonth(day.key, rangeMode ? mode : "day"))
+                  if (mode === "custom") {
+                    const currentRange = customRange || { start: "", end: "" }
+                    const nextRange = currentRange.start && !currentRange.end
+                      ? normalizeDateModePickerRange({ start: currentRange.start, end: day.key })
+                      : { start: day.key, end: "" }
+                    setDraftCustomRange(nextRange)
+                    onChange(nextRange.end || nextRange.start, "custom", nextRange)
+                    setCalendarMonth(getPreferredCalendarMonth(nextRange.end || nextRange.start, "custom", nextRange))
+                    return
+                  }
+
+                  const nextMode = rangeMode ? mode : "day"
+                  onChange(day.key, nextMode)
+                  setCalendarMonth(getPreferredCalendarMonth(day.key, nextMode))
                 }}
               >
                 {day.date.getDate()}
@@ -282,7 +336,7 @@ export function DateModePicker({
               {visibleMonths.map((monthDate, monthIndex) => renderCalendarMonth(monthDate, monthIndex))}
             </div>
             <div className="dateModePickerFooter attendanceDateFooter">
-              <strong>{getDateModePickerRangeSummary(value || todayDate, mode)}</strong>
+              <strong>{getDateModePickerRangeSummary(value || todayDate, mode, customRange)}</strong>
               <button type="button" onClick={() => setOpen(false)}>Tutup</button>
             </div>
           </section>
