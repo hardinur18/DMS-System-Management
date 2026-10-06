@@ -1,6 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0"
 
-type PayrollProcessAction = "lock" | "mark_paid" | "unlock" | "void" | "restore" | "mark_overtime_paid" | "void_overtime_payment" | "save_weekly_bonus_policy" | "mark_weekly_bonus_paid" | "void_weekly_bonus_payment"
+type PayrollProcessAction = "lock" | "lock_early" | "mark_paid" | "unlock" | "void" | "restore" | "mark_overtime_paid" | "void_overtime_payment" | "save_weekly_bonus_policy" | "mark_weekly_bonus_paid" | "void_weekly_bonus_payment"
 type PayrollPaymentMethod = "cash" | "bank_transfer" | "ewallet" | "other"
 
 interface PayrollProcessPayload {
@@ -266,6 +266,7 @@ Deno.serve(async (request) => {
 
     assertPayload(
       action === "lock"
+      || action === "lock_early"
       || action === "mark_paid"
       || action === "unlock"
       || action === "void"
@@ -595,13 +596,53 @@ Deno.serve(async (request) => {
         notes: appendPayrollNote(cycle.notes, notes ? `Finance kunci gaji: ${notes}` : "Finance kunci gaji."),
         updated_at: now,
       }
+    } else if (action === "lock_early") {
+      const workDaysCount = Number(cycle.work_days_count || 0)
+      const targetWorkDays = Number(cycle.target_work_days || 26)
+      const reason = notes || ""
+
+      assertPayload(currentStatus === "active", "Kunci dini hanya bisa untuk gaji yang masih Berjalan.")
+      assertPayload(workDaysCount > 0, "Kunci dini butuh minimal 1 hari kerja valid.")
+      assertPayload(workDaysCount < targetWorkDays, "Cycle sudah mencapai target, gunakan Kunci Gaji biasa.")
+      assertPayload(reason.length >= 5, "Alasan kunci dini wajib diisi minimal 5 karakter.")
+      await assertNoOpenPayrollDependencies(adminClient, cycle)
+      await rebuildPayrollCycleItems(adminClient, String(cycle.id))
+
+      const { data: lastCountedSummary, error: lastCountedError } = await adminClient
+        .from("attendance_daily_summaries")
+        .select("attendance_date")
+        .eq("payroll_cycle_id", cycle.id)
+        .eq("workday_counted", true)
+        .order("attendance_date", { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (lastCountedError) throw lastCountedError
+      assertPayload(lastCountedSummary?.attendance_date, "Tanggal tutup cycle dini tidak ditemukan.")
+
+      nextStatus = "locked"
+      auditAction = "Kunci dini gaji"
+      updatePayload = {
+        status: nextStatus,
+        period_closed_at: lastCountedSummary.attendance_date,
+        locked_at: now,
+        processed_by: actor.id,
+        gross_amount: grossAmount,
+        overtime_amount: overtimeAmount,
+        net_amount: netAmount,
+        notes: appendPayrollNote(cycle.notes, `Finance kunci gaji dini (${workDaysCount}/${targetWorkDays} hari): ${reason}`),
+        updated_at: now,
+      }
     } else if (action === "unlock") {
       assertPayload(currentStatus === "locked", "Hanya gaji berstatus Menunggu Bayar yang bisa dibuka ulang.")
 
-      nextStatus = "ready"
+      const workDaysCount = Number(cycle.work_days_count || 0)
+      const targetWorkDays = Number(cycle.target_work_days || 26)
+      nextStatus = workDaysCount >= targetWorkDays ? "ready" : "active"
       auditAction = "Buka koreksi gaji 26 hari"
       updatePayload = {
         status: nextStatus,
+        period_closed_at: workDaysCount >= targetWorkDays ? cycle.period_closed_at : null,
         locked_at: null,
         processed_by: null,
         notes: appendPayrollNote(cycle.notes, notes ? `Finance buka koreksi gaji: ${notes}` : "Finance buka koreksi gaji."),

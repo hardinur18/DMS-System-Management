@@ -104,7 +104,7 @@ type AttendanceStatus = "valid" | "pending" | "failed" | "missing"
 type AttendanceSettlementStatus = "ready" | "running" | "short" | "missing_checkout" | "missing_checkin" | "review" | "failed" | "no_shift" | "excused_paid" | "excused_unpaid" | "field_assignment" | "alpha" | "off_day"
 type AttendanceSettlementTone = "valid" | "pending" | "failed" | "missing"
 type PayrollStatus = "active" | "ready" | "locked" | "paid" | "void"
-type PayrollProcessAction = "lock" | "mark_paid" | "unlock" | "void" | "restore"
+type PayrollProcessAction = "lock" | "lock_early" | "mark_paid" | "unlock" | "void" | "restore"
 type PayrollPaymentMethod = "cash" | "bank_transfer" | "ewallet" | "other"
 type PayrollPaymentStatus = "paid" | "void" | "reversed"
 type PayrollLedgerTab = "active" | "ready" | "locked" | "paid" | "void" | "all"
@@ -19148,6 +19148,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
       commitAttendanceData((current) => applyPayrollPaymentResultToOperationsData(current, result))
       const payrollActionTitle: Record<PayrollProcessAction, string> = {
         lock: "Nominal gaji difinalkan",
+        lock_early: "Gaji dini dikunci",
         mark_paid: "Pembayaran dicatat",
         unlock: "Gaji dibuka untuk koreksi",
         void: "Gaji 26 hari dibatalkan",
@@ -19160,14 +19161,17 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
       })
       const payrollActionFocusTab: Record<PayrollProcessAction, PayrollLedgerTab> = {
         lock: "locked",
+        lock_early: "locked",
         mark_paid: "paid",
         unlock: "ready",
         void: "void",
         restore: "all",
       }
+      const updatedPayrollStatus = result.payroll?.status ? mapPayrollCycleStatus(result.payroll.status) : null
+      const nextFocusTab: PayrollLedgerTab = updatedPayrollStatus || payrollActionFocusTab[payrollAction]
       setPayrollTarget(null)
       setStatusFilter("all")
-      setPayrollFocusTab(payrollActionFocusTab[payrollAction])
+      setPayrollFocusTab(nextFocusTab)
       void refreshData()
     } catch (error) {
       showToast({
@@ -21878,6 +21882,13 @@ function PayrollProcessDialog({
       button: "Kunci Gaji",
       icon: Lock,
     },
+    lock_early: {
+      eyebrow: "KUNCI GAJI DINI",
+      title: `Kunci dini gaji ${row.fullName}?`,
+      description: "Gunakan hanya saat karyawan mengajukan gaji sebelum target hari kerja terpenuhi. Cycle akan ditutup di hari valid terakhir yang ikut dibayar.",
+      button: "Kunci Dini",
+      icon: Lock,
+    },
     mark_paid: {
       eyebrow: "BAYAR GAJI",
       title: `Bayar gaji ${row.fullName}?`,
@@ -21910,6 +21921,7 @@ function PayrollProcessDialog({
   const current = copy[action]
   const Icon = current.icon
   const isPayment = action === "mark_paid"
+  const isEarlyLock = action === "lock_early"
   const numericPaidAmount = Number(paidAmount)
   const paymentDelta = isPayment && Number.isFinite(numericPaidAmount) ? numericPaidAmount - row.payrollAmount : 0
   const paymentMethodOptions = (Object.keys(payrollPaymentMethodLabel) as PayrollPaymentMethod[]).map((method) => ({
@@ -21929,6 +21941,11 @@ function PayrollProcessDialog({
         setSubmitError("Nominal bayar wajib lebih dari 0.")
         return
       }
+    }
+
+    if (isEarlyLock && notes.trim().length < 5) {
+      setSubmitError("Alasan kunci dini wajib diisi minimal 5 karakter.")
+      return
     }
 
     setSubmitError("")
@@ -22023,13 +22040,30 @@ function PayrollProcessDialog({
             </section>
           )}
 
+          {isEarlyLock && (
+            <section className="payrollPaymentForm">
+              <div className="payrollPaymentFormHeader">
+                <Lock size={18} />
+                <div>
+                  <strong>Pengajuan Gaji Lebih Awal</strong>
+                  <small>Setelah dikunci dan dibayar, hari kerja berikutnya akan masuk cycle baru.</small>
+                </div>
+              </div>
+              <div className="payrollPaymentDelta hasDelta">
+                <span>Hari kerja saat ini</span>
+                <strong>{row.cycleDays}/{row.targetDays} hari</strong>
+              </div>
+            </section>
+          )}
+
           <div className="payrollProcessNotes">
             <span>Catatan Finance</span>
             <textarea
               value={notes}
               onChange={(event) => setNotes(event.target.value)}
-              placeholder={isPayment ? "Contoh: transfer BCA sudah dicek dan slip disimpan." : "Contoh: gaji pokok dan jumlah hari kerja sudah dicek."}
+              placeholder={isPayment ? "Contoh: transfer BCA sudah dicek dan slip disimpan." : isEarlyLock ? "Wajib diisi. Contoh: pengajuan gaji lebih awal disetujui owner." : "Contoh: gaji pokok dan jumlah hari kerja sudah dicek."}
               disabled={saving}
+              required={isEarlyLock}
             />
           </div>
           {submitError && <p className="formErrorMessage">{submitError}</p>}
@@ -22965,6 +22999,10 @@ function PayrollPreviewTable({
                           <RowActionMenuItem disabled={!row.payrollCycleId || row.payrollStatus !== "ready"} onClick={() => onProcess(row, "lock")}>
                             <Lock size={15} />
                             Kunci Gaji
+                          </RowActionMenuItem>
+                          <RowActionMenuItem disabled={!row.payrollCycleId || row.payrollStatus !== "active" || row.cycleDays <= 0 || row.cycleDays >= row.targetDays} onClick={() => onProcess(row, "lock_early")}>
+                            <Lock size={15} />
+                            Kunci Dini
                           </RowActionMenuItem>
                           <RowActionMenuItem disabled={!row.payrollCycleId || row.payrollStatus !== "locked"} onClick={() => onProcess(row, "mark_paid")}>
                             <CreditCard size={15} />
