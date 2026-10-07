@@ -650,6 +650,7 @@ interface AttendanceLoadOptions {
   refreshOvertime?: boolean
   refreshPayroll?: boolean
   refreshPayrollScope?: "all" | "range"
+  refreshPayrollOptional?: boolean
   refreshWeeklyBonus?: boolean
   includeAllPayrollCycles?: boolean
   scope?: AttendanceLoadScope
@@ -8773,7 +8774,7 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
         target_end_date: endDate,
       })
       : await supabase.rpc("refresh_all_employee_payroll_cycles")
-    if (payrollRefresh.error) throw payrollRefresh.error
+    if (payrollRefresh.error && !options.refreshPayrollOptional) throw payrollRefresh.error
   }
 
   if (options.refreshPayroll || options.refreshWeeklyBonus) {
@@ -17979,6 +17980,7 @@ function DashboardPage({ activeView }: { activeView: ViewId }) {
         refreshBackend: true,
         refreshPayroll: true,
         refreshPayrollScope: "range",
+        refreshPayrollOptional: true,
         scope: "full",
         overtimeDateScoped: true,
         includePayrollPayments: true,
@@ -18809,6 +18811,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
           refreshOvertime: activeView === "attendance-live" || activeView === "attendance-requests",
           refreshPayroll: activeView === "attendance-live" || activeView === "attendance-requests" || activeView === "payroll" || (activeView === "attendance-review" && activeApprovalTab === "overtime"),
           refreshPayrollScope: activeView === "payroll" ? "all" : "range",
+          refreshPayrollOptional: activeView !== "payroll",
           scope: loadScope,
           overtimeDateScoped: activeView !== "payroll",
           includePayrollPayments: activeView === "payroll",
