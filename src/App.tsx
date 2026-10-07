@@ -649,7 +649,9 @@ interface AttendanceLoadOptions {
   refreshBackend?: boolean
   refreshOvertime?: boolean
   refreshPayroll?: boolean
+  refreshPayrollScope?: "all" | "range"
   refreshWeeklyBonus?: boolean
+  includeAllPayrollCycles?: boolean
   scope?: AttendanceLoadScope
   overtimeDateScoped?: boolean
   includePayrollPayments?: boolean
@@ -7954,6 +7956,24 @@ async function fetchPayrollPaymentRows() {
   }
 }
 
+async function fetchPayrollCycleRows(startDate: string, endDate: string, includeAllPayrollCycles = false) {
+  const columns = "id, employee_id, cycle_number, period_started_at, period_closed_at, work_days_count, target_work_days, gross_amount, overtime_amount, net_amount, salary_type, status, ready_at, locked_at, paid_at"
+  const buildBaseQuery = () => supabase
+    .from("payroll_cycles")
+    .select(columns)
+    .order("cycle_number", { ascending: false })
+    .order("employee_id", { ascending: true })
+
+  if (includeAllPayrollCycles) {
+    return fetchSupabaseRangeRows<Record<string, unknown>>(() => buildBaseQuery(), 1000, 50000)
+  }
+
+  const scopedStartDate = shiftDateKey(startDate, -45)
+
+  return fetchSupabaseRangeRows<Record<string, unknown>>(() => buildBaseQuery()
+    .or(`status.in.(active,ready,locked),period_closed_at.gte.${scopedStartDate},period_started_at.gte.${scopedStartDate},period_closed_at.gte.${endDate}`), 1000, 10000)
+}
+
 async function fetchOvertimePaymentRows() {
   try {
     const rows = await fetchSupabaseRangeRows<Record<string, unknown>>(() => supabase
@@ -8747,7 +8767,12 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
   }
 
   if (options.refreshPayroll) {
-    const payrollRefresh = await supabase.rpc("refresh_all_employee_payroll_cycles")
+    const payrollRefresh = options.refreshPayrollScope === "range"
+      ? await supabase.rpc("refresh_employee_payroll_cycles_for_attendance_range", {
+        target_start_date: startDate,
+        target_end_date: endDate,
+      })
+      : await supabase.rpc("refresh_all_employee_payroll_cycles")
     if (payrollRefresh.error) throw payrollRefresh.error
   }
 
@@ -8789,11 +8814,7 @@ async function loadOperationsFoundationData(targetDate = getLocalDateKey(), opti
       .lte("attendance_date", endDate)
       .order("event_at", { ascending: false })
       .order("id", { ascending: true }), 500, 10000).then((data) => ({ data, error: null })),
-    fetchSupabaseRangeRows<Record<string, unknown>>(() => supabase
-      .from("payroll_cycles")
-      .select("id, employee_id, cycle_number, period_started_at, period_closed_at, work_days_count, target_work_days, gross_amount, overtime_amount, net_amount, salary_type, status, ready_at, locked_at, paid_at")
-      .order("cycle_number", { ascending: false })
-      .order("employee_id", { ascending: true }), 1000, 50000),
+    fetchPayrollCycleRows(startDate, endDate, options.includeAllPayrollCycles === true),
     fetchOvertimeRequestRows(startDate, endDate, options.overtimeDateScoped !== false),
     supabase
       .from("payroll_components")
@@ -17957,6 +17978,7 @@ function DashboardPage({ activeView }: { activeView: ViewId }) {
         ...dashboardRange,
         refreshBackend: true,
         refreshPayroll: true,
+        refreshPayrollScope: "range",
         scope: "full",
         overtimeDateScoped: true,
         includePayrollPayments: true,
@@ -18697,6 +18719,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
       includeWeeklyBonuses: activeView === "payroll",
       includeWeeklyBonusPayments: activeView === "payroll",
       includeWeeklyBonusPolicies: activeView === "payroll",
+      includeAllPayrollCycles: activeView === "payroll",
     }),
     [activeView, dataLoadRange, loadScope, selectedDate],
   )
@@ -18785,6 +18808,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
           refreshBackend: true,
           refreshOvertime: activeView === "attendance-live" || activeView === "attendance-requests",
           refreshPayroll: activeView === "attendance-live" || activeView === "attendance-requests" || activeView === "payroll" || (activeView === "attendance-review" && activeApprovalTab === "overtime"),
+          refreshPayrollScope: activeView === "payroll" ? "all" : "range",
           scope: loadScope,
           overtimeDateScoped: activeView !== "payroll",
           includePayrollPayments: activeView === "payroll",
@@ -18792,6 +18816,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
           includeWeeklyBonuses: activeView === "payroll",
           includeWeeklyBonusPayments: activeView === "payroll",
           includeWeeklyBonusPolicies: activeView === "payroll",
+          includeAllPayrollCycles: activeView === "payroll",
         }),
       })
 
