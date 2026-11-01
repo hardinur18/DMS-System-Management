@@ -16,7 +16,7 @@ const DEFAULT_COMMAND_RETRY_MS = 120_000;
 const DEFAULT_USER_SYNC_PIN = "ALL";
 const DEFAULT_USER_SYNC_COMMAND_TEMPLATE = "C:{id}:DATA QUERY USERINFO";
 const DEFAULT_AUTO_USER_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
-const RECEIVER_VERSION = "2026-08-27-auto-convert-v1";
+const RECEIVER_VERSION = "2026-11-01-adms-timezone-v1";
 
 const env = process.env;
 
@@ -45,6 +45,10 @@ const config = {
   supabaseUrl: env.SUPABASE_URL || env.VITE_SUPABASE_URL || "",
   supabaseServiceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY || "",
 };
+
+// Attendance PUSH uses integer hours (or minutes for fractional offsets),
+// while attendance parsing uses the ISO offset from the same configuration.
+const admsTimeZone = formatAdmsTimeZone(config.timezoneOffset);
 
 const supabase = config.dryRun
   ? null
@@ -195,7 +199,21 @@ function parseTimezoneOffset(value) {
   const sign = match[1] === "-" ? -1 : 1;
   const hours = Number.parseInt(match[2], 10);
   const minutes = Number.parseInt(match[3], 10);
-  return sign * ((hours * 60) + minutes);
+  const offset = sign * ((hours * 60) + minutes);
+  if (minutes > 59 || offset < -12 * 60 || offset > 14 * 60) {
+    throw new Error("BIOFINGER_TIMEZONE_OFFSET harus antara -12:00 dan +14:00, dengan menit 00-59.");
+  }
+  return offset;
+}
+
+function formatAdmsTimeZone(value) {
+  const offsetMinutes = parseTimezoneOffset(value);
+  const hours = offsetMinutes / 60;
+  // ZKTeco Attendance PUSH, initialization: -12 < TimeZone < 12 is hours;
+  // values outside +/-60 are minutes. Keep HTTP Date in GMT for clock sync.
+  if (Number.isInteger(hours) && hours > -12 && hours < 12) return String(hours);
+  if (Math.abs(offsetMinutes) > 60) return String(offsetMinutes);
+  throw new Error("BIOFINGER_TIMEZONE_OFFSET tidak dapat dikirim dalam format TimeZone Attendance PUSH.");
 }
 
 function parseDeviceDateTime(value) {
@@ -1121,6 +1139,7 @@ function buildOptionsResponse(serialNumber) {
     "TransTimes=00:00;14:05",
     "TransInterval=1",
     "TransFlag=1111000000",
+    `TimeZone=${admsTimeZone}`,
     "Realtime=1",
     "Encrypt=0",
     "",
@@ -1221,6 +1240,8 @@ async function handleRequest(request, response) {
       return jsonResponse(response, {
         ok: true,
         version: RECEIVER_VERSION,
+        timezoneOffset: config.timezoneOffset,
+        admsTimeZone,
         dryRun: config.dryRun,
         port: config.port,
         allowedSerials: config.allowedSerials.length,
@@ -1264,6 +1285,7 @@ const server = http.createServer((request, response) => {
 server.listen(config.port, config.host, () => {
   console.log(`${requestLogPrefix()} DMS Biofinger ADMS receiver listening on ${config.host}:${config.port}`);
   console.log(`${requestLogPrefix()} version=${RECEIVER_VERSION}`);
+  console.log(`${requestLogPrefix()} timezoneOffset=${config.timezoneOffset} admsTimeZone=${admsTimeZone}`);
   console.log(`${requestLogPrefix()} dryRun=${config.dryRun} allowedSerials=${config.allowedSerials.join(",") || "*"}`);
   console.log(`${requestLogPrefix()} convertOnImport=${config.convertOnImport} conversionBatchSize=${config.conversionBatchSize} autoConvertIntervalMs=${config.autoConvertIntervalMs}`);
   console.log(`${requestLogPrefix()} commandBatchSize=${config.commandBatchSize} userSyncTemplate=${config.userSyncCommandTemplate}`);

@@ -1,6 +1,6 @@
 # Biofinger ADMS Cloud Receiver
 
-Dokumen ini adalah rencana target agar AT-301 bisa online tanpa PC admin.
+Dokumen ini mencatat arsitektur, riwayat POC, dan hasil verifikasi receiver agar AT-301 bisa online tanpa PC admin.
 
 ## Target Arsitektur
 
@@ -132,7 +132,7 @@ Di menu `COMM. Settings > Pengaturan Server cloud`:
 - HTTPS: `Off` untuk HTTP test, `On` hanya kalau reverse proxy HTTPS sudah siap
 - Proxy: `Off`
 
-Setting POC yang sedang dipakai:
+Setting POC yang dicatat pada Agustus 2026:
 
 - Alamat server: `187.77.127.179`
 - Port server: `8090`
@@ -225,6 +225,116 @@ BIOFINGER_AUTO_USER_SYNC_INTERVAL_MS=21600000
 ```
 
 Aktifkan hanya setelah command manual `Sync User Mesin` sudah terbukti berhasil di mesin tersebut. Nilai `21600000` berarti 6 jam. Auto-sync ini hanya menarik daftar user/nama mesin; konversi raw event ke `attendance_logs` tetap dikendalikan oleh `BIOFINGER_CONVERT_ON_IMPORT` atau tombol `Proses Absensi`.
+
+## Zona Waktu dan Jam Mesin
+
+`BIOFINGER_TIMEZONE_OFFSET=+07:00` adalah zona waktu operasional WIB. Mulai receiver
+`2026-11-01-adms-timezone-v1`, nilai ini juga dikirim dalam respons awal
+`/iclock/cdata?options=all` sebagai `TimeZone=7`. Sebelumnya offset tersebut hanya
+dipakai untuk menafsirkan timestamp absensi, sementara respons awal tidak
+mengirim zona waktu kepada mesin.
+
+Protokol Attendance PUSH memakai integer jam untuk offset jam penuh di antara
+-12 dan +12, atau integer menit untuk offset pecahan di luar +/-60 menit
+(contoh `+05:30` menjadi `330`). Offset yang format atau representasinya tidak
+valid ditolak saat receiver mulai. Header HTTP `Date` tetap GMT; jangan
+menambah tujuh jam ke header tersebut. Mesin memakai waktu server bersama
+zona waktu saat sinkronisasi. Referensi:
+[ZKTeco Attendance PUSH Communication Protocol, bagian 5 dan 12](https://es.scribd.com/document/604032067/Attendance-PUSH-Communication-Protocol-20200325).
+
+Format integer di atas mengikuti Attendance PUSH edisi Maret 2020. Manual
+[PUSH SDK 3.2.0 tahun 2017](https://pt.scribd.com/document/695654989/PUSH-SDK-User-Manual3-2-0-release)
+mendokumentasikan format `hh:mm` untuk field yang sama. Cocokkan request awal
+perangkat atau uji penerimaan pada perangkat sebelum rollout; string build
+`PushVersion` saja tidak memastikan versi protokol. Tes otomatis di bawah
+memeriksa respons receiver, bukan kompatibilitas firmware mesin nyata.
+
+Uji receiver tanpa database atau mesin nyata:
+
+```powershell
+node --test scripts/biofinger_adms_receiver.test.mjs
+```
+
+Sebelum memasang versi ini pada VPS, cocokkan file receiver dan nilai
+`BIOFINGER_TIMEZONE_OFFSET` yang sedang aktif, lalu pastikan semua mesin yang
+memakai receiver tersebut memang berada pada zona waktu yang sama. Simpan
+salinan file receiver lama untuk rollback. Perubahan file lokal atau deployment
+frontend Cloudflare Pages tidak memperbarui service VPS `dms-biofinger-adms`.
+
+Sesudah pemasangan, `/health` harus menampilkan versi baru,
+`timezoneOffset: "+07:00"`, dan `admsTimeZone: "7"`. Verifikasi jam pada mesin
+setelah koneksi awal Cloud terulang, lalu periksa kembali setelah beberapa
+polling. Respons `/health` saja belum membuktikan jam perangkat sudah benar.
+
+Untuk WIB, DST mesin seharusnya mati. Jika jam masih berubah satu jam, baca
+pengaturan DST dan jam mesin secara langsung. Jangan mengoreksi seluruh data
+absensi historis dengan menggeser satu jam; koreksi data lama memerlukan
+rentang kejadian dan bukti tersendiri.
+
+### Hasil diagnosis AT-301-04, 1 November 2026
+
+Target terverifikasi melalui LAN dan balasan Cloud `INFO`: serial
+`GED7244800357`, IP lokal `192.168.1.204:4370`. Cloud aktif
+(`IclockSvrFun=1`), sedangkan DST mati (`DaylightSavingTimeOn=0`). Koreksi jam
+melalui LAN berhasil dibaca kembali pada 09:55 WIB, tetapi sekitar 20 detik
+kemudian jam kembali maju satu jam ketika Cloud tetap aktif. Pada pembandingan
+berikutnya, jam mesin mendekati header `Date` receiver ditambah delapan jam.
+
+Pembacaan opsi zona waktu melalui LAN ditolak dengan kode 4999. Cloud `INFO`
+melaporkan `FWVersion=Ver 8.0.4.3-20230515` dan
+`PushVersion=Ver 2.0.33S-20220613`; `MachineTZFunOn` kosong dan nilai zona waktu
+tidak disertakan. Getter firmware LAN melaporkan `Ver 6.60 Apr 13 2022`.
+Perbedaan laporan versi ini tidak menentukan protokol yang digunakan.
+
+Dua perintah diagnostik `INFO` mendapat balasan sukses dan hanya baris antrean
+sementara milik diagnosis tersebut yang dihapus setelah hasil dibaca. Tidak
+ada perintah pengaturan zona waktu yang dikirim melalui antrean. Sebelum
+deployment di bawah, receiver melaporkan `2026-08-27-auto-convert-v1`;
+sumber aktif cocok dengan HEAD repository setelah normalisasi.
+
+### Deployment receiver, 1 November 2026
+
+Akses pengelolaan telah memverifikasi receiver aktif pada VPS Hostinger:
+
+- VM: `1864207`, hostname `srv1864207.hstgr.cloud`, IP `187.77.127.179`.
+- Service: `dms-biofinger-adms`; direktori kerja: `/opt/dms-biofinger-adms`.
+- File environment: `/etc/dms-biofinger-adms.env`; offset aktif: `+07:00`.
+
+Patch receiver dipasang melalui SSH pada `2026-11-01T04:00:04Z`
+(11:00:04 WIB). Salinan receiver sebelumnya telah diverifikasi pada
+`/opt/dms-biofinger-adms/biofinger_adms_receiver.mjs.before-timezone-20261101T0403Z`.
+Akhiran `0403Z` adalah label nama backup, bukan waktu aktual deployment.
+SHA-256 sumber receiver yang dipasang:
+`8e01749c526b6881c38f771091b0a94b40e5359a310b7232ccc67099c717e253`.
+Hanya service receiver yang direstart; VPS tidak direboot.
+
+Sesudah restart, health check berhasil dan melaporkan:
+
+- `version: "2026-11-01-adms-timezone-v1"`
+- `timezoneOffset: "+07:00"`
+- `admsTimeZone: "7"`
+- `dryRun: false`
+
+Pada 11:00:14 WIB, sebelum koneksi awal Cloud terulang, target masih maju
+sekitar 3600 detik. Pengguna kemudian mematikan dan menyalakan kembali Cloud.
+Receiver menerima request awal target pada `2026-11-01T04:18:42.484Z`.
+
+Verifikasi melalui RJ45 setelah koneksi ulang membuktikan Cloud tetap aktif
+(`IclockSvrFun=1`) dan jam sesuai WIB: 11:19:01 di mesin dibandingkan
+11:19:02 WIB di PC. Pembacaan berikutnya pada 11:19:53 dan 11:20:26 tetap
+sesuai WIB, dengan perbedaan sekitar 1-2 detik; loncatan satu jam tidak berulang.
+Ini memverifikasi penerimaan `TimeZone=7` pada AT-301-04 yang diuji, bukan
+jaminan kompatibilitas seluruh firmware lain.
+
+Scan nyata pengguna tercatat `2026-11-01T04:19:45+00:00` (11:19:45 WIB),
+diterima DMS pada 11:19:49.177 WIB. Receiver melaporkan satu event masuk,
+satu insert, dan nol error. Status raw event `pending` mengikuti mapping user
+yang belum aktif; tidak ada konversi attendance/payroll dari scan ini.
+Timestamp absensi historis belum dikoreksi.
+
+Frontend Biofinger memakai `Asia/Jakarta` dan label WIB untuk waktu event,
+last seen, serta last sync. Build produksi dan pemeriksaan TypeScript lulus.
+Status deployment frontend perlu diverifikasi terhadap commit yang dipublikasikan.
 
 ## Status Online Device
 

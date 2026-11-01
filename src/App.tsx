@@ -3958,6 +3958,18 @@ function formatUserDateTime(value?: string | null, fallback = "Belum login") {
   }).format(new Date(value))
 }
 
+function formatBiofingerDateTime(value?: string | null, fallback = "-") {
+  if (!value) return fallback
+  return new Intl.DateTimeFormat("id-ID", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Asia/Jakarta",
+    timeZoneName: "short",
+  }).format(new Date(value))
+}
+
 function formatShortId(value?: string | null, prefix = "ID") {
   if (!value) return "-"
   const cleanValue = value.replace(/[^a-zA-Z0-9]/g, "").toUpperCase()
@@ -6126,7 +6138,7 @@ const biofingerConnectionLabel: Record<BiofingerConnectionState, string> = {
 function formatBiofingerConnectionDetail(device: BiofingerDeviceRow | null) {
   if (!device) return "Belum pilih device"
   if (!device.lastSeenAt) return "Belum pernah terlihat receiver"
-  return `Last seen ${formatUserDateTime(device.lastSeenAt, "-")}`
+  return `Last seen ${formatBiofingerDateTime(device.lastSeenAt, "-")}`
 }
 
 function BiofingerDeviceConnectionText({ device }: { device: BiofingerDeviceRow | null }) {
@@ -12518,7 +12530,7 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
   const userSyncDetail = data.commandLoadError && userSyncStatus.source === "none"
     ? data.commandLoadError
     : userSyncStatus.updatedAt
-      ? `${userSyncStatus.detail} / ${formatUserDateTime(userSyncStatus.updatedAt, "-")}`
+      ? `${userSyncStatus.detail} / ${formatBiofingerDateTime(userSyncStatus.updatedAt, "-")}`
       : userSyncStatus.detail
   const convertScopeLabel = selectedDevice ? selectedDevice.name : "Semua device Biofinger"
   const mappingDetailEvents = mappingDetailRow
@@ -13053,7 +13065,7 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
                 <div className="biofingerSyncHeader">
                   <div>
                     <h2>Sync Pipeline</h2>
-                    <p>{biofingerDataLoading ? "Menunggu data sinkronisasi dari Supabase." : selectedDevice ? `${selectedDevice.name} / ${selectedConnectionLabel} / last sync ${formatUserDateTime(selectedDevice.lastSyncAt, "Belum sync")}` : `${formatNumber(data.devices.length)} device / ${formatNumber(onlineDeviceCount)} online / last sync mengikuti masing-masing device.`}</p>
+                    <p>{biofingerDataLoading ? "Menunggu data sinkronisasi dari Supabase." : selectedDevice ? `${selectedDevice.name} / ${selectedConnectionLabel} / last sync ${formatBiofingerDateTime(selectedDevice.lastSyncAt, "Belum sync")}` : `${formatNumber(data.devices.length)} device / ${formatNumber(onlineDeviceCount)} online / last sync mengikuti masing-masing device.`}</p>
                     {!biofingerDataLoading && <small className="biofingerCommandHint">User sync: {userSyncDetail}</small>}
                   </div>
                   <InlinePageStats items={biofingerDataLoading ? biofingerInlineLoadingStats(3) : [`${formatNumber(mappedReadyEvents)} siap proses`, `${formatNumber(convertedEvents)} converted`, `${formatNumber(data.events.length)} sample tampil`]} />
@@ -13223,7 +13235,7 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
                 <div className="tableHeader">
                   <div>
                     <h2>Mapping User Biofinger</h2>
-                    <p>{biofingerDataLoading ? "Mengambil user mesin dan mapping karyawan dari Supabase." : selectedDevice ? `${selectedConnectionLabel} / ${formatBiofingerConnection(selectedDevice)} / sync ${formatUserDateTime(selectedDevice.lastSyncAt, "Belum sync")}` : "Semua device / mapping user mesin ke karyawan DMS."}</p>
+                    <p>{biofingerDataLoading ? "Mengambil user mesin dan mapping karyawan dari Supabase." : selectedDevice ? `${selectedConnectionLabel} / ${formatBiofingerConnection(selectedDevice)} / sync ${formatBiofingerDateTime(selectedDevice.lastSyncAt, "Belum sync")}` : "Semua device / mapping user mesin ke karyawan DMS."}</p>
                   </div>
                   <InlinePageStats items={biofingerDataLoading ? biofingerInlineLoadingStats(3) : [`${filteredLinks.length} user`, `${scopedActiveLinks} active`, `${scopedPendingLinks} pending`]} />
                 </div>
@@ -13274,7 +13286,7 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
                             <BiofingerEmployeeMappingChip row={row} disabled={!canManage || savingId === row.id} onClick={() => openMappingDrawer(row)} />
                           </td>
                           <td><BiofingerLinkStatusText status={row.status} /></td>
-                          <td><TableText primary={formatUserDateTime(row.lastSyncedAt, "-")} secondary={row.matchedBy} /></td>
+                          <td><TableText primary={formatBiofingerDateTime(row.lastSyncedAt, "-")} secondary={row.matchedBy} /></td>
                           <td className="tableActionCell">
                             <div className="rowActions">
                               <RowActionMenu label={`Aksi mapping ${row.externalUserId}`}>
@@ -13352,7 +13364,7 @@ function BiofingerPage({ activeView, profile, onOpenGuide }: { activeView: ViewI
                       <tr key={event.id}>
                         <td className="tableNumberCell"><TableNumberCell value={index + 1} /></td>
                         <td><TableText primary={event.externalUserId} secondary={`Punch ${event.punch ?? "-"}`} /></td>
-                        <td><TableText primary={formatUserDateTime(event.deviceEventAt, "-")} secondary={event.attendanceDate} /></td>
+                        <td><TableText primary={formatBiofingerDateTime(event.deviceEventAt, "-")} secondary={event.attendanceDate} /></td>
                         <td><TableText primary={event.employeeName || "Belum mapped"} secondary={event.employeeCode || "Pending"} /></td>
                         <td><TableText primary={<BiofingerEventText type={event.normalizedEventType} />} secondary={`Status ${event.statusCode ?? "-"}`} /></td>
                         <td><ModuleStatusBadge value={event.importStatus} /></td>
@@ -13636,7 +13648,7 @@ function BiofingerMappingDrawer({
               {events.map((event) => (
                 <div className="biofingerDrawerEvent" key={event.id}>
                   <BiofingerEventText type={event.normalizedEventType} />
-                  <strong>{formatUserDateTime(event.deviceEventAt, "-")}</strong>
+                  <strong>{formatBiofingerDateTime(event.deviceEventAt, "-")}</strong>
                   <small>Raw {event.importStatus}</small>
                 </div>
               ))}
@@ -13827,7 +13839,7 @@ function BiofingerDeviceDialog({
               </div>
               <div>
                 <span>Last Seen</span>
-                <strong>{device ? formatUserDateTime(device.lastSeenAt, "Belum online") : "Menunggu mesin online"}</strong>
+                <strong>{device ? formatBiofingerDateTime(device.lastSeenAt, "Belum online") : "Menunggu mesin online"}</strong>
               </div>
             </div>
           </aside>
@@ -14849,8 +14861,8 @@ function EmployeeDetailDialog({
     { label: "Nama di mesin", value: formatBiofingerMachineName(primaryBiofingerLink.externalName) },
     { label: "Device", value: primaryBiofingerLink.deviceName || primaryBiofingerLink.deviceCode || "Biofinger" },
     { label: "Serial device", value: primaryBiofingerLink.deviceSerialNumber || "Belum ada" },
-    { label: "Last seen", value: formatUserDateTime(primaryBiofingerLink.lastSeenAt, "-") },
-    { label: "Last sync", value: formatUserDateTime(primaryBiofingerLink.lastSyncedAt, "-") },
+    { label: "Last seen", value: formatBiofingerDateTime(primaryBiofingerLink.lastSeenAt, "-") },
+    { label: "Last sync", value: formatBiofingerDateTime(primaryBiofingerLink.lastSyncedAt, "-") },
     { label: "Total mapping", value: `${row.biofingerLinks.length} user/device` },
   ] : [
     { label: "Status mapping", value: "Belum mapped" },
