@@ -553,6 +553,7 @@ interface PayrollUnifiedPaymentRow {
   bonusAmount: number
   eligibleDays: number
   targetDays: number
+  salaryPayment?: PayrollPaymentRow
   overtimePayment?: OvertimePaymentRow
   weeklyBonusPayment?: WeeklyBonusPaymentRow
 }
@@ -10285,6 +10286,41 @@ async function processPayrollCycle(cycleId: string, action: PayrollProcessAction
   return data as PayrollProcessResult
 }
 
+async function voidPayrollPayment(paymentId: string, notes: string) {
+  const { data, error } = await supabase.functions.invoke("payroll-processing", {
+    body: {
+      action: "void_payroll_payment",
+      payload: { payrollPaymentId: paymentId, notes },
+    },
+  })
+
+  if (error) {
+    const context = "context" in error ? (error as { context?: unknown }).context : null
+
+    if (context instanceof Response) {
+      const text = await context.clone().text()
+
+      if (text) {
+        let parsedMessage = ""
+
+        try {
+          const parsed = JSON.parse(text) as { error?: unknown; message?: unknown }
+          parsedMessage = String(parsed.error || parsed.message || "")
+        } catch {
+          parsedMessage = ""
+        }
+
+        throw new Error(parsedMessage || text)
+      }
+    }
+
+    throw error
+  }
+  if (data?.error) throw new Error(String(data.error))
+
+  return data as PayrollProcessResult
+}
+
 function applyPayrollCycleResultToOperationsData(current: OperationsFoundationData, payroll?: Record<string, unknown>): OperationsFoundationData {
   const payrollCycleId = String(payroll?.id || "")
   if (!payrollCycleId) return current
@@ -19038,6 +19074,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
   const [payrollAction, setPayrollAction] = useState<PayrollProcessAction>("lock")
   const [payrollFocusTab, setPayrollFocusTab] = useState<PayrollLedgerTab | null>(null)
   const [payrollSubmitting, setPayrollSubmitting] = useState(false)
+  const [payrollPaymentVoidTarget, setPayrollPaymentVoidTarget] = useState<PayrollPaymentRow | null>(null)
   const [overtimePaymentTarget, setOvertimePaymentTarget] = useState<OvertimeReviewRow | null>(null)
   const [overtimePaymentVoidTarget, setOvertimePaymentVoidTarget] = useState<OvertimePaymentRow | null>(null)
   const [overtimePaymentSubmitting, setOvertimePaymentSubmitting] = useState(false)
@@ -19486,6 +19523,33 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
         tone: "error",
         title: "Gagal proses gaji",
         description: getFriendlySupabaseError(error, "Gaji belum bisa diproses."),
+      })
+    } finally {
+      setPayrollSubmitting(false)
+    }
+  }
+
+  const handlePayrollPaymentVoidSubmit = async (notes: string) => {
+    if (!payrollPaymentVoidTarget) return
+
+    setPayrollSubmitting(true)
+    try {
+      const result = await voidPayrollPayment(payrollPaymentVoidTarget.id, notes)
+      commitAttendanceData((current) => applyPayrollPaymentResultToOperationsData(current, result))
+      showToast({
+        tone: "success",
+        title: "Pembayaran gaji dibatalkan",
+        description: `${payrollPaymentVoidTarget.employeeName} kembali ke Menunggu Bayar. Buka Koreksi sebelum memperbaiki absensi.`,
+      })
+      setPayrollPaymentVoidTarget(null)
+      setStatusFilter("all")
+      setPayrollFocusTab("locked")
+      void refreshData()
+    } catch (error) {
+      showToast({
+        tone: "error",
+        title: "Gagal membatalkan pembayaran gaji",
+        description: getFriendlySupabaseError(error, "Pembayaran gaji belum bisa dibatalkan."),
       })
     } finally {
       setPayrollSubmitting(false)
@@ -20412,6 +20476,7 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
           focusTab={payrollFocusTab}
           onFocusTabConsumed={() => setPayrollFocusTab(null)}
           onProcess={openPayrollProcessDialog}
+          onVoidPayrollPayment={setPayrollPaymentVoidTarget}
           onPayOvertime={setOvertimePaymentTarget}
           onVoidOvertimePayment={setOvertimePaymentVoidTarget}
           onPayWeeklyBonus={setWeeklyBonusPaymentTarget}
@@ -20536,6 +20601,14 @@ function AttendanceCyclePage({ activeView, profile }: { activeView: "attendance-
         saving={payrollSubmitting}
         onClose={() => setPayrollTarget(null)}
         onSubmit={handlePayrollProcessSubmit}
+      />
+      <PayrollPaymentVoidDialog
+        row={payrollPaymentVoidTarget}
+        saving={payrollSubmitting}
+        onClose={() => {
+          if (!payrollSubmitting) setPayrollPaymentVoidTarget(null)
+        }}
+        onSubmit={handlePayrollPaymentVoidSubmit}
       />
       <OvertimePaymentDialog
         row={overtimePaymentTarget}
@@ -22394,6 +22467,115 @@ function PayrollProcessDialog({
   )
 }
 
+function PayrollPaymentVoidDialog({
+  row,
+  saving,
+  onClose,
+  onSubmit,
+}: {
+  row: PayrollPaymentRow | null
+  saving: boolean
+  onClose: () => void
+  onSubmit: (notes: string) => Promise<void> | void
+}) {
+  const [notes, setNotes] = useState("")
+  const [submitError, setSubmitError] = useState("")
+
+  useEffect(() => {
+    if (!row) return
+    setNotes("")
+    setSubmitError("")
+  }, [row])
+
+  if (!row) return null
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const normalizedNotes = notes.trim()
+
+    if (normalizedNotes.length < 5) {
+      setSubmitError("Alasan pembatalan wajib diisi minimal 5 karakter.")
+      return
+    }
+
+    setSubmitError("")
+    void onSubmit(normalizedNotes)
+  }
+
+  return (
+    <FoundationDialog
+      open={Boolean(row)}
+      labelledBy="payroll-payment-void-title"
+      describedBy="payroll-payment-void-description"
+      className="payrollProcessDialog"
+      closeOnBackdrop={!saving}
+      onClose={onClose}
+    >
+      <form className="payrollProcessShell" onSubmit={submit}>
+        <div className="payrollProcessHeader">
+          <span className="payrollProcessIcon"><RotateCcw size={22} /></span>
+          <div>
+            <span>BATALKAN BAYAR GAJI</span>
+            <h2 id="payroll-payment-void-title">Batalkan pembayaran {row.employeeName}?</h2>
+            <p id="payroll-payment-void-description">Transaksi lama tetap tersimpan sebagai void. Cycle kembali ke Menunggu Bayar agar bisa dibuka untuk koreksi.</p>
+          </div>
+          <FoundationDialogCloseButton label="Tutup pembatalan pembayaran" onClose={onClose} disabled={saving} />
+        </div>
+
+        <div className="payrollProcessBody">
+          <section className="payrollProcessSummary">
+            <div className="payrollProcessEmployee">
+              <TableText primary={row.employeeName} secondary={`${row.employeeCode} / ${row.paymentNo}`} />
+              <PayrollPaymentStatusBadge status={row.status} />
+            </div>
+            <div className="payrollProcessGrid">
+              <div>
+                <small>Periode</small>
+                <strong>{formatPayrollPaymentPeriod(row)}</strong>
+              </div>
+              <div>
+                <small>Cycle</small>
+                <strong>Cycle {row.cycleNumber || "-"}</strong>
+              </div>
+              <div>
+                <small>Tanggal Bayar</small>
+                <strong>{formatUserDateTime(row.paidAt, "-")}</strong>
+              </div>
+              <div className="payrollProcessTotal">
+                <small>Nominal Dibayar</small>
+                <strong>{formatCurrency(row.paidAmount)}</strong>
+              </div>
+            </div>
+          </section>
+
+          <div className="formAlert warning">
+            Pembatalan di DMS tidak otomatis menarik kembali uang yang sudah ditransfer. Pastikan koreksi transaksi fisik ditangani Finance.
+          </div>
+          <div className="payrollProcessNotes">
+            <span>Alasan Pembatalan</span>
+            <textarea
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              placeholder="Contoh: absensi tanggal 24 belum masuk sehingga batas cycle perlu dihitung ulang."
+              disabled={saving}
+              required
+            />
+          </div>
+          {submitError && <p className="formErrorMessage">{submitError}</p>}
+        </div>
+
+        <div className="attendanceReviewActions">
+          <button className="secondaryButton" type="button" onClick={onClose} disabled={saving}>Batal</button>
+          <button className="primaryButton dangerButton" type="submit" disabled={saving}>
+            <RotateCcw size={16} />
+            {saving ? "Membatalkan..." : "Batalkan Pembayaran"}
+          </button>
+        </div>
+      </form>
+    </FoundationDialog>
+  )
+}
+
 function OvertimePaymentDialog({
   row,
   saving,
@@ -23054,6 +23236,7 @@ function PayrollPreviewTable({
   focusTab,
   onFocusTabConsumed,
   onProcess,
+  onVoidPayrollPayment,
   onPayOvertime,
   onVoidOvertimePayment,
   onPayWeeklyBonus,
@@ -23075,6 +23258,7 @@ function PayrollPreviewTable({
   focusTab: PayrollLedgerTab | null
   onFocusTabConsumed: () => void
   onProcess: (row: AttendanceMonitorRow, action: PayrollProcessAction) => void
+  onVoidPayrollPayment: (row: PayrollPaymentRow) => void
   onPayOvertime: (row: OvertimeReviewRow) => void
   onVoidOvertimePayment: (row: OvertimePaymentRow) => void
   onPayWeeklyBonus: (row: WeeklyShiftBonusRow) => void
@@ -23456,6 +23640,7 @@ function PayrollPreviewTable({
               totalRows={filteredUnifiedPaymentRows.length}
               scrollProps={historyScrollProps}
               onOpenSlip={setHistorySlipRow}
+              onVoidPayrollPayment={onVoidPayrollPayment}
               onVoidOvertimePayment={onVoidOvertimePayment}
               onVoidWeeklyBonusPayment={onVoidWeeklyBonusPayment}
               onPageChange={setHistoryPage}
@@ -23961,6 +24146,7 @@ function buildPayrollUnifiedPaymentRows(payments: PayrollPaymentRow[], overtimeP
     bonusAmount: 0,
     eligibleDays: 0,
     targetDays: 0,
+    salaryPayment: row,
   }))
   const overtimeRows = overtimePayments.map((row) => ({
     id: `overtime-${row.id}`,
@@ -24427,6 +24613,7 @@ function PayrollUnifiedPaymentHistoryTable({
   totalRows,
   scrollProps,
   onOpenSlip,
+  onVoidPayrollPayment,
   onVoidOvertimePayment,
   onVoidWeeklyBonusPayment,
   onPageChange,
@@ -24440,6 +24627,7 @@ function PayrollUnifiedPaymentHistoryTable({
   totalRows: number
   scrollProps: ReturnType<typeof useHorizontalDragScroll<HTMLDivElement>>
   onOpenSlip: (row: PayrollUnifiedPaymentRow) => void
+  onVoidPayrollPayment: (row: PayrollPaymentRow) => void
   onVoidOvertimePayment: (row: OvertimePaymentRow) => void
   onVoidWeeklyBonusPayment: (row: WeeklyBonusPaymentRow) => void
   onPageChange: (page: number) => void
@@ -24520,6 +24708,10 @@ function PayrollUnifiedPaymentHistoryTable({
                     <RowActionMenuItem disabled={!row.paymentNo} onClick={() => copyPaymentNo(row.paymentNo)}>
                       <Copy size={15} />
                       Copy No Bayar
+                    </RowActionMenuItem>
+                    <RowActionMenuItem danger disabled={row.source !== "salary" || row.status !== "paid" || !row.salaryPayment} onClick={() => row.salaryPayment && onVoidPayrollPayment(row.salaryPayment)}>
+                      <RotateCcw size={15} />
+                      Batalkan Bayar Gaji
                     </RowActionMenuItem>
                     <RowActionMenuItem danger disabled={row.source !== "overtime" || row.status !== "paid" || !row.overtimePayment} onClick={() => row.overtimePayment && onVoidOvertimePayment(row.overtimePayment)}>
                       <RotateCcw size={15} />

@@ -1,10 +1,11 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0"
 
-type PayrollProcessAction = "lock" | "lock_early" | "mark_paid" | "unlock" | "void" | "restore" | "mark_overtime_paid" | "void_overtime_payment" | "save_weekly_bonus_policy" | "mark_weekly_bonus_paid" | "void_weekly_bonus_payment"
+type PayrollProcessAction = "lock" | "lock_early" | "mark_paid" | "unlock" | "void" | "restore" | "void_payroll_payment" | "mark_overtime_paid" | "void_overtime_payment" | "save_weekly_bonus_policy" | "mark_weekly_bonus_paid" | "void_weekly_bonus_payment"
 type PayrollPaymentMethod = "cash" | "bank_transfer" | "ewallet" | "other"
 
 interface PayrollProcessPayload {
   cycleId?: string
+  payrollPaymentId?: string
   overtimeRequestIds?: string[]
   overtimePaymentId?: string
   weeklyBonusCycleIds?: string[]
@@ -99,7 +100,7 @@ function getErrorMessage(error: unknown, fallback = "") {
 
 function isMissingLedgerError(error: unknown) {
   const message = getErrorMessage(error)
-  return /payroll_payments|payroll_cycle_items|overtime_payments|overtime_payment_items|overtime_payment_status|overtime_payment_policy|weekly_bonus_policies|weekly_bonus_policy_shifts|weekly_shift_bonus_cycles|weekly_shift_bonus_payments|weekly_shift_bonus_payment_items|target_payment_policy|set_overtime_payment_policy|mark_payroll_cycle_paid|mark_overtime_requests_paid|void_overtime_payment|refresh_weekly_shift_bonus_cycles|mark_weekly_shift_bonus_paid|void_weekly_bonus_payment|rebuild_payroll_cycle_items|schema cache|PGRST202/i.test(message)
+  return /payroll_payments|payroll_cycle_items|overtime_payments|overtime_payment_items|overtime_payment_status|overtime_payment_policy|weekly_bonus_policies|weekly_bonus_policy_shifts|weekly_shift_bonus_cycles|weekly_shift_bonus_payments|weekly_shift_bonus_payment_items|target_payment_policy|set_overtime_payment_policy|mark_payroll_cycle_paid|void_payroll_payment|mark_overtime_requests_paid|void_overtime_payment|refresh_weekly_shift_bonus_cycles|mark_weekly_shift_bonus_paid|void_weekly_bonus_payment|rebuild_payroll_cycle_items|schema cache|PGRST202/i.test(message)
 }
 
 function ledgerMigrationMessage() {
@@ -271,6 +272,7 @@ Deno.serve(async (request) => {
       || action === "unlock"
       || action === "void"
       || action === "restore"
+      || action === "void_payroll_payment"
       || action === "mark_overtime_paid"
       || action === "void_overtime_payment"
       || action === "save_weekly_bonus_policy"
@@ -514,6 +516,36 @@ Deno.serve(async (request) => {
       const bonusCycles = await fetchRecordsByIds(adminClient, "weekly_shift_bonus_cycles", weeklyBonusCycleColumns, affectedBonusCycleIds)
 
       return jsonResponse({ ok: true, ...paymentResult, payment, bonusCycles, restoredBonusCycleIds: affectedBonusCycleIds })
+    }
+
+    if (action === "void_payroll_payment") {
+      assertPayload(payload.payrollPaymentId, "ID pembayaran gaji wajib ada.")
+      assertPayload((notes || "").length >= 5, "Alasan pembatalan pembayaran wajib diisi minimal 5 karakter.")
+
+      const { data: paymentResult, error: paymentError } = await adminClient.rpc("void_payroll_payment", {
+        target_payment_id: payload.payrollPaymentId,
+        actor_user_id: actor.id,
+        actor_name: String(actor.full_name || actor.email || "Finance"),
+        note_text: notes,
+      })
+
+      if (paymentError) {
+        if (isMissingLedgerError(paymentError)) throw new Error(ledgerMigrationMessage())
+        throw paymentError
+      }
+
+      const resultRecord = paymentResult && typeof paymentResult === "object" && !Array.isArray(paymentResult)
+        ? paymentResult as Record<string, unknown>
+        : {}
+      const payment = await fetchSingleRecord(adminClient, "payroll_payments", payrollPaymentColumns, String(payload.payrollPaymentId || ""))
+      const payrollRecord = resultRecord.payroll && typeof resultRecord.payroll === "object" && !Array.isArray(resultRecord.payroll)
+        ? resultRecord.payroll as Record<string, unknown>
+        : null
+      const payroll = payrollRecord?.id
+        ? await fetchSingleRecord(adminClient, "payroll_cycles", payrollCycleColumns, String(payrollRecord.id))
+        : null
+
+      return jsonResponse({ ok: true, ...resultRecord, payment, payroll: payroll || payrollRecord })
     }
 
     assertPayload(payload.cycleId, "ID gaji wajib ada.")
